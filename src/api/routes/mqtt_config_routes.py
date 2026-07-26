@@ -200,6 +200,15 @@ async def update_mqtt(
     region = req.region_segment.strip() or _config.mqtt.region
     username = req.username.strip() or _config.mqtt.username
 
+    if req.map_reporting_enabled and not req.enabled:
+        raise HTTPException(
+            422,
+            detail=(
+                "map_reporting_enabled requires mqtt.enabled=true; "
+                "MapReports are published through the MQTT client"
+            ),
+        )
+
     updates: dict = {
         "enabled": req.enabled,
         "broker": broker,

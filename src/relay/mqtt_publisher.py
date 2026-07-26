@@ -216,7 +216,7 @@ class MqttPublisher:
             logger.exception("MQTT map report build/publish failed")
             return False
 
-        if result.rc != paho_mqtt.MQTT_ERR_SUCCESS:
+        if result.rc != 0:
             logger.warning("MQTT map report publish failed rc=%d", result.rc)
             return False
 
