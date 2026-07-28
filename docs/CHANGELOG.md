@@ -2,7 +2,36 @@
 
 ### Unreleased
 
-- **Native MQTT MapReport.** Optional, public MapReports publish the configured Meshpoint transmit identity to the official Meshtastic map without using LoRa airtime. Includes one-hour minimum cadence, 12-15 bit position privacy, dashboard controls, and `/2/map/` ServiceEnvelope compatibility. Closes [#115](https://github.com/KMX415/meshpoint/issues/115).
+#### MQTT and community map
+
+- **Native MQTT MapReport.** Optional public MapReports publish the configured Meshpoint transmit identity to the official Meshtastic map without using LoRa airtime. One-hour minimum cadence, 12-15 bit position privacy, Configuration → MQTT controls, and `/2/map/` ServiceEnvelope compatibility. MapReport requires MQTT enabled (422 if you turn MapReport on while MQTT is off). Closes [#115](https://github.com/KMX415/meshpoint/issues/115).
+
+#### Settings and Updates
+
+- **What's coming preview.** Settings → Updates groups release-notes bullets under CHANGELOG category headings so RC operators can scan the sprint before Apply.
+- **Full release-notes modal.** **Read full release notes** opens the untruncated CHANGELOG section for the selected channel.
+- **Commit timeline.** One channel-tip list above Apply: unapplied commits marked **NEW**, waiting count badge, muted already-installed rows, and an Apply glow when commits are waiting. Replaces the earlier duplicate incoming + latest-commit strips.
+
+#### Dashboard and storage
+
+- **Cache-bust after restart.** Local dashboard JS/CSS URLs carry a per-boot `?v=` token so Apply no longer leaves browsers on stale scripts until a hard reload.
+- **Telemetry retention cap.** `max_telemetry_retained` bounds SQLite telemetry growth on long-running Meshpoints.
+- **Stats chart downsampling.** Telemetry and signal history downsample into time buckets for the Stats charts; when history exceeds the chart limit, the newest buckets win.
+
+#### Auth and viewers
+
+- **Viewer write lockdown.** Viewer sessions cannot change config or send messages; channel PSKs are redacted in API responses for the viewer role.
+
+#### Serial Meshtastic and messaging
+
+- **Multiple Meshtastic USB sticks.** `capture.serial` accepts a list of ports so more than one companion can RX on the same Meshpoint; blank rows are ignored on save so multi-stick config cannot double-open a port.
+- **Stick-aware replies.** Meshtastic replies go out the USB stick that heard the contact; packets carry stick LoRa freq/SF/BW from the connect handshake.
+- **Serial decode and channel routing.** Reconstruct MeshPacket frames for USB decode, route stick-local channel index by name (not OTA hash), and allow replies when the remote channel name differs but the PSK matches.
+- **Capture source and band.** Packets are tagged with capture source name; node cards can surface band. Unmapped channel hashes land in their own conversation buckets.
+- **Messaging polish.** Channel message sender names are clickable via `source_id`. MeshCore name cross-contamination and sticky conversation titles are fixed. Serial Meshtastic self-telemetry that polluted the feed near -100 dBm is dropped.
+
+#### Not in this release
+
 - **MQTT broker TLS.** Transport TLS (`mqtts`, CA bundle, cert validation) is not implemented on `mqtt_publisher.py` (plain TCP only). Until then use plain port 1883 or a LAN broker without TLS.
 
 ### v0.7.7 (July 2026)
