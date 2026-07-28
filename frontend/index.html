@@ -36,6 +36,7 @@
     <link rel="stylesheet" href="css/radio_readout.css" />
     <link rel="stylesheet" href="css/stats.css" />
     <link rel="stylesheet" href="css/settings.css" />
+    <link rel="stylesheet" href="css/update_commits.css" />
     <link rel="stylesheet" href="css/update_release_notes_modal.css" />
     <link rel="stylesheet" href="css/configuration.css" />
     <link rel="stylesheet" href="css/gps.css" />
@@ -526,17 +527,20 @@
                         <p class="update-sync-status" data-update-sync-hint>
                             Select a channel, then check how far behind GitHub you are.
                         </p>
-                        <ul class="update-incoming" data-update-incoming hidden></ul>
+                        <div class="update-history" data-update-commits hidden>
+                            <div class="update-history__head">
+                                <p class="update-history__title" data-update-commits-title>On this channel</p>
+                                <span class="update-history__badge" data-update-commits-badge hidden></span>
+                            </div>
+                            <ul class="update-history__list" data-update-commits-list></ul>
+                            <p class="update-history__foot" data-update-commits-foot hidden></p>
+                        </div>
                         <div class="update-card__actions">
                             <button class="terminal-button terminal-button--ghost" type="button" data-update-check>Check for updates</button>
                             <button class="terminal-button terminal-button--primary" type="button" data-update-apply>Apply update</button>
                             <button class="terminal-button terminal-button--ghost" type="button" data-update-rollback disabled>Roll back last apply</button>
                         </div>
                         <p class="update-rollback-hint" data-update-rollback-hint></p>
-                        <div class="update-history" data-update-commits hidden>
-                            <p class="update-history__title">Latest commits</p>
-                            <ul class="update-history__list" data-update-commits-list></ul>
-                        </div>
                         <p class="update-status" data-update-status aria-live="polite"></p>
                     </article>
                     <section class="update-progress" data-update-progress hidden aria-live="polite"></section>
@@ -752,8 +756,7 @@
     <script src="js/settings/update_progress_view.js"></script>
     <script src="js/settings/update_stream_client.js"></script>
     <script src="js/settings/release_notes_view.js"></script>
-    <script src="js/settings/update_incoming_view.js"></script>
-    <script src="js/settings/update_remote_commits_view.js"></script>
+    <script src="js/settings/update_commit_timeline_view.js"></script>
     <script src="js/settings/update_panel_controller.js"></script>
     <script src="js/settings/meshpoint_display_form.js"></script>
     <script src="js/settings/backup_restore_card.js"></script>
