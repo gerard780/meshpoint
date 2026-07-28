@@ -143,7 +143,7 @@ class UpdatePanelController {
             } else if (behind != null && behind > 0) {
                 this._setStatus(
                     'success',
-                    `${behind} commit${behind === 1 ? '' : 's'} ready to land. Apply when you are.`,
+                    `${behind} commit${behind === 1 ? '' : 's'} ready to land. Use Apply update when ready.`,
                 );
             } else {
                 this._setStatus('success', 'Up to date with the selected channel.');
