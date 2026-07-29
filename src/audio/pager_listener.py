@@ -70,7 +70,7 @@ _FLEX_RE = re.compile(
 )
 _POCSAG_RE = re.compile(
     r"^(?P<proto>POCSAG\d+):\s*Address:\s*(?P<address>\d+)\s+Function:\s*(?P<function>\d+)"
-    r"(?:\s+Alpha:\s*(?P<message>.*))?$"
+    r"(?:\s+(?:Alpha|Numeric):\s*(?P<message>.*))?$"
 )
 # multimon-ng pads POCSAG alpha messages with literal "<NUL>" tokens
 # (confirmed on real captured output, 2026-07-12) -- strip trailing ones
