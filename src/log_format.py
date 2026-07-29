@@ -193,6 +193,10 @@ def _payload_summary(packet: Packet) -> str:
         ch = payload.get("channel_hash")
         if ch is not None:
             parts.append(f"ch=0x{ch:02x}")
+    elif ptype in ("dapnet_alpha", "dapnet_numeric", "dapnet_tone", "dapnet_activation"):
+        text = payload.get("text", "")
+        if text:
+            parts.append(f'"{text[:60]}"')
 
     return " ".join(parts)
 
@@ -202,9 +206,19 @@ def print_packet(packet: Packet) -> None:
     proto = packet.protocol.value
     proto_color = BLUE if proto == "meshtastic" else MAGENTA
 
-    rssi = packet.signal.rssi if packet.signal else 0.0
-    snr = packet.signal.snr if packet.signal else 0.0
-    bar = _rssi_bar(rssi)
+    if packet.signal:
+        rssi_str = f"{packet.signal.rssi:>6.1f}"
+        snr_str = f"{packet.signal.snr:>5.1f}"
+        bar = _rssi_bar(packet.signal.rssi)
+    else:
+        # No signal object at all (e.g. DAPNET, which reports no RSSI/SNR
+        # over its JSON serial protocol) -- showing a fabricated 0.0 here
+        # used to render as a full "perfect signal" bar (0.0 dBm clamps
+        # to the best end of the -120..-50 scale), which is actively
+        # misleading for a protocol with no signal data whatsoever.
+        rssi_str = f"{'--':>6}"
+        snr_str = f"{'--':>5}"
+        bar = f"{DIM}{_BAR_EMPTY * _BAR_SEGMENTS}{RESET}"
 
     ptype = packet.packet_type.value.upper()
     summary = _payload_summary(packet)
@@ -217,8 +231,8 @@ def print_packet(packet: Packet) -> None:
         f"{WHITE}{packet.source_id}{RESET} -> "
         f"{WHITE}{packet.destination_id}{RESET}  "
         f"{YELLOW}{ptype:<12}{RESET} "
-        f"{DIM}rssi{RESET} {rssi:>6.1f} {bar} "
-        f"{DIM}snr{RESET} {snr:>5.1f}"
+        f"{DIM}rssi{RESET} {rssi_str} {bar} "
+        f"{DIM}snr{RESET} {snr_str}"
         f"{summary_str}"
     )
     print(line, flush=True)
