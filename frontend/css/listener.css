@@ -119,6 +119,20 @@
     gap: 8px;
 }
 
+.pager-idle-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: rgba(243, 244, 246, 0.6);
+    cursor: pointer;
+    margin-right: 4px;
+}
+
+.pager-idle-toggle input[type="checkbox"] {
+    cursor: pointer;
+}
+
 .adsb-metric-toggle {
     display: flex;
     align-items: center;

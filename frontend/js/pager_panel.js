@@ -28,6 +28,22 @@ class PagerPanel {
         // decoded events don't fit the protocol/capcode/message shape
         // (e.g. rtl_433, whose fields vary per device model).
         this._rowRenderer = rowRenderer;
+        // "Hide idle frames" -- POCSAG batches pad every unused frame slot
+        // with a fixed idle code word (see src/audio/pager_listener.py);
+        // multimon-ng doesn't recognize that pattern specially and just
+        // decodes it like any other address, which comes out as a small
+        // single-digit capcode (0-7) with Function 0 and no message text.
+        // Real-world POCSAG capcodes are never that small, so filtering on
+        // capcode<8 + function 0 + no message is a safe, practical way to
+        // hide that structural noise -- default off so existing behavior
+        // (show everything) doesn't silently change for anyone not on
+        // POCSAG/Pagers. Shared across kinds since it's harmless where it
+        // doesn't apply (P2000/RTL433 never produce this exact shape).
+        this._hideIdle = (() => {
+            try { return localStorage.getItem('meshpoint.pagerHideIdle') === '1'; }
+            catch (_e) { return false; }
+        })();
+        this._lastStatus = null;
     }
 
     mount(root) {
@@ -42,6 +58,10 @@ class PagerPanel {
                             <span data-pager-status-text>idle</span>
                         </div>
                         <div class="pager-actions">
+                            <label class="pager-idle-toggle">
+                                <input type="checkbox" data-pager-hide-idle ${this._hideIdle ? 'checked' : ''}>
+                                Hide idle frames
+                            </label>
                             <button class="terminal-button" type="button" data-pager-start>Start listening</button>
                             <button class="terminal-button" type="button" data-pager-stop>Stop</button>
                             <button class="terminal-button" type="button" data-pager-clear>Clear</button>
@@ -63,6 +83,11 @@ class PagerPanel {
         this._root.querySelector('[data-pager-start]').addEventListener('click', () => this._start());
         this._root.querySelector('[data-pager-stop]').addEventListener('click', () => this._stop());
         this._root.querySelector('[data-pager-clear]').addEventListener('click', () => this._clear());
+        this._root.querySelector('[data-pager-hide-idle]').addEventListener('change', (ev) => {
+            this._hideIdle = ev.target.checked;
+            try { localStorage.setItem('meshpoint.pagerHideIdle', this._hideIdle ? '1' : '0'); } catch (_e) { /* ignore */ }
+            if (this._lastStatus) this._render(this._lastStatus);
+        });
     }
 
     show() {
@@ -118,6 +143,7 @@ class PagerPanel {
     }
 
     _render(status) {
+        this._lastStatus = status;
         const dot = this._root.querySelector('[data-pager-dot]');
         const text = this._root.querySelector('[data-pager-status-text]');
         const startBtn = this._root.querySelector('[data-pager-start]');
@@ -149,13 +175,22 @@ class PagerPanel {
 
         const log = this._root.querySelector('[data-pager-log]');
         if (!log) return;
-        const messages = status.messages || [];
+        let messages = status.messages || [];
+        if (this._hideIdle) messages = messages.filter((m) => !this._isIdleFrame(m));
         if (messages.length === 0) {
             log.innerHTML = '<div class="pager-log__empty">No messages yet.</div>';
             return;
         }
         // Newest first for a live feed.
         log.innerHTML = messages.slice().reverse().map((m) => this._rowHtml(m)).join('');
+    }
+
+    // POCSAG batch padding, not a real page -- see the constructor comment
+    // above for the reasoning. Only ever true for the default POCSAG/Pagers
+    // row shape (m.function is undefined for FLEX/RTL433 rows, so this is
+    // naturally a no-op there).
+    _isIdleFrame(m) {
+        return m.function === '0' && !m.message && Number(m.capcode) < 8;
     }
 
     _rowHtml(m) {

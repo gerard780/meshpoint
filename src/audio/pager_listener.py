@@ -112,6 +112,7 @@ def _parse_line(text: str) -> Optional[dict]:
         return {
             "protocol": m.group("proto"),
             "capcode": m.group("address"),
+            "function": m.group("function"),
             "message": message,
             "raw": text,
             "received_at": now,
