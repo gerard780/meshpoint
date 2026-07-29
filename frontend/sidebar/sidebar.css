@@ -555,6 +555,15 @@
     font-size: 0.78rem;
 }
 
+/* Nested group header (e.g. "Companions") inside a sublist — same
+ * divider treatment as the top-level ones, indented to match subitems. */
+.sidebar__sublist .sidebar__group-header {
+    margin: 0.35rem 0 0.15rem;
+    padding: 0 0.4rem 0 2.5rem;
+}
+
+.sidebar__sublist .sidebar__group-header:first-child { margin-top: 0.2rem; }
+
 /* ---- Active accent bar (FLIP target) ---- */
 .sidebar__active-bar {
     position: absolute;
