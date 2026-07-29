@@ -194,6 +194,40 @@ def _coerce_serial_devices(value) -> list[SerialDeviceConfig]:
     return []
 
 
+@dataclass
+class PocsagSerialDeviceConfig:
+    """POCSAG companion (``extra/pocsag_companion``) -- one entry per board.
+
+    Connection info only: callsign, screen timeout, and everything else
+    protocol-level is configured on the device's own WiFi web dashboard
+    (``pocsag-companion.local``), not here. No identity/advert concept --
+    unlike the Meshtastic/MeshCore companions, this board isn't itself a
+    mesh node with a nameable identity.
+    """
+
+    serial_port: Optional[str] = None
+    serial_baud: int = 115200
+    label: str = ""   # e.g. "ttgo" or "heltec" — shown in logs and capture_source tag
+    name: str = ""    # free-text display name shown in the dashboard UI
+
+
+_POCSAG_SERIAL_DEVICE_FIELDS: frozenset[str] = frozenset(
+    {"serial_port", "serial_baud", "label", "name"}
+)
+
+
+def _coerce_pocsag_serial_devices(value) -> list[PocsagSerialDeviceConfig]:
+    """Parse the multi-device ``capture.pocsag_serial`` list (same shape as ``serial``)."""
+    def _from_dict(d: dict) -> PocsagSerialDeviceConfig:
+        return PocsagSerialDeviceConfig(
+            **{k: v for k, v in d.items() if k in _POCSAG_SERIAL_DEVICE_FIELDS}
+        )
+
+    if isinstance(value, list):
+        return [_from_dict(d) for d in value if isinstance(d, dict)]
+    return []
+
+
 _REPEATER_FIELDS = {"key", "password", "name"}
 
 
@@ -232,6 +266,7 @@ class CaptureConfig:
     serial_port: Optional[str] = None
     serial_baud: int = 115200
     serial: list[SerialDeviceConfig] = field(default_factory=list)
+    pocsag_serial: list[PocsagSerialDeviceConfig] = field(default_factory=list)
     concentrator_spi_device: str = "/dev/spidev0.0"
     meshcore_usb: list[MeshcoreUsbConfig] = field(
         default_factory=lambda: [MeshcoreUsbConfig()]
@@ -663,6 +698,10 @@ def _apply_yaml(cfg: AppConfig, path: Path) -> None:
     # scalars keep working untouched when this key is absent.
     if isinstance(cap_raw, dict) and "serial" in cap_raw:
         cfg.capture.serial = _coerce_serial_devices(cap_raw.pop("serial"))
+    # pocsag_serial is a list-of-dicts, same shape as serial; pop it before
+    # the generic merge so _merge_dataclass doesn't store raw dicts.
+    if isinstance(cap_raw, dict) and "pocsag_serial" in cap_raw:
+        cfg.capture.pocsag_serial = _coerce_pocsag_serial_devices(cap_raw.pop("pocsag_serial"))
     # repeater_poll.repeaters is a list-of-dicts; pop it before the
     # generic merge so _merge_dataclass doesn't store raw dicts.
     rp_raw = raw.get("repeater_poll")

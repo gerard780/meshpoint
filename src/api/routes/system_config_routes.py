@@ -67,6 +67,18 @@ class SerialDevicesUpdate(BaseModel):
     enable_source: Optional[bool] = None
 
 
+class PocsagSerialDeviceEntry(BaseModel):
+    label: str = ""
+    serial_port: Optional[str] = None
+    serial_baud: int = Field(115200, ge=9600, le=921600)
+    name: str = ""
+
+
+class PocsagSerialDevicesUpdate(BaseModel):
+    devices: list[PocsagSerialDeviceEntry] = Field(..., min_length=0, max_length=4)
+    enable_source: Optional[bool] = None
+
+
 class RelayUpdate(BaseModel):
     enabled: Optional[bool] = None
     serial_port: Optional[str] = None
@@ -358,6 +370,64 @@ async def update_serial_devices(
     return {"saved": True, "restart_required": True}
 
 
+@router.put("/capture/pocsag-serial-devices")
+async def update_pocsag_serial_devices(
+    req: PocsagSerialDevicesUpdate,
+    _claims: SessionClaims = Depends(require_admin),
+    audit: AuditLogWriter = Depends(get_audit_writer),
+):
+    """Replace the full POCSAG companion device list (up to 4 entries).
+
+    Mirrors ``update_serial_devices`` -- same shape, minus long_name/
+    short_name (no identity concept here: callsign lives on the device's
+    own WiFi dashboard, not this config page).
+    """
+    from src.config import PocsagSerialDeviceConfig
+    if _config is None:
+        raise HTTPException(503, "Config not loaded")
+
+    new_devices = [
+        PocsagSerialDeviceConfig(
+            label=d.label,
+            serial_port=d.serial_port.strip() if d.serial_port else None,
+            serial_baud=d.serial_baud,
+            name=d.name,
+        )
+        for d in req.devices
+    ]
+    _config.capture.pocsag_serial = new_devices
+
+    yaml_updates: dict = {}
+    capture_updates: dict = {}
+
+    devices_list = [_pocsag_serial_device_dict(d) for d in new_devices]
+    yaml_updates["pocsag_serial"] = devices_list
+
+    sources = list(_config.capture.sources or [])
+    if req.enable_source is not None:
+        has_pocsag = "pocsag_serial" in sources
+        if req.enable_source and not has_pocsag:
+            sources.append("pocsag_serial")
+            capture_updates["sources"] = sources
+            _config.capture.sources = sources
+        elif not req.enable_source and has_pocsag:
+            sources = [s for s in sources if s != "pocsag_serial"]
+            capture_updates["sources"] = sources
+            _config.capture.sources = sources
+
+    with audit.timed_action(
+        user=_claims.subject,
+        action="config.pocsag_serial_devices_update",
+        params={"devices": devices_list},
+    ):
+        try:
+            save_section_to_yaml("capture", {**yaml_updates, **capture_updates})
+        except PermissionError as exc:
+            raise HTTPException(403, str(exc)) from exc
+
+    return {"saved": True, "restart_required": True}
+
+
 @router.put("/relay")
 async def update_relay(
     req: RelayUpdate,
@@ -465,4 +535,13 @@ def _serial_device_dict(dev) -> dict:
         "label": dev.label,
         "long_name": dev.long_name,
         "short_name": dev.short_name,
+    }
+
+
+def _pocsag_serial_device_dict(dev) -> dict:
+    return {
+        "serial_port": dev.serial_port,
+        "serial_baud": dev.serial_baud,
+        "label": dev.label,
+        "name": dev.name,
     }

@@ -128,6 +128,9 @@ class SerialConfigCard {
         (Array.isArray(cap.meshcore_usb) ? cap.meshcore_usb : []).forEach((c) => {
             if (c.serial_port) usage[c.serial_port] = c.label ? `MeshCore ${c.label}` : 'MeshCore';
         });
+        (Array.isArray(cap.pocsag_serial) ? cap.pocsag_serial : []).forEach((d) => {
+            if (d.serial_port) usage[d.serial_port] = d.label ? `POCSAG ${d.label}` : 'POCSAG';
+        });
         return usage;
     }
 

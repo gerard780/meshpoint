@@ -232,6 +232,33 @@ available without unplugging the stick into a laptop.
   immediately on the currently connected stick; only the
   swap-a-different-stick-in-later case needs a restart.
 
+### POCSAG Companion (config page only, not yet a capture source)
+
+`Configuration → POCSAG` edits the USB connection list for
+`extra/pocsag_companion` boards (TTGO LoRa32, Heltec V3) — same
+shape as `capture.serial` above, minus any identity/advert fields:
+this board isn't a mesh node, so it has nothing to rename. Callsign,
+screen timeout, and every other protocol-level setting stay on the
+board's own WiFi web dashboard (`pocsag-companion.local`), not here.
+
+```yaml
+capture:
+  # sources:
+  #   - pocsag_serial          # not yet consumed by a capture source
+  pocsag_serial:
+    - serial_port: "/dev/ttyUSB2"
+      serial_baud: 115200
+      label: "ttgo"
+      name: "Attic POCSAG"
+```
+
+**This is config-only for now** — `capture.pocsag_serial` persists
+via `PUT /api/config/capture/pocsag-serial-devices`, and the shared
+port-picker (`GET /api/config/serial-ports`) now also flags a port
+already pinned by a POCSAG entry, same as it does for Serial/MeshCore.
+No `PocsagSerialCaptureSource` exists yet, so adding `pocsag_serial`
+to `sources` has no effect until that capture source is built.
+
 ```yaml
 capture:
   serial:

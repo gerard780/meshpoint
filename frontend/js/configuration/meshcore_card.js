@@ -143,6 +143,9 @@ class MeshcoreConfigCard {
         (Array.isArray(cap.serial) ? cap.serial : []).forEach((d) => {
             if (d.serial_port) usage[d.serial_port] = d.label ? `Serial ${d.label}` : 'Serial';
         });
+        (Array.isArray(cap.pocsag_serial) ? cap.pocsag_serial : []).forEach((d) => {
+            if (d.serial_port) usage[d.serial_port] = d.label ? `POCSAG ${d.label}` : 'POCSAG';
+        });
         return usage;
     }
 
