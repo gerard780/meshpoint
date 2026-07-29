@@ -123,8 +123,8 @@
 // rtl433test.ino's lacrosse1On/nexus1On/etc switches.
 const bool alpha1On = 1;
 const bool alpha2On = 1;
-const bool numeric1On = 0;
-const bool tone1On = 0;
+const bool numeric1On = 1;
+const bool tone1On = 1;
 
 enum PagerMsgType { MSG_ALPHA, MSG_NUMERIC, MSG_TONE };
 
@@ -140,9 +140,37 @@ struct FakePager {
 // selects which of the 8 frames in a POCSAG batch carries the address --
 // see PagerClient::transmit()'s own framePos calculation) so a real
 // capture exercises more than one frame position, not just frame 0.
+//
+// Alpha strings are deliberately padded with trailing spaces to a length
+// that decodes cleanly -- CONFIRMED BUG in RadioLib 7.7.1's own
+// PagerClient::transmit() (src/protocols/Pager/Pager.cpp): the BCD/numeric
+// path explicitly space-pads any leftover 4-bit symbol slots in the last
+// message code word before encoding it ("in BCD mode, pad the rest of the
+// code word with spaces"), but the ASCII path has NO equivalent -- it
+// just `break`s when real data runs out, leaving whatever leftover 7-bit
+// symbol slots exist in that code word as raw zero bits (the buffer was
+// memset(0) before any real data was written in). Those zero-bits decode
+// as literal NUL bytes appended to the real text -- which is baked into
+// the actual over-the-air transmission, not a receiver artifact. Proven
+// by porting Pager.cpp's real message-building loop and Pager.cpp's real
+// decode loop (readData()) verbatim into a standalone native C++ harness
+// (no Arduino/hardware deps needed -- BCH.cpp is pure math) and round-
+// tripping every string here through RadioLib's OWN actual algorithm:
+// "Second pager, different capcode" (32 chars) already lands on a clean
+// boundary with 0 leftover bits -- which is exactly why it's the only
+// alpha message that was ever seen decoding successfully live, while
+// "Meshpoint POCSAG test alpha message" (36 chars unpadded) leftover 2
+// slots, meaning the real transmitted signal carried 2 trailing NUL
+// bytes baked in -- almost certainly what silently kills that message
+// before multimon-ng's decoded text line ever reaches the dashboard (a
+// raw NUL mid-line breaks most C-string-based text handling). If you
+// change either string, re-verify the padding needed (brute-force 0-19
+// trailing spaces against RadioLib's real encode+decode logic -- do NOT
+// just guess a number) before assuming a new alpha message will decode
+// cleanly.
 FakePager pagers[] = {
-  { MSG_ALPHA,   alpha1On,   1234561, "Meshpoint POCSAG test alpha message" },
-  { MSG_ALPHA,   alpha2On,   1234562, "Second pager, different capcode" },
+  { MSG_ALPHA,   alpha1On,   1234561, "Meshpoint POCSAG test alpha message  " }, // +2 spaces, see comment above
+  { MSG_ALPHA,   alpha2On,   1234562, "Second pager, different capcode" },       // already clean, 0 padding needed
   { MSG_NUMERIC, numeric1On, 1234563, "0123456789*U -()" }, // only 0-9 * U - ( ) space allowed in BCD, per Pager.h
   { MSG_TONE,    tone1On,    1234564, nullptr },
 };
