@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -14,21 +14,31 @@ from src.api.auth.dependencies import require_admin, require_auth
 from src.api.auth.jwt_session import SessionClaims
 from src.config import AppConfig, save_section_to_yaml
 
+if TYPE_CHECKING:
+    # Deferred: importing this at module load drags in src.storage.database,
+    # which imports aiosqlite at the top -- not installed on the Mac dev
+    # machine (see CLAUDE.md), and this route module is otherwise
+    # Mac-testable (test_serial_devices_route.py, test_dapnet_update_route.py).
+    from src.storage.packet_repository import PacketRepository
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/config", tags=["config"])
 
 _config: AppConfig | None = None
+_packet_repo: PacketRepository | None = None
 
 
-def init_routes(config: AppConfig) -> None:
-    global _config
+def init_routes(config: AppConfig, packet_repo: PacketRepository | None = None) -> None:
+    global _config, _packet_repo
     _config = config
+    _packet_repo = packet_repo
 
 
 def reset_routes() -> None:
-    global _config
+    global _config, _packet_repo
     _config = None
+    _packet_repo = None
 
 
 class StorageUpdate(BaseModel):
@@ -536,7 +546,13 @@ async def update_dapnet(
     needed (unlike the USB device list PUTs above, which reconfigure
     an already-running connection). ``blacklist_capcodes`` are shown
     live but never stored; ``ignore_capcodes`` are neither shown nor
-    stored.
+    stored -- but that coordinator-side check only applies to pages
+    captured AFTER this save, so a page for a capcode newly added to
+    EITHER list, already sitting in the packets table from before,
+    would otherwise keep showing up in history forever (Recent Pages
+    reads straight from storage). Purging both lists here (via
+    PacketRepository.delete_dapnet_capcodes) makes "never stored"
+    hold immediately for both tiers, not just going forward.
     """
     if _config is None:
         raise HTTPException(503, "Config not loaded")
@@ -556,7 +572,12 @@ async def update_dapnet(
         except PermissionError as exc:
             raise HTTPException(403, str(exc)) from exc
 
-    return {"saved": True, "restart_required": False}
+    purged = 0
+    to_purge = sorted(set(req.blacklist_capcodes) | set(req.ignore_capcodes))
+    if _packet_repo is not None and to_purge:
+        purged = await _packet_repo.delete_dapnet_capcodes(to_purge)
+
+    return {"saved": True, "restart_required": False, "purged": purged}
 
 
 def _meshcore_usb_dict(mc_usb) -> dict:

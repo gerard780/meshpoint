@@ -5,11 +5,19 @@
  * (extra/pocsag_companion, an ESP32 + SX1276/SX1262 sketch talking JSON
  * over USB serial). Deliberately minimal compared to
  * SerialConfigCard/MeshcoreConfigCard: no identity sub-block, no "send
- * advert", no live readouts -- the board has no mesh identity to
- * rename, and its own protocol settings (callsign, screen timeout,
- * etc.) live on the device's own WiFi web dashboard at
- * pocsag-companion.local, not here. This card only owns connection
- * info: which USB port, what baud, and a free-text display name/label.
+ * advert" -- the board has no mesh identity to rename, and its own
+ * protocol settings (callsign, screen timeout, etc.) live on the
+ * device's own WiFi web dashboard at pocsag-companion.local, not here.
+ * This card only owns connection info: which USB port, what baud, and
+ * a free-text display name/label. It DOES show live readouts (same
+ * `cfg-mc-readout` tiles as Serial/MeshCore), sourced from
+ * `config.dapnet_status` -- the same per-device connected/board/
+ * callsign/frequency_mhz data the topbar's DAPNET chip already
+ * consumes (DapnetSerialSource's one-shot {"cmd":"status"} reply).
+ * There's no bandwidth/SF/TX-power/firmware equivalent here (POCSAG is
+ * fixed-frequency FSK, not LoRa, and the sketch's status reply doesn't
+ * report a firmware version), so the tile set is deliberately smaller
+ * than MeshCore's -- only fields that actually exist are shown.
  *
  * "DAPNET capcode filters" is unrelated to the connection above -- it
  * edits DapnetConfig's two dashboard-side capcode tiers (see
@@ -133,6 +141,10 @@ class PocsagSerialConfigCard {
         const cap = config.capture || {};
         const devices = Array.isArray(cap.pocsag_serial) ? cap.pocsag_serial : [];
         const sources = cap.sources || [];
+        // Live per-device status (connected/board/callsign/frequency_mhz),
+        // keyed by `name` -- e.g. "dapnet_heltec" or bare "dapnet" -- same
+        // shape/convention the topbar's DAPNET chip already reads.
+        this._liveStatuses = Array.isArray(config.dapnet_status) ? config.dapnet_status : [];
 
         const enableEl = this._root.querySelector('[data-pocsag-serial-enable]');
         if (enableEl) enableEl.checked = sources.includes('pocsag_serial');
@@ -188,6 +200,11 @@ class PocsagSerialConfigCard {
             status.dataset.kind = 'error';
             status.textContent = 'Save failed.';
         }
+    }
+
+    _liveStatusFor(label) {
+        const name = label ? `dapnet_${label}` : 'dapnet';
+        return (this._liveStatuses || []).find((s) => s.name === name) || null;
     }
 
     /** Maps every currently-configured serial_port value across ALL THREE
@@ -257,6 +274,7 @@ class PocsagSerialConfigCard {
         const port = this._esc(data.serial_port || '');
         const baud = data.serial_baud != null ? data.serial_baud : 115200;
         const name = this._esc(data.name || '');
+        const live = this._liveStatusFor(data.label || '');
 
         const div = document.createElement('div');
         div.className = 'cfg-companion';
@@ -298,6 +316,7 @@ class PocsagSerialConfigCard {
                        placeholder="e.g. Attic POCSAG"
                        value="${name}" data-device-name>
             </label>
+            ${this._deviceReadoutsHtml(live)}
         `;
 
         div.querySelector('.cfg-companion__remove').addEventListener('click', () => {
@@ -314,6 +333,44 @@ class PocsagSerialConfigCard {
 
         this._devicesEl.appendChild(div);
         this._syncAddBtn();
+    }
+
+    /** Live connection/board readouts for one row -- same `cfg-mc-readout`
+     * tiles Serial/MeshCore use, but only the fields DAPNET actually has:
+     * DapnetSerialSource's one-shot {"cmd":"status"} reply carries just
+     * board/callsign/freq, no LoRa params (POCSAG is fixed-frequency FSK,
+     * not LoRa) and no firmware version. */
+    _deviceReadoutsHtml(live) {
+        if (!live || !live.connected) {
+            return `<p class="cfg-companion__offline-hint">Not connected.</p>`;
+        }
+        return `
+            <div class="cfg-mc-readouts">
+                <div class="cfg-mc-readout">
+                    <span class="cfg-mc-readout__label">Callsign</span>
+                    <span class="cfg-mc-readout__value">${this._esc(live.callsign || '--')}</span>
+                </div>
+                <div class="cfg-mc-readout">
+                    <span class="cfg-mc-readout__label">Frequency</span>
+                    <span class="cfg-mc-readout__value">${this._fmtFreq(live.frequency_mhz)}</span>
+                </div>
+                <div class="cfg-mc-readout">
+                    <span class="cfg-mc-readout__label">Hardware</span>
+                    <span class="cfg-mc-readout__value">${this._fmtBoard(live.board)}</span>
+                </div>
+            </div>
+        `;
+    }
+
+    _fmtFreq(mhz) {
+        const n = Number(mhz);
+        if (!n || Number.isNaN(n)) return '--';
+        return `${n.toFixed(4)} MHz`;
+    }
+
+    _fmtBoard(board) {
+        const labels = { ttgo: 'TTGO LoRa32', heltec: 'Heltec V3' };
+        return labels[board] || board || '--';
     }
 
     _reindexDevices() {

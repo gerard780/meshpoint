@@ -1748,7 +1748,7 @@ def _init_routes(
     upstream_config_routes.init_routes(config=config)
     device_config_routes.init_routes(config=config, identity=identity)
     gps_status.init_routes(location_source=coord.location_source)
-    system_config_routes.init_routes(config=config)
+    system_config_routes.init_routes(config=config, packet_repo=coord.packet_repo)
     hardware_config_routes.init_routes(config=config)
     repeater_config_routes.init_routes(config=config)
     metrics_config_routes.init_routes(config=config)

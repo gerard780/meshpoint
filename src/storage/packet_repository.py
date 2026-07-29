@@ -224,6 +224,31 @@ class PacketRepository:
         logger.info("Cleaned up %d old packets", excess)
         return excess
 
+    async def delete_dapnet_capcodes(self, capcodes: list[int]) -> int:
+        """Remove already-stored DAPNET pages for the given capcodes.
+
+        Both DapnetConfig tiers (blacklist and ignore) promise "never
+        stored", but coordinator.py's per-packet tier check only stops
+        FUTURE pages from being written -- adding a capcode to either
+        list doesn't retroactively touch rows captured before that
+        save, so without this a capcode the UI promises is never
+        stored keeps showing its pre-existing history forever (Recent
+        Pages reads straight from the packets table). Called with the
+        union of both lists right after a save so the promise holds
+        immediately, not just going forward. ``source_id`` is TEXT, so
+        capcodes are bound as strings to match how they're actually
+        stored.
+        """
+        if not capcodes:
+            return 0
+        placeholders = ",".join("?" for _ in capcodes)
+        result = await self._db.execute(
+            f"DELETE FROM packets WHERE protocol = 'dapnet' AND source_id IN ({placeholders})",
+            tuple(str(c) for c in capcodes),
+        )
+        await self._db.commit()
+        return int(getattr(result, "rowcount", 0) or 0)
+
     @staticmethod
     def _row_to_packet(row: dict) -> Packet:
         signal = None
