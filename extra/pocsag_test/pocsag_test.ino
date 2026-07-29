@@ -428,7 +428,19 @@ String padAlphaForCleanDecode(const String &text, uint32_t addr) {
                                        // regardless (calculateBWManExp()), so this
                                        // doesn't need to be exact.
 #define POCSAG_RX_BATCH_BYTES 64      // 16 code words -- see the section comment above
-const uint8_t POCSAG_SYNC_BYTES[4] = { 0x7C, 0xD2, 0x15, 0xD8 }; // RADIOLIB_PAGER_FRAME_SYNC_CODE_WORD, big-endian bytes
+// BITWISE-INVERTED RADIOLIB_PAGER_FRAME_SYNC_CODE_WORD (0x7CD215D8), not the
+// plain value -- confirmed against RadioLib's own direct-mode receive code
+// (PagerClient::startReceiveCommon() in Pager.cpp): "the logic here is
+// inverted, because modules like SX1278 assume high frequency to be logic 1,
+// which is opposite to POCSAG" -- it searches for
+// ~RADIOLIB_PAGER_FRAME_SYNC_CODE_WORD when invert=false (our default, same
+// as our own TX side uses), and its read() function inverts every full
+// codeword the same way (`codeWord = ~codeWord`) -- see the payload-byte
+// inversion in loopReceiver() below, applied for the identical reason.
+// Live-confirmed necessary: real strong signal spikes (RSSI up to -17dBm
+// from a ~-85dBm floor) never triggered DIO0/PayloadReady at all against
+// the plain (non-inverted) sync word, no matter how strong the real signal.
+const uint8_t POCSAG_SYNC_BYTES[4] = { 0x83, 0x2D, 0xEA, 0x27 };
 
 int rxBatchCount = 0;
 
@@ -514,6 +526,20 @@ String decodeMessageSymbols(uint32_t *codewords, size_t n, size_t startIdx, uint
 // i (matching the TX side's own `framePos = 2*(addr&7)` code word
 // position), `i/2` is the exact same value under integer division
 // (confirmed by hand for every even i in 0..14, not assumed).
+// POCSAG has no message-length field, so the last code word's leftover,
+// unused symbol slots decode as whatever bit pattern is actually there --
+// LIVE-CONFIRMED trailing NUL byte(s) on real DAPNET traffic (e.g.
+// "Test message1 ", "XTIME=...  "). Same ambiguity
+// src/audio/pager_listener.py already works around for multimon-ng's own
+// decode ("multimon-ng pads POCSAG alpha messages with literal '<NUL>'
+// tokens ... strip trailing ones for a clean display") -- mirrored here.
+void trimTrailingPadding(String &s) {
+  while (s.length() > 0 && s[s.length() - 1] == '\0') {
+    s.remove(s.length() - 1);
+  }
+  s.trim();
+}
+
 void decodeBatchAndEmit(uint32_t *cw, size_t n) {
   for (size_t i = 0; i < n; i++) {
     uint32_t w = cw[i];
@@ -529,6 +555,7 @@ void decodeBatchAndEmit(uint32_t *cw, size_t n) {
 
     size_t consumed = 0;
     String text = decodeMessageSymbols(cw, n, i + 1, symbolLength, bcd, &consumed);
+    trimTrailingPadding(text);
 
     JsonDocument out;
     out["capcode"] = capcode;
@@ -589,41 +616,100 @@ void setupReceiver() {
   display.display();
 }
 
+bool rxContinuousStarted = false;
+
 void loopReceiver() {
-  uint8_t payload[POCSAG_RX_BATCH_BYTES];
-  // 3s timeout so we loop back around periodically even during silence
-  // (nothing depends on that period specifically, just don't want a
-  // forever-blocking call with zero visible activity).
-  int state = radio.receive(payload, sizeof(payload), 3000);
-
-  if (state == RADIOLIB_ERR_NONE) {
-    // Big-endian -- POCSAG code words are MSB-first, matching the same
-    // bit convention BitWriter/PagerClient use throughout the TX side
-    // of this file.
-    uint32_t cw[16];
-    for (int i = 0; i < 16; i++) {
-      cw[i] = ((uint32_t)payload[i * 4] << 24) | ((uint32_t)payload[i * 4 + 1] << 16)
-            | ((uint32_t)payload[i * 4 + 2] << 8) | (uint32_t)payload[i * 4 + 3];
+  // FIXED a real flaw in the previous version of this diagnostic:
+  // radio.receive(...) is a BLOCKING call that, per RadioLib's own
+  // source (SX127x::finishReceive(), called internally on timeout),
+  // puts the chip into STANDBY before returning -- meaning the RSSI
+  // read right after receive() returned was reading a value AFTER the
+  // receiver had already left active RX mode, not a live sample of
+  // what the channel looked like during the listen window. Three
+  // deliberately-timed real DAPNET sends still showed a flat RSSI
+  // trace against that flawed version, which is suggestive but not
+  // conclusive given the sampling bug. This version uses non-blocking
+  // continuous RX (radio.startReceive(), returns immediately) and
+  // polls RSSI at ~5x/sec while genuinely still listening the whole
+  // time, checking the DIO0 pin directly (same pin+meaning
+  // SX127x::receive()'s own blocking wait polls internally --
+  // PayloadReady goes high on a real packet match) for an actual
+  // packet without ever leaving RX mode in between samples.
+  if (!rxContinuousStarted) {
+    // Never checked this return value before -- if startReceive() itself
+    // is silently failing, the chip just sits in standby the whole time
+    // and getRSSI() returns a frozen value (whatever it was at the
+    // moment standby was entered), which would exactly explain a
+    // perfectly static reading across many samples (real RF noise
+    // essentially never holds bit-identical that long).
+    int rxState = radio.startReceive();
+    if (rxState != RADIOLIB_ERR_NONE) {
+      Serial.print("[rx] startReceive() FAILED, code="); Serial.println(rxState);
     }
-    rxBatchCount++;
-    decodeBatchAndEmit(cw, 16);
+    rxContinuousStarted = true;
+  }
 
-    display.clearDisplay();
-    display.setTextColor(SSD1306_WHITE);
-    display.setTextSize(2);
-    display.setCursor(0, 0);
-    display.print("RX #");
-    display.print(rxBatchCount);
-    display.drawFastHLine(0, 20, OLED_WIDTH, SSD1306_WHITE);
-    display.setTextSize(1);
-    display.setCursor(0, 26);
-    display.println("batch decoded,");
-    display.println("see Serial for JSON");
-    display.display();
-  } else if (state != RADIOLIB_ERR_RX_TIMEOUT) {
-    // RX timeout is the normal "nothing arrived in 3s" case -- logging
-    // that every 3s during quiet moments would just be noise.
-    Serial.print("[rx] receive() error "); Serial.println(state);
+  static unsigned long lastRssiPrint = 0;
+  if (millis() - lastRssiPrint >= 200) {
+    lastRssiPrint = millis();
+    // skipReceive=true is load-bearing, not cosmetic: SX127x::getRSSICommon()'s
+    // FSK branch, by default (skipReceive=false, what plain getRSSI() uses),
+    // silently does its OWN startReceive()+read+standby() cycle EVERY call --
+    // completely independent of and conflicting with the continuous RX we
+    // already armed above. That was undoing our own startReceive() and
+    // forcing standby roughly every 200ms, which is almost certainly why
+    // nothing was ever received in every earlier test: the receiver was
+    // spending nearly all its time in standby because of this diagnostic
+    // itself, not actually listening long enough to catch anything.
+    // Quiet the log down to just the interesting moments -- printing every
+    // ~85dBm noise-floor sample was drowning out the real spikes we're
+    // actually looking for. -80dBm is comfortably above the observed ~-80
+    // to -89dBm noise floor and comfortably below the real signal spikes
+    // confirmed live (-17 to -21dBm), so it only ever suppresses genuine
+    // quiet-channel noise, never a real signal.
+    float rssi = radio.getRSSI(false, true);
+    if (rssi > -80.0f) {
+      Serial.print("[rx] live RSSI="); Serial.print(rssi);
+      Serial.print(" dBm  DIO0="); Serial.println(digitalRead(LORA_DIO0));
+    }
+  }
+
+  if (digitalRead(LORA_DIO0)) {
+    uint8_t payload[POCSAG_RX_BATCH_BYTES];
+    int state = radio.readData(payload, sizeof(payload));
+    rxContinuousStarted = false; // re-armed via startReceive() next loop() call
+
+    if (state == RADIOLIB_ERR_NONE) {
+      // Big-endian -- POCSAG code words are MSB-first, matching the
+      // same bit convention BitWriter/PagerClient use throughout the
+      // TX side of this file. Every byte is also INVERTED before use --
+      // see POCSAG_SYNC_BYTES' own comment above for why (the chip's
+      // hardware demodulator's bit sense is backwards relative to
+      // POCSAG's real convention).
+      uint32_t cw[16];
+      for (int i = 0; i < 16; i++) {
+        uint8_t b0 = ~payload[i * 4], b1 = ~payload[i * 4 + 1], b2 = ~payload[i * 4 + 2], b3 = ~payload[i * 4 + 3];
+        cw[i] = ((uint32_t)b0 << 24) | ((uint32_t)b1 << 16) | ((uint32_t)b2 << 8) | (uint32_t)b3;
+      }
+      rxBatchCount++;
+      Serial.println("[rx] PACKET RECEIVED");
+      decodeBatchAndEmit(cw, 16);
+
+      display.clearDisplay();
+      display.setTextColor(SSD1306_WHITE);
+      display.setTextSize(2);
+      display.setCursor(0, 0);
+      display.print("RX #");
+      display.print(rxBatchCount);
+      display.drawFastHLine(0, 20, OLED_WIDTH, SSD1306_WHITE);
+      display.setTextSize(1);
+      display.setCursor(0, 26);
+      display.println("batch decoded,");
+      display.println("see Serial for JSON");
+      display.display();
+    } else {
+      Serial.print("[rx] readData error "); Serial.println(state);
+    }
   }
 }
 #endif // POCSAG_MODE_RX

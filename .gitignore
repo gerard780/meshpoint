@@ -61,3 +61,6 @@ scripts/_*
 
 # Ruff cache
 .ruff_cache/
+
+# WiFi/OTA credentials for the pocsag_companion Arduino sketch -- never commit
+extra/pocsag_companion/secrets.h
