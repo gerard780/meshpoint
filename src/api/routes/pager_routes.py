@@ -68,6 +68,14 @@ def _add_endpoints(router: APIRouter, get_listener: Callable[[], Optional[PagerL
         await listener.stop()
         return listener.status()
 
+    @router.post("/clear")
+    async def clear(_claims: SessionClaims = Depends(require_admin)):
+        listener = get_listener()
+        if listener is None:
+            raise HTTPException(503, "Listener not initialised")
+        listener.clear()
+        return listener.status()
+
 
 _add_endpoints(p2000_router, lambda: _p2000)
 _add_endpoints(pagers_router, lambda: _pagers)

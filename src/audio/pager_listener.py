@@ -170,6 +170,11 @@ class PagerListener:
         async with self._lock:
             await self._stop_locked()
 
+    def clear(self) -> None:
+        """Empty the on-screen message history. Independent of running/
+        stopped state -- clearing does not touch the listener process."""
+        self.messages.clear()
+
     def poll(self) -> dict:
         """Called by the status endpoint; marks activity for the idle watchdog."""
         self._last_poll_at = time.monotonic()

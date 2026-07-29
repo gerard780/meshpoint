@@ -55,3 +55,11 @@ async def stop(_claims: SessionClaims = Depends(require_admin)):
         raise HTTPException(503, "Listener not initialised")
     await _listener.stop()
     return _listener.status()
+
+
+@router.post("/clear")
+async def clear(_claims: SessionClaims = Depends(require_admin)):
+    if _listener is None:
+        raise HTTPException(503, "Listener not initialised")
+    _listener.clear()
+    return _listener.status()

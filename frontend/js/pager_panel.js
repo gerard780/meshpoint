@@ -44,6 +44,7 @@ class PagerPanel {
                         <div class="pager-actions">
                             <button class="terminal-button" type="button" data-pager-start>Start listening</button>
                             <button class="terminal-button" type="button" data-pager-stop>Stop</button>
+                            <button class="terminal-button" type="button" data-pager-clear>Clear</button>
                         </div>
                     </div>
                 </div>
@@ -61,6 +62,7 @@ class PagerPanel {
         `;
         this._root.querySelector('[data-pager-start]').addEventListener('click', () => this._start());
         this._root.querySelector('[data-pager-stop]').addEventListener('click', () => this._stop());
+        this._root.querySelector('[data-pager-clear]').addEventListener('click', () => this._clear());
     }
 
     show() {
@@ -93,6 +95,15 @@ class PagerPanel {
     async _stop() {
         try {
             await fetch(`${this._apiPrefix}/stop`, { method: 'POST' });
+        } catch (_e) { /* ignore -- status poll will reflect reality */ }
+        this._refresh();
+    }
+
+    async _clear() {
+        // Independent of Start/Stop -- wipes the on-screen message
+        // history without touching whether the listener is running.
+        try {
+            await fetch(`${this._apiPrefix}/clear`, { method: 'POST' });
         } catch (_e) { /* ignore -- status poll will reflect reality */ }
         this._refresh();
     }
