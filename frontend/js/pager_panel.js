@@ -35,13 +35,19 @@ class PagerPanel {
         // single-digit capcode (0-7) with Function 0 and no message text.
         // Real-world POCSAG capcodes are never that small, so filtering on
         // capcode<8 + function 0 + no message is a safe, practical way to
-        // hide that structural noise -- default off so existing behavior
-        // (show everything) doesn't silently change for anyone not on
-        // POCSAG/Pagers. Shared across kinds since it's harmless where it
-        // doesn't apply (P2000/RTL433 never produce this exact shape).
+        // hide that structural noise. Per-kind storage key (not shared
+        // across P2000/Pagers/POCSAG/RTL433) so each tab's toggle -- and
+        // default -- is independent: POCSAG defaults ON (idle padding is
+        // dense there, one real frame per otherwise-mostly-idle batch, see
+        // extra/pocsag_test/pocsag_test.ino), everything else defaults off
+        // so existing behavior doesn't silently change where the noise is
+        // rare and someone might actually want to see every raw frame.
         this._hideIdle = (() => {
-            try { return localStorage.getItem('meshpoint.pagerHideIdle') === '1'; }
-            catch (_e) { return false; }
+            try {
+                const stored = localStorage.getItem(`meshpoint.pagerHideIdle.${kind}`);
+                if (stored !== null) return stored === '1';
+            } catch (_e) { /* fall through to the default below */ }
+            return kind === 'pocsag';
         })();
         this._lastStatus = null;
     }
@@ -85,7 +91,7 @@ class PagerPanel {
         this._root.querySelector('[data-pager-clear]').addEventListener('click', () => this._clear());
         this._root.querySelector('[data-pager-hide-idle]').addEventListener('change', (ev) => {
             this._hideIdle = ev.target.checked;
-            try { localStorage.setItem('meshpoint.pagerHideIdle', this._hideIdle ? '1' : '0'); } catch (_e) { /* ignore */ }
+            try { localStorage.setItem(`meshpoint.pagerHideIdle.${this.kind}`, this._hideIdle ? '1' : '0'); } catch (_e) { /* ignore */ }
             if (this._lastStatus) this._render(this._lastStatus);
         });
     }
