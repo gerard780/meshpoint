@@ -215,6 +215,15 @@
                           // callsign and screen timeout across reboots
 #include "secrets.h" // gitignored -- WIFI_SSID/WIFI_PASSWORD/OTA_PASSWORD/WEB_PASSWORD, see that file
 
+// Turns a macro's expanded VALUE into a string literal (two-step indirection
+// needed so e.g. BUTTON_GPIO expands to its number before stringifying --
+// STRINGIFY(BUTTON_GPIO) alone would produce the literal text "BUTTON_GPIO").
+// Used below to bake the per-board BUTTON_GPIO value into INDEX_HTML at
+// compile time, so the web UI's hint text doesn't hardcode a pin number
+// that's only right for one of the two boards.
+#define STRINGIFY(x) #x
+#define TOSTRING(x) STRINGIFY(x)
+
 // ---------- Tuning knobs ----------
 #define POCSAG_FREQ_MHZ 439.9875f // DAPNET's real German transmitter frequency --
                                    // see pocsag_test.ino's own POCSAG_BAUD comment
@@ -1062,6 +1071,17 @@ bool queueWebSend(uint32_t capcode, const String &text) {
   return queued;
 }
 
+// Reboot handoff (from /api/reboot) -- a single scalar+timestamp, not a
+// String, so unlike webSendText above this doesn't need the mutex (no
+// heap-corruption risk from concurrent access, just a plain word read/
+// write). loop() waits REBOOT_DELAY_MS after the flag is set before
+// actually calling ESP.restart() -- restarting synchronously inside the
+// web handler risks AsyncTCP never getting a chance to flush the HTTP
+// response, leaving the browser hanging with no confirmation.
+#define REBOOT_DELAY_MS 500UL
+bool rebootRequested = false;
+unsigned long rebootRequestedAt = 0;
+
 // Operator callsign -- required before sendPocsagAlpha() will transmit
 // anything (see its own comment), persisted in NVS via Preferences so it
 // survives a reboot. Read/written from both the loop() thread and the web
@@ -1197,23 +1217,46 @@ const char INDEX_HTML[] = R"HTMLPAGE(
   .result { font-size:12px; margin-top:8px; min-height:14px; }
   .result.ok { color: var(--accent-green); }
   .result.err { color: var(--accent-red); }
-  #authOverlay {
+  .modal-overlay {
     position:fixed; inset:0; background: rgba(10,14,23,0.92); display:flex; align-items:center; justify-content:center; z-index:100;
   }
-  #authOverlay .card { width:260px; }
-  #authOverlay h2 { color: var(--accent-cyan); font-size:14px; }
+  .modal-overlay .card { width:280px; }
+  .modal-overlay h2 { color: var(--accent-cyan); font-size:14px; }
+  .modal-overlay p { font-size:12px; color: var(--text-secondary); line-height:1.5; }
   .hidden { display:none !important; }
+  button.danger { background: var(--accent-red); color: #fff; }
+  button.secondary { background: var(--bg-primary); color: var(--text-secondary); border:1px solid var(--border); }
 </style>
 </head>
 <body>
 
-<div id="authOverlay">
+<div id="authOverlay" class="modal-overlay">
   <div class="card">
     <h2>POCSAG COMPANION</h2>
     <label for="pw">Password</label>
     <input type="password" id="pw" autocomplete="off" spellcheck="false">
     <button onclick="tryLogin()">Unlock</button>
     <div class="result err" id="authErr"></div>
+  </div>
+</div>
+
+<div id="clearConfirmModal" class="modal-overlay hidden">
+  <div class="card">
+    <h2 style="color:var(--accent-red)">CLEAR ALL SETTINGS?</h2>
+    <p>Wipes callsign and screen timeout back to defaults. This cannot be undone.</p>
+    <button class="danger" onclick="confirmClearSettings()">Clear Settings</button>
+    <button class="secondary" onclick="document.getElementById('clearConfirmModal').classList.add('hidden')">Cancel</button>
+    <div class="result" id="clearConfirmResult"></div>
+  </div>
+</div>
+
+<div id="rebootModal" class="modal-overlay hidden">
+  <div class="card">
+    <h2 style="color:var(--accent-red)">SETTINGS CLEARED</h2>
+    <p>Callsign and screen timeout were reset to defaults. Reboot now to test a clean boot, or reboot later yourself.</p>
+    <button onclick="rebootNow()">Reboot Now</button>
+    <button class="secondary" onclick="document.getElementById('rebootModal').classList.add('hidden')">Later</button>
+    <div class="result" id="rebootResult"></div>
   </div>
 </div>
 
@@ -1250,6 +1293,8 @@ const char INDEX_HTML[] = R"HTMLPAGE(
       <input type="text" id="callsign" placeholder="N0CALL" maxlength="8" style="text-transform:uppercase">
       <button onclick="saveCallsign()">Save</button>
       <div class="result" id="callsignResult"></div>
+      <button class="danger" onclick="clearSettings()">Clear Settings</button>
+      <div class="hint">Wipes callsign + screen timeout back to defaults -- for testing a clean install.</div>
     </div>
 
     <div class="card">
@@ -1258,7 +1303,7 @@ const char INDEX_HTML[] = R"HTMLPAGE(
       <input type="number" id="timeout" min="0" step="1">
       <button onclick="applyTimeout()">Apply</button>
       <div class="result" id="timeoutResult"></div>
-      <div class="hint">GPIO0 (BOOT button) also toggles the display manually at any time.</div>
+      <div class="hint">GPIO)HTMLPAGE" TOSTRING(BUTTON_GPIO) R"HTMLPAGE( (BOOT button) also toggles the display manually at any time.</div>
     </div>
   </div>
 </div>
@@ -1403,6 +1448,42 @@ async function saveCallsign() {
   } catch (e) {
     result.className = 'result err'; result.textContent = 'Request failed';
   }
+}
+
+function clearSettings() {
+  document.getElementById('clearConfirmResult').textContent = '';
+  document.getElementById('clearConfirmModal').classList.remove('hidden');
+}
+
+async function confirmClearSettings() {
+  const result = document.getElementById('clearConfirmResult');
+  try {
+    const r = await apiPost('/api/clear-settings', {});
+    if (r.ok) {
+      callsignTouched = false; timeoutTouched = false;
+      pollStatus();
+      document.getElementById('clearConfirmModal').classList.add('hidden');
+      document.getElementById('rebootModal').classList.remove('hidden');
+    } else {
+      result.className = 'result err'; result.textContent = r.error || 'Failed';
+    }
+  } catch (e) {
+    result.className = 'result err'; result.textContent = 'Request failed';
+  }
+}
+
+async function rebootNow() {
+  const result = document.getElementById('rebootResult');
+  result.className = 'result'; result.textContent = 'Rebooting...';
+  try {
+    await apiPost('/api/reboot', {});
+  } catch (e) {
+    // Expected -- the device drops the connection as it restarts, this
+    // isn't a real failure.
+  }
+  result.className = 'result ok';
+  result.textContent = 'Reconnecting...';
+  setTimeout(() => location.reload(), 6000); // rough guess at boot+WiFi-reconnect time
 }
 
 async function applyTimeout() {
@@ -1565,6 +1646,25 @@ void setupWebServer() {
     setCallsign(cs);
     prefs.putString("callsign", cs);
     request->send(200, "application/json", "{\"ok\":true}");
+  });
+
+  server.on("/api/clear-settings", HTTP_POST, [](AsyncWebServerRequest *request) {
+    if (!checkAuth(request)) return;
+    prefs.clear(); // wipes the whole "pocsag" NVS namespace -- callsign +
+                    // dispTimeoutMs, nothing else is stored under it
+    setCallsign("");
+    displayTimeoutMs = DISPLAY_TIMEOUT_MS_DEFAULT;
+    lastDisplayActivity = millis();
+    Serial.println("[web] settings cleared -- callsign + screen timeout reset to defaults");
+    request->send(200, "application/json", "{\"ok\":true}");
+  });
+
+  server.on("/api/reboot", HTTP_POST, [](AsyncWebServerRequest *request) {
+    if (!checkAuth(request)) return;
+    Serial.println("[web] reboot requested via dashboard");
+    request->send(200, "application/json", "{\"ok\":true}");
+    rebootRequested = true;
+    rebootRequestedAt = millis(); // loop() does the actual ESP.restart() -- see its own comment
   });
 
   server.begin();
@@ -1740,6 +1840,10 @@ void loop() {
   checkWebSendPending(); // picks up a send staged by the web UI's /api/send handler --
                           // see that function's own comment for why the handoff, not a
                           // direct call, is required from an AsyncWebServer callback
+
+  if (rebootRequested && millis() - rebootRequestedAt >= REBOOT_DELAY_MS) {
+    ESP.restart();
+  }
 
   if (displayOn && displayTimeoutMs > 0 && millis() - lastDisplayActivity >= displayTimeoutMs) {
     display.ssd1306_command(SSD1306_DISPLAYOFF);
