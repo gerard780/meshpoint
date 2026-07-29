@@ -168,12 +168,17 @@
   Heltec WiFi LoRa32 V3 (HTIT-WB32LA(F), ESP32-S3 + SX1262):
   SPI:  SCK 9, MISO 11, MOSI 10, CS 8
   LoRa: RST 12, BUSY 13, DIO1 14
-  OLED: SDA 17, SCL 18, RST 12 (shares LoRa's RST line, not its own pin)
-  VEXT_PIN GPIO21: external power switch for the OLED + onboard sensors,
-    active LOW = powered on -- NOT a reset pin (this file's first draft
-    got that wrong; caught and fixed before ever being flashed).
+  OLED: SDA 17, SCL 18, RST 21 (its own DEDICATED pin, NOT shared with
+    LORA_RST -- see the `display` object's own comment, Radio section
+    below, for the two real, live-hardware-confirmed pin bugs this file
+    had before checking the ESP32 core's own board file: GPIO21 was
+    wrongly believed to be Vext and held permanently LOW, i.e. the OLED
+    permanently in reset; the real Vext, GPIO36, was never touched)
+  VEXT_PIN GPIO36: external power switch for the OLED + onboard sensors,
+    active LOW = powered on.
   Button: GPIO0 (USER_SW / PRG, per Heltec's own published pin-map)
-  All of the above LIVE-CONFIRMED working on real hardware 2026-07-29.
+  RX+TX LIVE-CONFIRMED working on real hardware 2026-07-29; the OLED pin
+  fixes above have NOT been re-flashed/confirmed yet as of this comment.
 
   Network (once WiFi connects, see secrets.h): pocsag-companion.local
 */
@@ -267,9 +272,8 @@ const uint8_t POCSAG_SYNC_BYTES[4] = { 0x83, 0x2D, 0xEA, 0x27 };
 #define OLED_WIDTH 128
 #define OLED_HEIGHT 64
 
-// The `display` object itself is declared after the "Radio" section below,
-// not here -- on the Heltec build it needs OLED_RST_PIN, which is only
-// defined once the per-board pin block runs.
+// The `display` object itself is declared after the "Radio" section below
+// (see its own comment there for why), not here.
 
 
 // ---------- Radio ----------
@@ -307,11 +311,24 @@ const uint8_t POCSAG_SYNC_BYTES[4] = { 0x83, 0x2D, 0xEA, 0x27 };
                                   // packet mode routes PayloadReady to DIO0
   #define OLED_SDA_PIN 17
   #define OLED_SCL_PIN 18
-  #define OLED_RST_PIN LORA_RST // shares its reset line with the LoRa chip (GPIO12) --
-                                 // NOT its own pin, see setup()'s own comment
-  #define VEXT_PIN 21 // external power switch for the OLED + onboard sensors --
-                       // active LOW = powered on. NOT a reset pin (an earlier
-                       // version of this file wrongly treated it as one).
+  // GROUND TRUTH for these two, from the ESP32 core's own board file
+  // (~/Library/Arduino15/.../variants/heltec_wifi_lora_32_V3/pins_arduino.h,
+  // the exact file arduino-cli already compiles against) and cross-checked
+  // against Meshtastic's heltec_v3 variant.h -- this file had BOTH of
+  // these wrong in earlier drafts (a diagram-based guess claimed GPIO21
+  // was Vext and OLED reset was shared with LORA_RST; neither was true):
+  #define OLED_RST_PIN 21 // OLED's own DEDICATED reset pin (RST_OLED in the
+                           // board file) -- NOT shared with LORA_RST (12) at
+                           // all. LIVE BUG from the previous draft: this pin
+                           // was being driven LOW and left there thinking it
+                           // was a Vext power switch -- holding the OLED in
+                           // permanent hardware reset the entire time, which
+                           // alone fully explains the blank screen.
+  #define VEXT_PIN 36 // the REAL Vext power switch (Vext in the board file) --
+                      // active LOW = powered on. Never touched at all in the
+                      // previous draft (GPIO21 was wrongly used for this
+                      // instead), so the OLED's power rail may not even have
+                      // been enabled on top of the reset bug above.
   #define BUTTON_GPIO 0 // USER_SW / PRG, per Heltec's pin-map
   #define POCSAG_RX_SUPPORTED 1 // LIVE-VERIFIED 2026-07-29 -- real DAPNET traffic
                                  // decoded correctly on first flash, no debugging
@@ -323,11 +340,22 @@ const uint8_t POCSAG_SYNC_BYTES[4] = { 0x83, 0x2D, 0xEA, 0x27 };
   SX1262 radio = new Module(LORA_CS, LORA_DIO1, LORA_RST, LORA_BUSY);
 #endif
 
-// TTGO's OLED has no dedicated reset pin (Adafruit_SSD1306 handles that as
-// -1 = "not controlled by us"); the Heltec's OLED reset is shared with the
-// LoRa chip's own RST line, so Adafruit_SSD1306 needs to know that pin
-// explicitly -- it does its own pulse sequence inside display.begin(),
-// before the radio's own init later in setup() takes the pin back over.
+// TTGO: the OLED has no dedicated reset pin at all, so -1 ("Adafruit_SSD1306
+// doesn't drive a reset pin"). Heltec: OLED_RST_PIN (GPIO21) IS a real,
+// dedicated reset pin, confirmed against the ESP32 core's own board file
+// (RST_OLED) and cross-checked against Meshtastic's heltec_v3 variant.h --
+// completely separate from LORA_RST (GPIO12), not shared with anything, so
+// it's safe to hand to Adafruit_SSD1306 unlike the earlier (wrong) belief
+// that it was shared with the radio. Two real, live-hardware-confirmed bugs
+// existed in earlier drafts of this board's OLED setup, both from acting on
+// incorrect pin information before this ground truth was found:
+//   1. GPIO21 was believed to be the "Vext" power switch and driven LOW then
+//      left there -- but GPIO21 is actually OLED_RST, so this held the OLED
+//      in permanent hardware reset the whole time. Alone sufficient to
+//      explain a permanently blank screen.
+//   2. The REAL Vext (GPIO36) was never touched at all, so the OLED's power
+//      rail may not have even been switched on.
+// See VEXT_PIN's own comment and setup() for the power-on fix.
 #if defined(BOARD_TTGO_LORA32)
   Adafruit_SSD1306 display(OLED_WIDTH, OLED_HEIGHT, &Wire, -1);
 #elif defined(BOARD_HELTEC_WIFI_LORA32_V3)
@@ -406,7 +434,7 @@ void setupWifiNtpOta() {
 
   // UTC, no DST -- decoded-page timestamps (if added later) or Serial logs
   // showing wall-clock time don't need a specific local offset to be useful.
-  configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+  configTime(0, 0, "ntp.time.nl", "pool.ntp.org", "time.nist.gov");
   Serial.print("[ntp] syncing");
   struct tm timeinfo;
   unsigned long ntpStart = millis();
@@ -1184,7 +1212,7 @@ const char INDEX_HTML[] = R"HTMLPAGE(
     <div class="card">
       <h2>Send Page</h2>
       <label for="capcode">Capcode</label>
-      <input type="number" id="capcode" placeholder="2041152">
+      <input type="number" id="capcode" placeholder="123456">
       <label for="text">Message</label>
       <input type="text" id="text" placeholder="Hello from meshpoint" maxlength="80">
       <button id="sendBtn" onclick="sendPage()">Send</button>
@@ -1194,8 +1222,8 @@ const char INDEX_HTML[] = R"HTMLPAGE(
 
     <div class="card">
       <h2>Operator Callsign</h2>
-      <label for="callsign">Prefixed to every outgoing message, e.g. PD2EMC: your text</label>
-      <input type="text" id="callsign" placeholder="PD2EMC" maxlength="8" style="text-transform:uppercase">
+      <label for="callsign">Prefixed to every outgoing message, e.g. N0CALL: your text</label>
+      <input type="text" id="callsign" placeholder="N0CALL" maxlength="8" style="text-transform:uppercase">
       <button onclick="saveCallsign()">Save</button>
       <div class="result" id="callsignResult"></div>
     </div>
@@ -1606,13 +1634,14 @@ void setup() {
 
 #if defined(BOARD_HELTEC_WIFI_LORA32_V3)
   // Heltec V3's OLED (and onboard sensors) sit behind an external power
-  // switch (Vext, GPIO21) that has to be pulled LOW before anything on
-  // that rail will respond -- it's a power gate, not a reset line (an
-  // earlier version of this file wrongly pulsed this pin as if it were
-  // OLED reset, which would have left the display UNPOWERED: LOW-then-HIGH
-  // ends on HIGH, i.e. off). Left LOW for the rest of the session; the
-  // actual OLED reset pulse happens inside display.begin() below, via the
-  // shared LORA_RST pin passed into the Adafruit_SSD1306 constructor above.
+  // switch, Vext (GPIO36, confirmed against the ESP32 core's own board
+  // file -- an earlier draft of this file used GPIO21 here, which is
+  // actually the OLED's own dedicated RESET pin, not Vext; see
+  // OLED_RST_PIN/VEXT_PIN's own comments in the Radio section for the
+  // full story). Pulled LOW before anything on that rail will respond,
+  // left LOW for the rest of the session. The actual OLED reset pulse
+  // happens separately, inside display.begin() below, via OLED_RST_PIN
+  // (GPIO21) passed into the Adafruit_SSD1306 constructor.
   pinMode(VEXT_PIN, OUTPUT);
   digitalWrite(VEXT_PIN, LOW); // power ON
   delay(100); // let the display's power rail stabilize before I2C traffic
