@@ -12,6 +12,7 @@ class Protocol(str, Enum):
     MESHTASTIC = "meshtastic"
     MESHCORE = "meshcore"
     LORAWAN = "lorawan"
+    DAPNET = "dapnet"
     UNKNOWN = "unknown"
 
 
@@ -35,6 +36,10 @@ class PacketType(str, Enum):
     LORAWAN_DATA = "lorawan_data"
     LORAWAN_REJOIN = "lorawan_rejoin"
     NEIGHBOUR_ADVERT = "neighbour_advert"
+    DAPNET_ALPHA = "dapnet_alpha"
+    DAPNET_NUMERIC = "dapnet_numeric"
+    DAPNET_TONE = "dapnet_tone"
+    DAPNET_ACTIVATION = "dapnet_activation"
     UNKNOWN = "unknown"
 
 

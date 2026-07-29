@@ -42,6 +42,7 @@ class SidebarController {
         this._wireEvents();
         this._wireRouterSubscription();
         this._applyIdentity();
+        this._applySourceGating();
         this._refreshCollapseAffordance();
         requestAnimationFrame(() => {
             requestAnimationFrame(() => this._refreshAccentBar());
@@ -359,6 +360,30 @@ class SidebarController {
             const visible = needs.some((need) => allowed.has(need));
             el.style.display = visible ? '' : 'none';
         });
+    }
+
+    /** Hides a nav item entirely when the capture source it depends on
+     * isn't enabled in `capture.sources` -- e.g. the DAPNET link has no
+     * reason to appear until "Include POCSAG capture source" is turned
+     * on in Configuration -> POCSAG. Independent of _applyIdentity's
+     * role-based gating: this is about capture-source state, not who's
+     * logged in. Best-effort -- a failed fetch leaves source-gated
+     * links at their default (visible) markup state rather than
+     * incorrectly hiding them. */
+    async _applySourceGating() {
+        try {
+            const res = await fetch('/api/config', { credentials: 'same-origin' });
+            if (!res.ok) return;
+            const cfg = await res.json();
+            const sources = new Set((cfg.capture && cfg.capture.sources) || []);
+            document.querySelectorAll('[data-requires-source]').forEach((el) => {
+                const needs = el.dataset.requiresSource.split(/\s+/).filter(Boolean);
+                const visible = needs.some((need) => sources.has(need));
+                el.style.display = visible ? '' : 'none';
+            });
+        } catch (_) {
+            // best-effort, see method doc above
+        }
     }
 }
 

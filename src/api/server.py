@@ -52,6 +52,7 @@ from src.api.routes import (
     pager_routes,
     rtl433_routes,
     lorawan_routes,
+    dapnet_routes,
     meshtastic_routes,
     meshcore_routes,
     messages,
@@ -464,6 +465,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.include_router(config_routes.router, dependencies=protected)
     app.include_router(stats_routes.router)
     app.include_router(lorawan_routes.router, dependencies=protected)
+    app.include_router(dapnet_routes.router, dependencies=protected)
     app.include_router(listener_routes.router, dependencies=protected)
     app.include_router(pager_routes.p2000_router, dependencies=protected)
     app.include_router(pager_routes.pagers_router, dependencies=protected)
@@ -537,6 +539,8 @@ def _build_pipeline(config: AppConfig) -> PipelineCoordinator:
             _add_concentrator_source(coordinator, config)
         elif source_name == "meshcore_usb":
             _add_meshcore_usb_source(coordinator, config)
+        elif source_name == "pocsag_serial":
+            _add_dapnet_source(coordinator, config)
 
     if (
         "meshcore_usb" not in config.capture.sources
@@ -566,6 +570,18 @@ def _add_serial_source(coordinator: PipelineCoordinator, config: AppConfig):
             SerialCaptureSource(
                 port=dev.serial_port, baud=dev.serial_baud, label=dev.label,
                 long_name=dev.long_name, short_name=dev.short_name,
+            )
+        )
+
+
+def _add_dapnet_source(coordinator: PipelineCoordinator, config: AppConfig):
+    """Add one DapnetSerialSource per configured POCSAG companion."""
+    from src.capture.dapnet_source import DapnetSerialSource
+
+    for dev in config.capture.pocsag_serial:
+        coordinator.capture_coordinator.add_source(
+            DapnetSerialSource(
+                serial_port=dev.serial_port, serial_baud=dev.serial_baud, label=dev.label,
             )
         )
 
@@ -1728,6 +1744,7 @@ def _init_routes(
     serial_config_routes.init_routes(config=config, serial_sources=_find_serial_sources(coord))
     _dev_name = config.device.device_name or "meshpoint"
     lorawan_routes.init_routes(coord.packet_repo, device_name=_dev_name)
+    dapnet_routes.init_routes(coord.packet_repo, device_name=_dev_name)
     meshtastic_routes.init_routes(
         coord.packet_repo, coord.node_repo, device_name=_dev_name,
     )

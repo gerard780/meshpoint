@@ -601,6 +601,29 @@ class UpdateCheckConfig:
 
 
 @dataclass
+class DapnetConfig:
+    """DAPNET/POCSAG companion capture (extra/pocsag_companion) settings.
+
+    Not a connection setting (that's ``capture.pocsag_serial``) -- this
+    is what happens to a decoded page once received. Two independent
+    tiers, both user-editable from Configuration -> POCSAG:
+
+    - ``blacklist_capcodes``: DAPNET's own network housekeeping/time-
+      sync beacons (real capcodes, confirmed) repeat every couple of
+      minutes -- worth seeing live (confirms the decoder/network are
+      still alive) but not worth persisting. Shown on the live DAPNET
+      page but never written to the packets table.
+    - ``ignore_capcodes``: pure noise the user never wants to see at
+      all -- neither persisted nor shown live.
+    """
+
+    blacklist_capcodes: list[int] = field(
+        default_factory=lambda: [200, 208, 216, 224]
+    )
+    ignore_capcodes: list[int] = field(default_factory=lambda: [4512, 4520])
+
+
+@dataclass
 class AppConfig:
     radio: RadioConfig = field(default_factory=RadioConfig)
     meshtastic: MeshtasticConfig = field(default_factory=MeshtasticConfig)
@@ -621,6 +644,7 @@ class AppConfig:
     button: ButtonConfig = field(default_factory=ButtonConfig)
     repeater_poll: RepeaterPollConfig = field(default_factory=RepeaterPollConfig)
     update_check: UpdateCheckConfig = field(default_factory=UpdateCheckConfig)
+    dapnet: DapnetConfig = field(default_factory=DapnetConfig)
 
 
 def _resolve_radio_frequency(radio: "RadioConfig") -> None:
@@ -733,6 +757,7 @@ def _apply_yaml(cfg: AppConfig, path: Path) -> None:
         "button": cfg.button,
         "repeater_poll": cfg.repeater_poll,
         "update_check": cfg.update_check,
+        "dapnet": cfg.dapnet,
     }
 
     unknown_keys: list[str] = []

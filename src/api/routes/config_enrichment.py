@@ -86,6 +86,10 @@ def enrich_config_payload(cfg: AppConfig, base: dict) -> dict:
         "min_relay_rssi": relay.min_relay_rssi,
         "max_relay_rssi": relay.max_relay_rssi,
     }
+    base["dapnet"] = {
+        "blacklist_capcodes": list(cfg.dapnet.blacklist_capcodes or []),
+        "ignore_capcodes": list(cfg.dapnet.ignore_capcodes or []),
+    }
     base["radio_advanced"] = {
         "spectral_scan_interval_seconds": radio.spectral_scan_interval_seconds,
         "sx1261_spi_path": radio.sx1261_spi_path or "",

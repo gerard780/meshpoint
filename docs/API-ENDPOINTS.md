@@ -75,6 +75,8 @@ session gets `401 Unauthorized`. See `src/api/auth/dependencies.py` for the
 | GET | `/api/config/serial/firmware-check` | Viewer | Compare a Meshtastic USB stick's firmware against the latest `meshtastic/firmware` release (cached 5 min) |
 | PUT | `/api/config/serial/identity` | Admin | Rename one Meshtastic USB stick's long/short name (label-scoped) |
 | POST | `/api/config/serial/advert` | Admin | Send a NodeInfo broadcast from one specific Meshtastic USB stick (label-scoped) |
+| PUT | `/api/config/capture/pocsag-serial-devices` | Admin | Replace full POCSAG companion (DAPNET) USB device list (max 4) |
+| PUT | `/api/config/dapnet` | Admin | Replace DAPNET blacklist/ignore capcode lists (applies immediately, no restart) |
 | PUT | `/api/config/nodeinfo` | Admin | Update NodeInfo broadcast interval |
 | POST | `/api/config/nodeinfo/send` | Admin | Send a NodeInfo broadcast now |
 | PUT | `/api/config/position` | Admin | Set position broadcast interval |
@@ -117,7 +119,7 @@ session gets `401 Unauthorized`. See `src/api/auth/dependencies.py` for the
 | GET | `/api/stats/summary` | Viewer | Dashboard stats-bar summary |
 | GET | `/api/topology/graph` | Viewer | Mesh topology graph: nodes + edges from traceroutes, direct receptions, and neighbour imports |
 
-## Per-protocol data (LoRaWAN / Meshtastic / MeshCore)
+## Per-protocol data (LoRaWAN / DAPNET / Meshtastic / MeshCore)
 
 | Method | Path | Role | Description |
 |---|---|---|---|
@@ -126,6 +128,11 @@ session gets `401 Unauthorized`. See `src/api/auth/dependencies.py` for the
 | GET | `/api/lorawan/stats` | Viewer | LoRaWAN totals: packets, unique devices, by frame type |
 | GET | `/api/lorawan/export/packets.csv` | Viewer | Download all LoRaWAN packets as CSV |
 | GET | `/api/lorawan/export/devices.csv` | Viewer | Download the LoRaWAN device census as CSV |
+| GET | `/api/dapnet/capcodes` | Viewer | DAPNET capcode roster (frame count, last text, first/last seen) |
+| GET | `/api/dapnet/packets` | Viewer | Recent DAPNET page log (max 1000) |
+| GET | `/api/dapnet/stats` | Viewer | DAPNET totals: pages, unique capcodes, by page type |
+| GET | `/api/dapnet/export/packets.csv` | Viewer | Download all DAPNET pages as CSV |
+| GET | `/api/dapnet/export/capcodes.csv` | Viewer | Download the DAPNET capcode roster as CSV |
 | GET | `/api/meshtastic/nodes` | Viewer | Meshtastic node list |
 | GET | `/api/meshtastic/packets` | Viewer | Recent Meshtastic packet log |
 | GET | `/api/meshtastic/stats` | Viewer | Meshtastic totals |

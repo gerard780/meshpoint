@@ -232,19 +232,19 @@ available without unplugging the stick into a laptop.
   immediately on the currently connected stick; only the
   swap-a-different-stick-in-later case needs a restart.
 
-### POCSAG Companion (config page only, not yet a capture source)
+### POCSAG Companion / DAPNET (Networks tab)
 
 `Configuration → POCSAG` edits the USB connection list for
 `extra/pocsag_companion` boards (TTGO LoRa32, Heltec V3) — same
 shape as `capture.serial` above, minus any identity/advert fields:
 this board isn't a mesh node, so it has nothing to rename. Callsign,
-screen timeout, and every other protocol-level setting stay on the
+screen timeout, and every other on-device setting stay on the
 board's own WiFi web dashboard (`pocsag-companion.local`), not here.
 
 ```yaml
 capture:
-  # sources:
-  #   - pocsag_serial          # not yet consumed by a capture source
+  sources:
+    - pocsag_serial
   pocsag_serial:
     - serial_port: "/dev/ttyUSB2"
       serial_baud: 115200
@@ -252,12 +252,40 @@ capture:
       name: "Attic POCSAG"
 ```
 
-**This is config-only for now** — `capture.pocsag_serial` persists
-via `PUT /api/config/capture/pocsag-serial-devices`, and the shared
-port-picker (`GET /api/config/serial-ports`) now also flags a port
-already pinned by a POCSAG entry, same as it does for Serial/MeshCore.
-No `PocsagSerialCaptureSource` exists yet, so adding `pocsag_serial`
-to `sources` has no effect until that capture source is built.
+`capture.pocsag_serial` persists via `PUT
+/api/config/capture/pocsag-serial-devices`, and the shared port-picker
+(`GET /api/config/serial-ports`) flags a port already pinned by a
+POCSAG entry, same as it does for Serial/MeshCore. Adding
+`pocsag_serial` to `sources` spins up one `DapnetSerialSource` per
+configured device (`src/capture/dapnet_source.py`), reading
+newline-delimited JSON pages off the board's serial connection —
+decoded traffic shows up on the **Networks → DAPNET** dashboard page
+(named for the real DAPNET paging network the companion talks to, not
+the generic POCSAG modulation — see `frontend/js/dapnet_panel.js`).
+The Networks sidebar link only appears once `pocsag_serial` is in
+`capture.sources` (a new `data-requires-source` sidebar-hiding
+mechanism, independent of the existing role-based
+`data-requires-section` gating).
+
+**DAPNET capcode filters** (`Configuration → POCSAG`'s second card,
+`dapnet:` config section) — two independent, immediately-applied
+tiers (no restart needed) for decoded pages, keyed on capcode:
+
+```yaml
+dapnet:
+  blacklist_capcodes: [200, 208, 216, 224]   # shown live, never stored
+  ignore_capcodes: [4512, 4520]              # neither shown nor stored
+```
+
+- `blacklist_capcodes` (defaults to DAPNET's own confirmed real
+  network housekeeping/time-sync beacon capcodes) still broadcast to
+  the live DAPNET page over the dashboard WebSocket — useful to
+  confirm the decoder/network are still alive — but are never written
+  to the `packets` table, and never touch relay/MQTT/stats.
+- `ignore_capcodes` are dropped entirely: not shown, not stored, not
+  counted anywhere. Pure noise.
+- Anything not on either list is treated like every other protocol:
+  stored, broadcast live, and included in `/api/dapnet/stats`.
 
 ```yaml
 capture:

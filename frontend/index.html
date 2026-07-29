@@ -176,6 +176,18 @@
                             <span class="sidebar__label">Topology</span>
                         </a>
                     </li>
+                    <li class="sidebar__item" data-requires-source="pocsag_serial">
+                        <a href="#/dapnet" class="sidebar__link" data-route="dapnet">
+                            <span class="sidebar__icon">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <rect x="4" y="8" width="16" height="12" rx="2"/>
+                                    <path d="M8 8V6a4 4 0 0 1 8 0v2"/>
+                                    <circle cx="12" cy="14" r="1.5"/>
+                                </svg>
+                            </span>
+                            <span class="sidebar__label">DAPNET</span>
+                        </a>
+                    </li>
                     <li class="sidebar__group-header" aria-hidden="true">
                         <span class="sidebar__group-header-label">Radio</span>
                     </li>
@@ -574,6 +586,10 @@
 
             <section class="section" data-section="lorawan" style="display:none">
                 <div id="lorawan-panel"></div>
+            </section>
+
+            <section class="section" data-section="dapnet" style="display:none">
+                <div id="dapnet-panel"></div>
             </section>
 
             <section class="section" data-section="listener" style="display:none">
@@ -1045,6 +1061,7 @@
     <script src="js/message_notifier.js"></script>
     <script src="js/theme_controller.js"></script>
     <script src="js/lorawan_panel.js"></script>
+    <script src="js/dapnet_panel.js"></script>
     <script src="js/pager_panel.js"></script>
     <script src="js/adsb_panel.js"></script>
     <script src="js/adsb_map_modal.js"></script>

@@ -41,7 +41,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const router = new Router({
         defaultRoute: 'dashboard',
         allowedRoutes: [
-            'dashboard', 'meshtastic', 'meshcore', 'lorawan', 'listener', 'stats', 'rf', 'repeaters', 'topology', 'messages', 'radio', 'terminal',
+            'dashboard', 'meshtastic', 'meshcore', 'lorawan', 'dapnet', 'listener', 'stats', 'rf', 'repeaters', 'topology', 'messages', 'radio', 'terminal',
             'configuration/identity', 'configuration/radio',
             'configuration/channels', 'configuration/transmit',
             'configuration/mqtt',
@@ -149,6 +149,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     _bootConfigurationPanel(router);
     _bootDangerousPanel(router);
     _bootLoRaWANPanel(router);
+    _bootDapnetPanel(router);
     _bootListenerPanel(router);
     _bootRepeatersPanel(router);
     _bootTopologyPanel(router);
@@ -303,6 +304,15 @@ function _bootLoRaWANPanel(router) {
     const panel = new window.LoRaWANPanel();
     router.onRouteChange((route) => {
         if (route === 'lorawan') panel.show();
+        else panel.hide();
+    });
+}
+
+function _bootDapnetPanel(router) {
+    if (!window.DapnetPanel) return;
+    const panel = new window.DapnetPanel();
+    router.onRouteChange((route) => {
+        if (route === 'dapnet') panel.show();
         else panel.hide();
     });
 }

@@ -279,6 +279,8 @@ class PipelineCoordinator:
     async def _process_capture(self, raw: RawCapture) -> None:
         if raw.capture_source.startswith("meshcore_usb"):
             packet = self._adapt_meshcore_usb(raw)
+        elif raw.capture_source.startswith("dapnet"):
+            packet = self._adapt_dapnet(raw)
         else:
             packet = self._router.decode(
                 raw.payload,
@@ -291,6 +293,19 @@ class PipelineCoordinator:
             return
 
         packet.capture_source = raw.capture_source
+
+        if packet.protocol == Protocol.DAPNET:
+            tier = self._dapnet_capcode_tier(packet)
+            if tier == "ignore":
+                # Pure noise: neither persisted nor shown live.
+                return
+            if tier == "blacklist":
+                # Worth seeing live (confirms the decoder/network are
+                # still alive) but not worth persisting or acting on --
+                # notify only, skip storage/relay/mqtt/stats entirely.
+                self._notify_callbacks(packet)
+                return
+
         await self._store_packet(packet)
         self._notify_callbacks(packet)
         await self._relay.process_packet(packet)
@@ -301,6 +316,24 @@ class PipelineCoordinator:
     def _adapt_meshcore_usb(raw: RawCapture) -> Optional[Packet]:
         from src.decode.meshcore_event_adapter import adapt_event
         return adapt_event(raw.payload, signal=raw.signal)
+
+    @staticmethod
+    def _adapt_dapnet(raw: RawCapture) -> Optional[Packet]:
+        from src.decode.dapnet_event_adapter import adapt_event
+        return adapt_event(raw.payload, signal=raw.signal)
+
+    def _dapnet_capcode_tier(self, packet: Packet) -> Optional[str]:
+        """Classify a decoded DAPNET page against the two configured
+        capcode tiers (see ``DapnetConfig``): ``"ignore"`` (never shown,
+        never stored), ``"blacklist"`` (shown live, never stored), or
+        ``None`` (normal handling)."""
+        capcode = (packet.decoded_payload or {}).get("capcode")
+        cfg = self._config.dapnet
+        if capcode in set(cfg.ignore_capcodes or []):
+            return "ignore"
+        if capcode in set(cfg.blacklist_capcodes or []):
+            return "blacklist"
+        return None
 
     async def _store_packet(self, packet: Packet) -> None:
         try:
@@ -315,6 +348,12 @@ class PipelineCoordinator:
             # LoRaWAN devices have no Meshtastic node profile; just bump the counter.
             if packet.source_id:
                 await self._node_repo.increment_packet_count(packet.source_id)
+            return
+        if packet.protocol == Protocol.DAPNET:
+            # DAPNET capcodes have no Meshtastic node profile and no nodes
+            # table row to bump -- the capcode roster aggregates straight
+            # from the packets table (GROUP BY capcode), same as LoRaWAN's
+            # device list.
             return
         decoder = (
             self._router.meshtastic_decoder

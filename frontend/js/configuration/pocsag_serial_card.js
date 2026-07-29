@@ -1,15 +1,22 @@
 /**
- * Configuration → POCSAG card.
+ * Configuration → POCSAG page: two cards.
  *
- * Edits the list of POCSAG companion boards (extra/pocsag_companion,
- * an ESP32 + SX1276/SX1262 sketch talking JSON over USB serial).
- * Deliberately minimal compared to SerialConfigCard/MeshcoreConfigCard:
- * no identity sub-block, no "send advert", no live readouts -- the
- * board has no mesh identity to rename and no protocol-level settings
- * configured from here (callsign, screen timeout, etc. live on the
- * device's own WiFi web dashboard at pocsag-companion.local). This
- * card only owns connection info: which USB port, what baud, and a
- * free-text display name/label pair.
+ * "POCSAG companions" edits the list of companion boards
+ * (extra/pocsag_companion, an ESP32 + SX1276/SX1262 sketch talking JSON
+ * over USB serial). Deliberately minimal compared to
+ * SerialConfigCard/MeshcoreConfigCard: no identity sub-block, no "send
+ * advert", no live readouts -- the board has no mesh identity to
+ * rename, and its own protocol settings (callsign, screen timeout,
+ * etc.) live on the device's own WiFi web dashboard at
+ * pocsag-companion.local, not here. This card only owns connection
+ * info: which USB port, what baud, and a free-text display name/label.
+ *
+ * "DAPNET capcode filters" is unrelated to the connection above -- it
+ * edits DapnetConfig's two dashboard-side capcode tiers (see
+ * coordinator.py's _dapnet_capcode_tier): blacklist (shown live on the
+ * DAPNET page, never written to the packets table) and ignore (neither
+ * shown nor stored). Both apply to already-decoded pages, regardless
+ * of which companion board or serial port they came from.
  */
 
 class PocsagSerialConfigCard {
@@ -55,6 +62,44 @@ class PocsagSerialConfigCard {
                     </div>
                     <p class="cfg-status" data-pocsag-serial-status aria-live="polite"></p>
                 </article>
+
+                <article class="cfg-card">
+                    <header class="cfg-card__head">
+                        <h3 class="cfg-card__title">DAPNET capcode filters</h3>
+                        <p class="cfg-card__hint">
+                            Two independent lists, both take effect immediately (no restart
+                            needed). Both are capcode filters on the decoded DAPNET/POCSAG page
+                            feed, not the serial connection above.
+                        </p>
+                    </header>
+                    <label class="cfg-field">
+                        <span class="cfg-field__label">Blacklist -- shown live, never stored (comma-separated)</span>
+                        <input class="cfg-field__input" type="text"
+                               placeholder="e.g. 200, 208, 216, 224"
+                               data-dapnet-blacklist>
+                        <span class="cfg-field__hint">
+                            DAPNET's own network housekeeping/time-sync beacons repeat every
+                            couple of minutes on a handful of fixed, well-known capcodes -- worth
+                            confirming they're still ticking, not worth persisting.
+                        </span>
+                    </label>
+                    <label class="cfg-field">
+                        <span class="cfg-field__label">Ignore -- never shown, never stored (comma-separated)</span>
+                        <input class="cfg-field__input" type="text"
+                               placeholder="e.g. 4512, 4520"
+                               data-dapnet-ignore>
+                        <span class="cfg-field__hint">
+                            Pure noise you never want to see at all.
+                        </span>
+                    </label>
+                    <div class="cfg-card__actions">
+                        <button class="terminal-button terminal-button--primary"
+                                type="button" data-dapnet-save>
+                            Save capcode filters
+                        </button>
+                    </div>
+                    <p class="cfg-status" data-dapnet-status aria-live="polite"></p>
+                </article>
             </div>
         `;
         this._devicesEl = this._root.querySelector('[data-pocsag-serial-devices]');
@@ -65,6 +110,8 @@ class PocsagSerialConfigCard {
             .addEventListener('click', () => this._saveDevices());
         this._root.querySelector('[data-pocsag-serial-rescan-usb]')
             .addEventListener('click', (e) => this._rescanUsb(e.currentTarget));
+        this._root.querySelector('[data-dapnet-save]')
+            .addEventListener('click', () => this._saveDapnetBlacklist());
     }
 
     async _rescanUsb(button) {
@@ -96,6 +143,51 @@ class PocsagSerialConfigCard {
             : [{ label: '', serial_port: '', serial_baud: 115200, name: '' }];
         list.forEach((d) => this._addDeviceRow(d));
         this._syncAddBtn();
+
+        const dapnet = config.dapnet || {};
+        const blacklistEl = this._root.querySelector('[data-dapnet-blacklist]');
+        if (blacklistEl) {
+            blacklistEl.value = (Array.isArray(dapnet.blacklist_capcodes) ? dapnet.blacklist_capcodes : []).join(', ');
+        }
+        const ignoreEl = this._root.querySelector('[data-dapnet-ignore]');
+        if (ignoreEl) {
+            ignoreEl.value = (Array.isArray(dapnet.ignore_capcodes) ? dapnet.ignore_capcodes : []).join(', ');
+        }
+    }
+
+    /** Parses "200, 208, 216" into [200, 208, 216], dropping anything
+     * that isn't a plain integer -- silently, since a typo here should
+     * just not-match a capcode rather than block the whole save. */
+    _parseCapcodeList(value) {
+        return (value || '')
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean)
+            .map((s) => parseInt(s, 10))
+            .filter((n) => Number.isInteger(n));
+    }
+
+    async _saveDapnetBlacklist() {
+        const status = this._root.querySelector('[data-dapnet-status]');
+        status.dataset.kind = 'pending';
+        status.textContent = 'Saving…';
+
+        const blacklistEl = this._root.querySelector('[data-dapnet-blacklist]');
+        const ignoreEl = this._root.querySelector('[data-dapnet-ignore]');
+
+        const result = await this._api.put('/api/config/dapnet', {
+            blacklist_capcodes: this._parseCapcodeList(blacklistEl?.value),
+            ignore_capcodes: this._parseCapcodeList(ignoreEl?.value),
+        });
+
+        if (result) {
+            status.dataset.kind = 'success';
+            status.textContent = 'Saved.';
+            await this._api.refresh();
+        } else {
+            status.dataset.kind = 'error';
+            status.textContent = 'Save failed.';
+        }
     }
 
     /** Maps every currently-configured serial_port value across ALL THREE

@@ -94,6 +94,11 @@ class RadioAdvancedUpdate(BaseModel):
     sx1261_spi_path: Optional[str] = None
 
 
+class DapnetUpdate(BaseModel):
+    blacklist_capcodes: list[int] = Field(..., max_length=200)
+    ignore_capcodes: list[int] = Field(..., max_length=200)
+
+
 @router.get("/serial-ports")
 async def get_serial_ports(_claims: SessionClaims = Depends(require_auth)) -> dict:
     """Enumerate connected USB-serial devices for the dashboard's port
@@ -516,6 +521,42 @@ async def update_radio_advanced(
             raise HTTPException(403, str(exc)) from exc
 
     return {"saved": True, "restart_required": restart_needed, "updates": updates}
+
+
+@router.put("/dapnet")
+async def update_dapnet(
+    req: DapnetUpdate,
+    _claims: SessionClaims = Depends(require_admin),
+    audit: AuditLogWriter = Depends(get_audit_writer),
+):
+    """Replace the DAPNET blacklist/ignore capcode lists.
+
+    Takes effect immediately -- the coordinator reads
+    ``config.dapnet`` fresh on every packet, no capture-source restart
+    needed (unlike the USB device list PUTs above, which reconfigure
+    an already-running connection). ``blacklist_capcodes`` are shown
+    live but never stored; ``ignore_capcodes`` are neither shown nor
+    stored.
+    """
+    if _config is None:
+        raise HTTPException(503, "Config not loaded")
+
+    _config.dapnet.blacklist_capcodes = req.blacklist_capcodes
+    _config.dapnet.ignore_capcodes = req.ignore_capcodes
+
+    updates = {
+        "blacklist_capcodes": req.blacklist_capcodes,
+        "ignore_capcodes": req.ignore_capcodes,
+    }
+    with audit.timed_action(
+        user=_claims.subject, action="config.dapnet_update", params=updates,
+    ):
+        try:
+            save_section_to_yaml("dapnet", updates)
+        except PermissionError as exc:
+            raise HTTPException(403, str(exc)) from exc
+
+    return {"saved": True, "restart_required": False}
 
 
 def _meshcore_usb_dict(mc_usb) -> dict:
