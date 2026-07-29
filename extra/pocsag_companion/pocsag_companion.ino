@@ -1246,7 +1246,7 @@ const char INDEX_HTML[] = R"HTMLPAGE(
 
     <div class="card">
       <h2>Operator Callsign</h2>
-      <label for="callsign">Prefixed to every outgoing message, e.g. N0CALL: your text</label>
+      <label for="callsign">Prefixed to every outgoing message, e.g. <span id="callsignExample">N0CALL</span>: your text</label>
       <input type="text" id="callsign" placeholder="N0CALL" maxlength="8" style="text-transform:uppercase">
       <button onclick="saveCallsign()">Save</button>
       <div class="result" id="callsignResult"></div>
@@ -1352,6 +1352,7 @@ async function pollStatus() {
     document.getElementById('txCount').textContent = s.txCount;
     if (!timeoutTouched) document.getElementById('timeout').value = Math.round(s.displayTimeoutMs / 1000);
     if (!callsignTouched) document.getElementById('callsign').value = s.callsign || '';
+    document.getElementById('callsignExample').textContent = s.callsign || 'N0CALL';
     // Server-side (sendPocsagAlpha()) is the real guard -- this is just UX,
     // so the button doesn't invite a doomed send.
     document.getElementById('sendBtn').disabled = !s.callsign;
