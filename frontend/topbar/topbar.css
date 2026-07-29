@@ -418,6 +418,35 @@
     opacity: 0.55;
 }
 
+/* --- DAPNET companion chip(s) (blue) --------------------------------
+ * Same structure/layout as .topbar-serial above (Meshtastic USB, cyan)
+ * -- .topbar-dapnet is added alongside it on the root element and
+ * only overrides the color-bearing properties, so offline/reconnecting
+ * state styling (red/amber borders) still applies unchanged. Blue
+ * chosen deliberately distinct from Meshtastic's cyan, MeshCore's
+ * purple, and the reconnecting/offline status colors (amber/red). */
+.topbar-dapnet {
+    border-color: rgba(59, 130, 246, 0.45);
+    background: rgba(59, 130, 246, 0.08);
+    box-shadow:
+        0 0 14px rgba(59, 130, 246, 0.22),
+        inset 0 0 18px rgba(59, 130, 246, 0.05);
+}
+
+.topbar-dapnet .topbar-serial__brand {
+    color: var(--accent-blue);
+    text-shadow: 0 0 8px rgba(59, 130, 246, 0.4);
+    border-right-color: rgba(59, 130, 246, 0.28);
+}
+
+.topbar-dapnet .topbar-serial__preset {
+    border-left-color: rgba(59, 130, 246, 0.22);
+}
+
+.topbar-dapnet .topbar-serial__freq {
+    color: var(--accent-blue);
+}
+
 /* --- Action group ----------------------------------------------- */
 
 .topbar-actions {

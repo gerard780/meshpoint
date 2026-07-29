@@ -41,7 +41,7 @@ class TopbarDapnetChip {
         const callText = !reachable ? 'Reconnecting…' : (callsign || '----');
 
         const root = document.createElement('span');
-        root.className = 'topbar-serial';
+        root.className = 'topbar-serial topbar-dapnet';
         root.setAttribute(
             'aria-label',
             `DAPNET ${callsign || 'companion'} `
