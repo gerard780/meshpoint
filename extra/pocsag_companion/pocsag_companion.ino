@@ -927,9 +927,9 @@ bool lastTxOk = false;
 // in the file funnels through here.
 void sendPocsagAlpha(uint32_t capcode, const String &text) {
   String cs = getCallsign();
-  if (cs.length() == 0) {
+  if (!isValidCallsign(cs)) {
     Serial.println("========================================");
-    Serial.println("[serial] SEND BLOCKED -- no callsign configured (set one in the web dashboard's Callsign card first)");
+    Serial.println("[serial] SEND BLOCKED -- no valid callsign configured (set one in the web dashboard's Callsign card first)");
     Serial.println("========================================");
     pushWebLog(capcode, RADIOLIB_PAGER_FUNC_BITS_ALPHA, "alpha", text, "blocked");
     return;
@@ -1083,6 +1083,30 @@ void setCallsign(const String &newCallsign) {
   xSemaphoreTake(stateMutex, portMAX_DELAY);
   callsign = newCallsign;
   xSemaphoreGive(stateMutex);
+}
+
+// Rejects two things that would otherwise pass the "non-empty" check but
+// aren't a real callsign: "N0CALL" (the well-known ham-radio placeholder/
+// example callsign -- if someone saves it, TX should stay blocked exactly
+// as if nothing were configured, not silently start transmitting under a
+// fake identity) and anything with no digit in it at all -- every real
+// amateur callsign format worldwide includes at least one digit (that part
+// IS universal, unlike full format validation, which varies too much by
+// country to check reliably -- see CALLSIGN_MAX_LEN's own comment). Used
+// both to gate /api/callsign's save (reject bad values outright, rather
+// than accepting a "Saved" that then silently blocks every future send)
+// and as an extra defense-in-depth check in sendPocsagAlpha()/`/api/send`
+// itself, in case `callsign` is ever populated by anything other than a
+// validated save (e.g. NVS state written by a future firmware version
+// without this check).
+bool isValidCallsign(const String &cs) {
+  if (cs.length() == 0) return false;
+  if (cs.equalsIgnoreCase("N0CALL")) return false;
+  bool hasDigit = false;
+  for (size_t i = 0; i < cs.length(); i++) {
+    if (isDigit(cs[i])) { hasDigit = true; break; }
+  }
+  return hasDigit;
 }
 
 // Called every loop() pass. Cheap when nothing's pending (one bool check).
@@ -1366,6 +1390,10 @@ async function saveCallsign() {
   const cs = input.value.trim().toUpperCase();
   const result = document.getElementById('callsignResult');
   if (!cs) { result.className = 'result err'; result.textContent = 'Callsign is required'; return; }
+  if (cs === 'N0CALL') { result.className = 'result err'; result.textContent = 'N0CALL is a placeholder, not a real callsign'; return; }
+  if (!/\d/.test(cs)) { result.className = 'result err'; result.textContent = 'Must include a digit -- every real callsign format does'; return; }
+  // Server (/api/callsign) re-validates the same rules -- this is just
+  // instant feedback without a round trip, not the real enforcement.
   try {
     const r = await apiPost('/api/callsign', { callsign: cs });
     result.className = r.ok ? 'result ok' : 'result err';
@@ -1463,15 +1491,18 @@ void setupWebServer() {
       request->send(400, "application/json", "{\"ok\":false,\"error\":\"capcode out of range\"}");
       return;
     }
-    if (getCallsign().length() == 0) {
+    if (!isValidCallsign(getCallsign())) {
       // Fast, synchronous feedback for the web UI -- sendPocsagAlpha()
       // (via checkWebSendPending()) would refuse this too and log it the
       // same way, but that only happens after a round trip through
       // loop(); this gives an immediate error instead of a 202 that
-      // silently goes nowhere.
-      Serial.println("[web] SEND BLOCKED -- no callsign configured");
+      // silently goes nowhere. In practice this should be unreachable
+      // once /api/callsign's own validation is in place (a bad value can
+      // no longer be saved), but it's cheap defense-in-depth to keep --
+      // see isValidCallsign()'s own comment for why.
+      Serial.println("[web] SEND BLOCKED -- no valid callsign configured");
       pushWebLog(capcode, RADIOLIB_PAGER_FUNC_BITS_ALPHA, "alpha", text, "blocked");
-      request->send(400, "application/json", "{\"ok\":false,\"error\":\"no callsign configured -- set one in the Callsign card first\"}");
+      request->send(400, "application/json", "{\"ok\":false,\"error\":\"no valid callsign configured -- set one in the Callsign card first\"}");
       return;
     }
     if (!queueWebSend(capcode, text)) {
@@ -1520,6 +1551,14 @@ void setupWebServer() {
     }
     if (cs.length() > CALLSIGN_MAX_LEN) {
       request->send(400, "application/json", "{\"ok\":false,\"error\":\"callsign too long (max " + String(CALLSIGN_MAX_LEN) + ")\"}");
+      return;
+    }
+    if (cs.equalsIgnoreCase("N0CALL")) {
+      request->send(400, "application/json", "{\"ok\":false,\"error\":\"N0CALL is a placeholder, not a real callsign\"}");
+      return;
+    }
+    if (!isValidCallsign(cs)) {
+      request->send(400, "application/json", "{\"ok\":false,\"error\":\"not a valid callsign -- must include a digit (every real amateur callsign format does)\"}");
       return;
     }
     setCallsign(cs);
