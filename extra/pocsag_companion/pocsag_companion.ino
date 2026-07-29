@@ -194,6 +194,15 @@
   #error "Uncomment exactly ONE board in the BOARD SELECT block above"
 #endif
 
+// Short board identifier, reused by the boot banner and the serial
+// {"cmd":"status"} reply -- one place to keep in sync if a third board
+// is ever added.
+#if defined(BOARD_TTGO_LORA32)
+  #define BOARD_NAME_STR "ttgo"
+#elif defined(BOARD_HELTEC_WIFI_LORA32_V3)
+  #define BOARD_NAME_STR "heltec"
+#endif
+
 #include <Arduino.h>
 #include <SPI.h>
 #include <Wire.h>
@@ -896,12 +905,32 @@ void checkSerialInput() {
   }
 }
 
+// One-shot status reply for a Meshpoint-side capture source to query
+// once at connect (not a periodic broadcast -- this shares the same
+// serial line as real page JSON, so keeping it request/response-only
+// avoids adding chatter that could be mistaken for a decoded page).
+void sendStatusReply() {
+  JsonDocument out;
+  out["type"] = "status";
+  out["board"] = BOARD_NAME_STR;
+  out["callsign"] = getCallsign();
+  out["freq"] = POCSAG_FREQ_MHZ;
+  serializeJson(out, Serial);
+  Serial.println();
+}
+
 void handleSerialJsonLine(const String &line) {
   JsonDocument doc;
   DeserializationError err = deserializeJson(doc, line);
   if (err) {
     Serial.print("[serial] JSON parse error: "); Serial.println(err.c_str());
     Serial.println("[serial] expected e.g. {\"text\": \"hello\"} or {\"capcode\": 112, \"text\": \"hello\"}");
+    return;
+  }
+
+  String cmd = doc["cmd"] | "";
+  if (cmd == "status") {
+    sendStatusReply();
     return;
   }
 

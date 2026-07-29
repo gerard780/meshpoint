@@ -267,6 +267,19 @@ The Networks sidebar link only appears once `pocsag_serial` is in
 mechanism, independent of the existing role-based
 `data-requires-section` gating).
 
+**Topbar status chip.** `DapnetSerialSource` sends a one-shot
+`{"cmd":"status"}` query right after connecting; the companion (a
+recent-enough build of `extra/pocsag_companion.ino`) replies
+`{"type":"status","board":"ttgo"|"heltec","callsign":"...","freq":439.9875}`,
+cached and exposed via `GET /api/config`'s `dapnet_status` array (one
+entry per configured companion — distinct from the `dapnet` key
+above, which is the saved blacklist/ignore config, not live status).
+Shows as a small topbar badge (callsign, frequency, board), same
+visual style as the Meshtastic USB chip, hidden entirely when no
+POCSAG companion is configured. Older companion firmware without the
+`"cmd"` handler simply never replies — the chip then just shows `----`
+for callsign/board rather than failing.
+
 **DAPNET capcode filters** (`Configuration → POCSAG`'s second card,
 `dapnet:` config section) — two independent, immediately-applied
 tiers (no restart needed) for decoded pages, keyed on capcode:

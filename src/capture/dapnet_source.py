@@ -4,7 +4,10 @@ Reads newline-delimited JSON off a USB serial connection to an ESP32
 board running that sketch. Unlike the Meshtastic/MeshCore companions,
 there is no request/response library here -- the board just prints one
 JSON object per decoded page whenever it happens to receive one, plus
-assorted plain-text boot/log lines this source simply ignores.
+assorted plain-text boot/log lines this source simply ignores. The one
+exception is a one-shot ``{"cmd":"status"}`` query sent right after
+connecting, answered with ``{"type":"status","board":...,"callsign":...,
+"freq":...}`` -- used for the topbar chip, not the packet feed.
 
 pyserial's ``readline()`` is blocking, so the actual read loop runs in
 a background thread (mirrors ``src/hal/gps_reader.py``'s fallback
@@ -19,7 +22,7 @@ import asyncio
 import json
 import logging
 import threading
-from typing import AsyncIterator, Optional
+from typing import Any, AsyncIterator, Optional
 
 from src.capture.base import CaptureSource
 from src.models.packet import RawCapture
@@ -51,6 +54,8 @@ class DapnetSerialSource(CaptureSource):
         self._serial = None
         self._queue: asyncio.Queue = asyncio.Queue(maxsize=500)
         self._running = False
+        self._connected = False
+        self._status: dict[str, Any] = {}
         self._reader_thread: Optional[threading.Thread] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
 
@@ -61,6 +66,17 @@ class DapnetSerialSource(CaptureSource):
     @property
     def is_running(self) -> bool:
         return self._running
+
+    @property
+    def connected(self) -> bool:
+        return self._connected
+
+    @property
+    def status(self) -> dict[str, Any]:
+        """Cached reply from the one-shot {"cmd":"status"} query -- board/
+        callsign/freq, or {} if the companion hasn't answered yet (query
+        lost, or a firmware too old to understand "cmd")."""
+        return self._status
 
     async def start(self) -> None:
         if not self._port:
@@ -76,6 +92,7 @@ class DapnetSerialSource(CaptureSource):
             return
 
         self._running = True
+        self._connected = True
         self._loop = asyncio.get_running_loop()
         self._reader_thread = threading.Thread(
             target=self._read_loop, name=f"{self.name}-reader", daemon=True
@@ -85,6 +102,7 @@ class DapnetSerialSource(CaptureSource):
 
     async def stop(self) -> None:
         self._running = False
+        self._connected = False
         if self._serial is not None:
             try:
                 self._serial.close()
@@ -102,17 +120,31 @@ class DapnetSerialSource(CaptureSource):
 
     def _read_loop(self) -> None:
         """Runs in a background thread -- pyserial's readline() blocks."""
+        try:
+            self._serial.write(b'{"cmd":"status"}\n')
+        except Exception:
+            logger.debug("%s: failed to send status query", self.name)
+
         while self._running and self._serial is not None:
             try:
                 line = self._serial.readline()
             except Exception:
                 logger.exception("%s: serial read failed on %s", self.name, self._port)
+                self._connected = False
                 break
             if not line or not line.strip():
                 continue
-            if not _looks_like_json(line):
+            data = _parse_json_line(line)
+            if data is None:
                 # Boot banners, WiFi/OTA logs, "SEND BLOCKED"/"SEND FAILED"
                 # lines, etc. -- expected and harmless, just not for us.
+                continue
+            if isinstance(data, dict) and data.get("type") == "status":
+                self._status = {
+                    "board": data.get("board"),
+                    "callsign": data.get("callsign"),
+                    "freq": data.get("freq"),
+                }
                 continue
             if self._loop is not None:
                 self._loop.call_soon_threadsafe(self._enqueue, line)
@@ -126,15 +158,16 @@ class DapnetSerialSource(CaptureSource):
             logger.warning("%s: queue full, dropping line", self.name)
 
 
-def _looks_like_json(line: bytes) -> bool:
-    """Cheap pre-filter so obviously-non-JSON serial lines never even
-    reach json.loads -- the sketch prints far more plain-text log lines
-    than JSON pages."""
+def _parse_json_line(line: bytes) -> Optional[dict]:
+    """Parse a serial line as a JSON object, or None if it isn't one.
+
+    Cheap pre-check on the first byte before ever calling json.loads --
+    the sketch prints far more plain-text log lines than JSON lines."""
     stripped = line.strip()
     if not stripped or stripped[:1] != b"{":
-        return False
+        return None
     try:
-        json.loads(stripped)
+        data = json.loads(stripped)
     except (json.JSONDecodeError, UnicodeDecodeError):
-        return False
-    return True
+        return None
+    return data if isinstance(data, dict) else None

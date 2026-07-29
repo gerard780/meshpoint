@@ -48,6 +48,7 @@ _identity: DeviceIdentity | None = None
 _channel_hash_resolver = None
 _serial_sources: list = []
 _meshcore_sources: list = []
+_dapnet_sources: list = []
 
 
 def init_routes(
@@ -58,9 +59,10 @@ def init_routes(
     channel_hash_resolver=None,
     serial_sources: list | None = None,
     meshcore_sources: list | None = None,
+    dapnet_sources: list | None = None,
 ) -> None:
     global _config, _crypto, _tx_service, _identity, _channel_hash_resolver
-    global _serial_sources, _meshcore_sources
+    global _serial_sources, _meshcore_sources, _dapnet_sources
     _config = config
     _crypto = crypto
     _tx_service = tx_service
@@ -68,6 +70,7 @@ def init_routes(
     _channel_hash_resolver = channel_hash_resolver
     _serial_sources = serial_sources or []
     _meshcore_sources = meshcore_sources or []
+    _dapnet_sources = dapnet_sources or []
 
 
 def _refresh_channel_hash_map() -> None:
@@ -170,6 +173,24 @@ def _serial_status_entry(src) -> dict:
         ),
         **info,
         "own_node_id_hex": f"{own_node_num:08x}" if own_node_num is not None else None,
+    }
+
+
+def _dapnet_status_entry(src) -> dict:
+    """Topbar status for one DAPNET/POCSAG companion capture source.
+
+    Board/callsign/freq come from the source's cached reply to the
+    one-shot {"cmd":"status"} query it sends at connect (see
+    DapnetSerialSource.status) -- {} until that reply arrives (or if
+    the companion's firmware predates the "cmd" handler).
+    """
+    status = getattr(src, "status", {}) or {}
+    return {
+        "name": src.name,
+        "connected": bool(getattr(src, "connected", False)),
+        "board": status.get("board"),
+        "callsign": status.get("callsign"),
+        "frequency_mhz": status.get("freq"),
     }
 
 
@@ -287,6 +308,7 @@ async def get_config(claims: SessionClaims = Depends(require_auth)):
     )
 
     serial_status = [_serial_status_entry(src) for src in _serial_sources]
+    dapnet_status = [_dapnet_status_entry(src) for src in _dapnet_sources]
     # One entry per configured MeshCore companion (own connection, own
     # radio/device readouts) -- unlike mc_status above, which only ever
     # reflects company[0] (the single companion _tx_service._meshcore_tx
@@ -371,6 +393,7 @@ async def get_config(claims: SessionClaims = Depends(require_auth)):
         "channels": channels,
         "meshcore": mc_status,
         "serial": serial_status,
+        "dapnet_status": dapnet_status,
         "duty_cycle": duty_info,
         "presets": all_presets_list(),
         "regions": [

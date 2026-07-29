@@ -20,7 +20,13 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt ruff pytest pytest-asyncio httpx
+        # ruff pinned: unpinned installs pick up whatever's newest at CI run
+        # time, and ruff 0.16.0 broadened its default lint rule set (adding
+        # UP045 "Optional[X] -> X | None" among others) -- every version
+        # through 0.15.1 passes this repo cleanly with zero config changes.
+        # Bump this deliberately (and fix/ignore whatever it newly flags)
+        # rather than letting it drift and fail on an unrelated PR again.
+        run: pip install -r requirements.txt "ruff==0.15.1" pytest pytest-asyncio httpx
 
       - name: Lint
         run: ruff check src/ tests/

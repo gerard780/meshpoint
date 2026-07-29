@@ -1152,6 +1152,19 @@ def _find_serial_sources(coord: PipelineCoordinator) -> list:
     ]
 
 
+def _find_dapnet_sources(coord: PipelineCoordinator) -> list:
+    """All DAPNET/POCSAG companion capture sources, in configured order.
+
+    Same "one badge per device" reasoning as _find_serial_sources --
+    each companion is an independent passive capture source, no single
+    "primary" to pick.
+    """
+    return [
+        src for src in coord.capture_coordinator._sources
+        if src.name.startswith("dapnet")
+    ]
+
+
 def _companion_label(source) -> str:
     """Extract a companion's own label from its capture-source name
     (``meshcore_usb_868`` -> ``"868"``, bare ``meshcore_usb`` -> ``""``)."""
@@ -1726,6 +1739,7 @@ def _init_routes(
         channel_hash_resolver=channel_hash_resolver,
         serial_sources=_find_serial_sources(coord),
         meshcore_sources=_find_meshcore_sources(coord),
+        dapnet_sources=_find_dapnet_sources(coord),
     )
     mqtt_config_routes.init_routes(
         config=config,
