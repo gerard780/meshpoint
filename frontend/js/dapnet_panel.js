@@ -125,12 +125,12 @@ class DapnetPanel {
                     </div>
                     <div data-dp-view="packets">
                         <div class="panel__body lw-table-wrap">
-                        <table class="lw-table lw-table--packets">
+                        <table class="lw-table lw-table--dapnet-packets">
                             <colgroup>
                                 <col class="col-time">
                                 <col class="col-type">
                                 <col class="col-dev">
-                                <col class="col-fport">
+                                <col class="col-text">
                             </colgroup>
                             <thead>
                                 <tr>
@@ -149,14 +149,14 @@ class DapnetPanel {
                     </div>
                     <div data-dp-view="capcodes" hidden>
                         <div class="panel__body lw-table-wrap">
-                        <table class="lw-table lw-table--devices">
+                        <table class="lw-table lw-table--dapnet-capcodes">
                             <colgroup>
                                 <col class="col-time">
                                 <col class="col-time">
                                 <col class="col-id">
                                 <col class="col-type">
                                 <col class="col-frames">
-                                <col class="col-dev">
+                                <col class="col-text">
                             </colgroup>
                             <thead>
                                 <tr>
@@ -308,7 +308,7 @@ class DapnetPanel {
                 <td class="lw-id">${this._esc(String(c.capcode ?? '--'))}</td>
                 <td>${this._fmtType(c.packet_type)}</td>
                 <td class="lw-num">${c.frame_count}</td>
-                <td>${this._esc(c.last_text || '')}</td>
+                <td class="lw-text">${this._esc(c.last_text || '')}</td>
             </tr>
         `).join('');
     }
@@ -351,7 +351,7 @@ class DapnetPanel {
                 <td class="lw-time">${this._fmtTime(p.timestamp)}</td>
                 <td>${this._fmtType(p.packet_type)}</td>
                 <td class="lw-id">${this._esc(String(p.capcode ?? '--'))}</td>
-                <td>${this._esc(p.text || '')}</td>
+                <td class="lw-text">${this._esc(p.text || '')}</td>
             </tr>
         `).join('');
     }
