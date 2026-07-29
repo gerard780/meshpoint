@@ -1,8 +1,10 @@
 /* LoRaWAN monitoring panel */
 
-/* Both lorawan and meshtastic sections need their own scroll context.
- * The parent .section has overflow:hidden — promote them to scroll containers. */
+/* Every section reusing this file's panel/table layout needs its own
+ * scroll context. The parent .section has overflow:hidden — promote
+ * them to scroll containers. */
 .section[data-section="lorawan"],
+.section[data-section="dapnet"],
 .section[data-section="meshtastic"],
 .section[data-section="meshcore"] {
     overflow-y: auto;
