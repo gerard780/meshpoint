@@ -225,7 +225,7 @@ async def compile_firmware_stream(
             _select_board_define(req.board_macro)
             cmd = [
                 _ARDUINO_CLI_BIN, "--config-file", _ARDUINO_CLI_CONFIG,
-                "compile", "--fqbn", board["fqbn"], str(_SKETCH_DIR),
+                "compile", "-v", "--fqbn", board["fqbn"], str(_SKETCH_DIR),
             ]
             success = False
             async for chunk in _stream_subprocess(cmd):

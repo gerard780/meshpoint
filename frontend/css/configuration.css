@@ -72,6 +72,16 @@
     gap: 6px;
 }
 
+/* .cfg-field's own `display: flex` above silently beats the browser's
+   `[hidden] { display: none }` UA rule (author CSS always wins,
+   regardless of specificity) -- same bug class as the LoRaWAN search
+   box's .lw-search-wrap[hidden] fix. Needed for the "Companion to
+   flash" picker, hidden via the `hidden` attribute when 0-1 devices
+   are configured. */
+.cfg-field[hidden] {
+    display: none;
+}
+
 .cfg-field--toggle {
     flex-direction: row;
     align-items: center;
