@@ -4,16 +4,23 @@ Reads newline-delimited JSON off a USB serial connection to an ESP32
 board running that sketch. Unlike the Meshtastic/MeshCore companions,
 there is no request/response library here -- the board just prints one
 JSON object per decoded page whenever it happens to receive one, plus
-assorted plain-text boot/log lines this source simply ignores. The one
-exception is a one-shot ``{"cmd":"status"}`` query sent right after
-connecting, answered with ``{"type":"status","board":...,"callsign":...,
-"freq":...}`` -- used for the topbar chip, not the packet feed.
+assorted plain-text boot/log lines this source simply ignores. Two
+request/response commands ride the same line: a one-shot
+``{"cmd":"status"}`` query sent right after connecting (answered with
+``{"type":"status","board":...,"callsign":...,"freq":...}``, used for
+the topbar chip) and an on-demand ``{"cmd":"set_callsign",...}`` a
+dashboard save can trigger (answered with
+``{"type":"set_callsign_result","ok":...}``), via ``send_command()``.
 
 pyserial's ``readline()`` is blocking, so the actual read loop runs in
 a background thread (mirrors ``src/hal/gps_reader.py``'s fallback
 path) and hands lines back to the asyncio side via
 ``loop.call_soon_threadsafe``, matching every other capture source's
-``asyncio.Queue``-backed ``packets()`` shape.
+``asyncio.Queue``-backed ``packets()`` shape. Outgoing commands are
+handed to that same thread through a stdlib ``queue.Queue`` (not
+``asyncio.Queue`` -- this queue is drained from the reader thread, not
+the event loop) so every serial read/write stays on the one thread
+that owns the ``serial.Serial`` object.
 """
 
 from __future__ import annotations
@@ -21,6 +28,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import queue
 import threading
 from typing import Any, AsyncIterator, Optional
 
@@ -58,6 +66,13 @@ class DapnetSerialSource(CaptureSource):
         self._status: dict[str, Any] = {}
         self._reader_thread: Optional[threading.Thread] = None
         self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._command_queue: "queue.Queue[bytes]" = queue.Queue()
+        # Only one request/response command can be in flight at a time --
+        # the wire protocol has no request-id, just "write a command,
+        # the next matching-type reply is the answer" (same assumption
+        # the one-shot status query already relied on).
+        self._pending_expect_type: Optional[str] = None
+        self._pending_future: Optional[asyncio.Future] = None
 
     @property
     def name(self) -> str:
@@ -77,6 +92,36 @@ class DapnetSerialSource(CaptureSource):
         callsign/freq, or {} if the companion hasn't answered yet (query
         lost, or a firmware too old to understand "cmd")."""
         return self._status
+
+    def note_new_callsign(self, callsign: str) -> None:
+        """Update the cached status right after a successful set_callsign
+        command, so the topbar chip / config-page readout reflect the
+        change immediately rather than waiting for another status query
+        (which only ever happens once, at connect)."""
+        self._status = {**self._status, "callsign": callsign}
+
+    async def send_command(
+        self, command: dict, expect_type: str, timeout: float = 5.0,
+    ) -> Optional[dict]:
+        """Write a JSON command line and wait for the companion's matching
+        reply (matched by its "type" field), or None on timeout or if this
+        source isn't connected. The actual write happens on the reader
+        thread (see _read_loop) so it never races with a readline() call
+        already in flight on the same serial.Serial object.
+        """
+        if not self._connected or self._loop is None:
+            return None
+        future: asyncio.Future = self._loop.create_future()
+        self._pending_expect_type = expect_type
+        self._pending_future = future
+        self._command_queue.put_nowait(json.dumps(command).encode() + b"\n")
+        try:
+            return await asyncio.wait_for(future, timeout=timeout)
+        except asyncio.TimeoutError:
+            return None
+        finally:
+            self._pending_expect_type = None
+            self._pending_future = None
 
     async def start(self) -> None:
         if not self._port:
@@ -126,6 +171,7 @@ class DapnetSerialSource(CaptureSource):
             logger.debug("%s: failed to send status query", self.name)
 
         while self._running and self._serial is not None:
+            self._flush_command_queue()
             try:
                 line = self._serial.readline()
             except Exception:
@@ -146,8 +192,40 @@ class DapnetSerialSource(CaptureSource):
                     "freq": data.get("freq"),
                 }
                 continue
+            if (
+                isinstance(data, dict)
+                and self._pending_expect_type is not None
+                and data.get("type") == self._pending_expect_type
+            ):
+                self._resolve_pending(data)
+                continue
             if self._loop is not None:
                 self._loop.call_soon_threadsafe(self._enqueue, line)
+
+    def _flush_command_queue(self) -> None:
+        """Write any queued outgoing commands -- called once per read-loop
+        pass, so a command queued while readline() is blocked waits at
+        most one read timeout (1s) before actually going out."""
+        while True:
+            try:
+                cmd_line = self._command_queue.get_nowait()
+            except queue.Empty:
+                return
+            try:
+                self._serial.write(cmd_line)
+            except Exception:
+                logger.exception("%s: failed to write command", self.name)
+
+    def _resolve_pending(self, data: dict) -> None:
+        future = self._pending_future
+        if future is None or self._loop is None:
+            return
+
+        def _set_result() -> None:
+            if not future.done():
+                future.set_result(data)
+
+        self._loop.call_soon_threadsafe(_set_result)
 
     def _enqueue(self, line: bytes) -> None:
         try:

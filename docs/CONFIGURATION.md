@@ -280,6 +280,21 @@ POCSAG companion is configured. Older companion firmware without the
 `"cmd"` handler simply never replies — the chip then just shows `----`
 for callsign/board rather than failing.
 
+**Setting the callsign from the dashboard.** Each connected device's
+readout tile on `Configuration → POCSAG` also has a "Set callsign"
+field — saving it sends `{"cmd":"set_callsign","callsign":"..."}` over
+the same serial connection and waits for the companion's reply (same
+validation the on-device web dashboard's own Callsign card already
+enforces: non-empty, ≤8 chars, not `N0CALL`, must contain a digit).
+Nothing is persisted on the Meshpoint side — the callsign lives
+entirely in the companion's own NVS — but a successful save updates
+the cached status immediately, so the readout tile and topbar chip
+reflect it without waiting for another status query (which only ever
+happens once, at connect). Requires a companion running a firmware
+build with the `set_callsign` command (added alongside the status
+query above); older builds will just time out after 5s with "No reply
+from companion".
+
 **DAPNET capcode filters** (`Configuration → POCSAG`'s second card,
 `dapnet:` config section) — two independent, immediately-applied
 tiers (no restart needed) for decoded pages, keyed on capcode:

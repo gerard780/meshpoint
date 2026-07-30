@@ -317,6 +317,7 @@ class PocsagSerialConfigCard {
                        value="${name}" data-device-name>
             </label>
             ${this._deviceReadoutsHtml(live)}
+            ${this._callsignEditHtml(live)}
         `;
 
         div.querySelector('.cfg-companion__remove').addEventListener('click', () => {
@@ -329,6 +330,13 @@ class PocsagSerialConfigCard {
         if (portInput) {
             portInput.addEventListener('input', () => this._updateResolvedPort(portInput));
             this._updateResolvedPort(portInput);
+        }
+
+        const callsignSaveBtn = div.querySelector('[data-callsign-save]');
+        if (callsignSaveBtn) {
+            callsignSaveBtn.addEventListener('click', () => {
+                this._saveCallsign(div, data.label || '');
+            });
         }
 
         this._devicesEl.appendChild(div);
@@ -360,6 +368,65 @@ class PocsagSerialConfigCard {
                 </div>
             </div>
         `;
+    }
+
+    /** Editable callsign, set over the companion's live serial connection
+     * (PUT /api/config/dapnet/callsign) -- unlike everything else on this
+     * card, there's nothing to persist in local.yaml afterward, since the
+     * callsign lives entirely in the companion's own NVS. Only rendered
+     * when connected; there's no serial link to send the command over
+     * otherwise. */
+    _callsignEditHtml(live) {
+        if (!live || !live.connected) return '';
+        return `
+            <div class="cfg-mc-identity" data-callsign-edit>
+                <label class="cfg-field cfg-field--inline">
+                    <span class="cfg-field__label">Set callsign (required before TX)</span>
+                    <input class="cfg-field__input" type="text" maxlength="8"
+                           placeholder="e.g. PD2EMC"
+                           data-callsign-input>
+                </label>
+                <div class="cfg-card__actions">
+                    <button class="terminal-button terminal-button--primary"
+                            type="button" data-callsign-save>
+                        Set Callsign
+                    </button>
+                </div>
+                <p class="cfg-status" data-callsign-status aria-live="polite"></p>
+            </div>
+        `;
+    }
+
+    async _saveCallsign(deviceDiv, label) {
+        const input = deviceDiv.querySelector('[data-callsign-input]');
+        const status = deviceDiv.querySelector('[data-callsign-status]');
+        const button = deviceDiv.querySelector('[data-callsign-save]');
+        if (!input || !status) return;
+
+        const callsign = (input.value || '').trim();
+        if (!callsign) {
+            status.dataset.kind = 'error';
+            status.textContent = 'Enter a callsign.';
+            return;
+        }
+
+        button.disabled = true;
+        status.dataset.kind = 'pending';
+        status.textContent = 'Sending to companion…';
+
+        const result = await this._api.put('/api/config/dapnet/callsign', { label, callsign });
+
+        if (result) {
+            status.dataset.kind = 'success';
+            status.textContent = `Callsign set to ${result.callsign}.`;
+            this._api.toast('Callsign updated on the companion');
+            input.value = '';
+            await this._api.refresh();
+        } else {
+            status.dataset.kind = 'error';
+            status.textContent = 'Save failed.';
+        }
+        button.disabled = false;
     }
 
     _fmtFreq(mhz) {

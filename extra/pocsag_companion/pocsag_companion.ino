@@ -408,6 +408,14 @@ void showIncomingScreen(uint32_t capcode, const String &type, const String &text
 void showSentScreen(uint32_t capcode, const String &text, int state);
 void setupWebServer();
 
+// Same forward-reference problem, but for a global VARIABLE rather than
+// a function -- Arduino's auto-prototyping only ever covers functions,
+// so `prefs` (declared further down, right before getCallsign()/
+// setCallsign()) needs an explicit extern here for handleSetCallsignCommand()
+// (defined earlier in the file, alongside handleSerialJsonLine()) to
+// persist a serial-set callsign to NVS the same way /api/callsign does.
+extern Preferences prefs;
+
 
 // ---------- WiFi / NTP / OTA ----------
 //
@@ -919,6 +927,44 @@ void sendStatusReply() {
   Serial.println();
 }
 
+// Sets the operator callsign over the same JSON serial link the web
+// dashboard's own /api/callsign already uses -- same validation
+// cascade, same NVS persistence (prefs.putString), so a Meshpoint-side
+// dashboard save behaves identically to a save made directly on the
+// companion's own WiFi page. Always replies exactly once (ok+callsign,
+// or ok:false+error) so the caller isn't left guessing whether a
+// rejected value silently "sort of" saved.
+void handleSetCallsignCommand(JsonDocument &doc) {
+  String cs = doc["callsign"] | "";
+  cs.trim();
+  cs.toUpperCase(); // ham convention -- also what every outgoing TX prefix uses
+
+  JsonDocument out;
+  out["type"] = "set_callsign_result";
+
+  if (cs.length() == 0) {
+    out["ok"] = false;
+    out["error"] = "callsign is required";
+  } else if (cs.length() > CALLSIGN_MAX_LEN) {
+    out["ok"] = false;
+    out["error"] = "callsign too long (max " + String(CALLSIGN_MAX_LEN) + ")";
+  } else if (cs.equalsIgnoreCase("N0CALL")) {
+    out["ok"] = false;
+    out["error"] = "N0CALL is a placeholder, not a real callsign";
+  } else if (!isValidCallsign(cs)) {
+    out["ok"] = false;
+    out["error"] = "not a valid callsign -- must include a digit";
+  } else {
+    setCallsign(cs);
+    prefs.putString("callsign", cs);
+    out["ok"] = true;
+    out["callsign"] = cs;
+  }
+
+  serializeJson(out, Serial);
+  Serial.println();
+}
+
 void handleSerialJsonLine(const String &line) {
   JsonDocument doc;
   DeserializationError err = deserializeJson(doc, line);
@@ -931,6 +977,10 @@ void handleSerialJsonLine(const String &line) {
   String cmd = doc["cmd"] | "";
   if (cmd == "status") {
     sendStatusReply();
+    return;
+  }
+  if (cmd == "set_callsign") {
+    handleSetCallsignCommand(doc);
     return;
   }
 
