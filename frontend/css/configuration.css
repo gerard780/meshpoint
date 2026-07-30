@@ -476,6 +476,15 @@ select.cfg-field__input option:checked {
     color: var(--brand-amber, #ffb84d);
 }
 
+/* A nested link (e.g. the DAPNET Web UI tile) has its own browser
+   default/visited colors that override the inherited amber otherwise --
+   same fix as .cfg-mc-readout__update-status a below. */
+.cfg-mc-readout__value a,
+.cfg-mc-readout__value a:visited {
+    color: inherit;
+    text-decoration: underline;
+}
+
 .cfg-mc-readout__check {
     align-self: flex-start;
     margin-top: 2px;
