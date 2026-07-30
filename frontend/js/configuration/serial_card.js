@@ -564,16 +564,22 @@ class SerialConfigCard {
      * custom-minutes fallback, exactly the same pattern Configuration ->
      * Radio's own NodeInfoConfigCard/TelemetryBroadcastCard use), and
      * Bluetooth. Deliberately rendered as PLAIN .cfg-field elements with
-     * no extra bordered wrapper (earlier draft nested these in their own
-     * `.cfg-mc-identity` box(es), which looked inconsistent with every
-     * other settings page in the app -- .cfg-companion itself already
-     * provides the one border a device row needs). Always shown when
-     * connected (not just while unconfigured), so this also serves as a
-     * way to change any of these later. None of these persist to
-     * local.yaml -- all live durably in the device's own NVS, and
-     * re-applying them to a swapped-in blank replacement is a much
-     * rarer need than re-applying the name (which does persist, see
-     * _identityHtml). */
+     * matching Configuration -> Radio's own card structure EXACTLY
+     * (`.cfg-card` > `.cfg-card__head` with title+hint > `.cfg-form`) --
+     * grouped into two sub-cards, "Modem settings" (region + preset,
+     * mirroring Radio's own Region+Modem-preset fields) and "Other
+     * settings" (broadcast intervals + Bluetooth), sitting alongside the
+     * pre-existing Name box so a device row reads as three peer cards:
+     * Name, Modem settings, Other settings. Nesting `.cfg-card` inside
+     * `.cfg-companion` is deliberate here (unlike the earlier all-flat
+     * draft) -- these are genuinely distinct settings groups, same as
+     * Radio/NodeInfo/Telemetry are separate top-level cards elsewhere,
+     * just one level deeper since they belong to one specific device.
+     * Always shown when connected, so this also serves as a way to
+     * change any of these later. None of these persist to local.yaml --
+     * all live durably in the device's own NVS, and re-applying them to
+     * a swapped-in blank replacement is a much rarer need than
+     * re-applying the name (which does persist, see _identityHtml). */
     _radioControlsHtml(live) {
         if (!live || !live.connected) return '';
         const region = live.region && live.region !== 'UNSET' ? live.region : '';
@@ -592,90 +598,113 @@ class SerialConfigCard {
         )).join('');
 
         return `
-            <label class="cfg-field cfg-field--narrow">
-                <span class="cfg-field__label">LoRa region</span>
-                <select class="cfg-field__input" data-device-region-input>
-                    <option value="" disabled ${region ? '' : 'selected'}>-- select --</option>
-                    ${regionOptions}
-                </select>
-            </label>
-            ${live.region === 'UNSET' ? `
-                <p class="cfg-field__hint">
-                    Region is UNSET -- this stick will not transmit at all until
-                    a region is set (Meshtastic's factory default on a fresh flash).
-                </p>
-            ` : ''}
-            <div class="cfg-card__actions">
-                <button class="terminal-button terminal-button--primary"
-                        type="button" data-device-region-save>
-                    Set Region
-                </button>
-            </div>
-            <p class="cfg-status" data-device-region-status aria-live="polite"></p>
+            <div class="cfg-card">
+                <header class="cfg-card__head">
+                    <h3 class="cfg-card__title">Modem settings</h3>
+                    <p class="cfg-card__hint">
+                        Region and modem preset for this stick, set over its live
+                        serial connection.
+                    </p>
+                </header>
+                <div class="cfg-form">
+                    <label class="cfg-field cfg-field--narrow">
+                        <span class="cfg-field__label">Region</span>
+                        <select class="cfg-field__input" data-device-region-input>
+                            <option value="" disabled ${region ? '' : 'selected'}>-- select --</option>
+                            ${regionOptions}
+                        </select>
+                    </label>
+                    ${live.region === 'UNSET' ? `
+                        <p class="cfg-field__hint">
+                            Region is UNSET -- this stick will not transmit at all until
+                            a region is set (Meshtastic's factory default on a fresh flash).
+                        </p>
+                    ` : ''}
+                    <div class="cfg-card__actions">
+                        <button class="terminal-button terminal-button--primary"
+                                type="button" data-device-region-save>
+                            Set Region
+                        </button>
+                    </div>
+                    <p class="cfg-status" data-device-region-status aria-live="polite"></p>
 
-            <div class="cfg-field">
-                <span class="cfg-field__label">Modem preset</span>
-                <div class="cfg-chip-row" data-device-preset-chips></div>
+                    <div class="cfg-field">
+                        <span class="cfg-field__label">Modem preset</span>
+                        <div class="cfg-chip-row" data-device-preset-chips></div>
+                    </div>
+                    <div class="cfg-card__actions">
+                        <button class="terminal-button terminal-button--primary"
+                                type="button" data-device-preset-save>
+                            Set Preset
+                        </button>
+                    </div>
+                    <p class="cfg-status" data-device-preset-status aria-live="polite"></p>
+                </div>
             </div>
-            <div class="cfg-card__actions">
-                <button class="terminal-button terminal-button--primary"
-                        type="button" data-device-preset-save>
-                    Set Preset
-                </button>
-            </div>
-            <p class="cfg-status" data-device-preset-status aria-live="polite"></p>
 
-            <div class="cfg-field">
-                <span class="cfg-field__label">NodeInfo broadcast interval</span>
-                <div class="cfg-chip-row" data-device-ni-chips></div>
-            </div>
-            <label class="cfg-field cfg-field--narrow">
-                <span class="cfg-field__label">Custom (minutes)</span>
-                <input class="cfg-field__input" type="number" min="0" max="1440"
-                       data-device-ni-input>
-            </label>
+            <div class="cfg-card">
+                <header class="cfg-card__head">
+                    <h3 class="cfg-card__title">Other settings</h3>
+                    <p class="cfg-card__hint">
+                        This stick's own NodeInfo/telemetry broadcast timing and
+                        Bluetooth -- not the same as Meshpoint's own concentrator
+                        broadcast-interval cards on Configuration &rarr; Radio.
+                    </p>
+                </header>
+                <div class="cfg-form">
+                    <div class="cfg-field">
+                        <span class="cfg-field__label">NodeInfo broadcast interval</span>
+                        <div class="cfg-chip-row" data-device-ni-chips></div>
+                    </div>
+                    <label class="cfg-field cfg-field--narrow">
+                        <span class="cfg-field__label">Custom (minutes)</span>
+                        <input class="cfg-field__input" type="number" min="0" max="1440"
+                               data-device-ni-input>
+                    </label>
 
-            <div class="cfg-field">
-                <span class="cfg-field__label">Telemetry broadcast interval</span>
-                <div class="cfg-chip-row" data-device-tel-chips></div>
-            </div>
-            <label class="cfg-field cfg-field--narrow">
-                <span class="cfg-field__label">Custom (minutes)</span>
-                <input class="cfg-field__input" type="number" min="0" max="1440"
-                       data-device-tel-input>
-            </label>
-            <div class="cfg-card__actions">
-                <button class="terminal-button terminal-button--primary"
-                        type="button" data-device-intervals-save>
-                    Set Intervals
-                </button>
-            </div>
-            <p class="cfg-status" data-device-intervals-status aria-live="polite"></p>
+                    <div class="cfg-field">
+                        <span class="cfg-field__label">Telemetry broadcast interval</span>
+                        <div class="cfg-chip-row" data-device-tel-chips></div>
+                    </div>
+                    <label class="cfg-field cfg-field--narrow">
+                        <span class="cfg-field__label">Custom (minutes)</span>
+                        <input class="cfg-field__input" type="number" min="0" max="1440"
+                               data-device-tel-input>
+                    </label>
+                    <div class="cfg-card__actions">
+                        <button class="terminal-button terminal-button--primary"
+                                type="button" data-device-intervals-save>
+                            Set Intervals
+                        </button>
+                    </div>
+                    <p class="cfg-status" data-device-intervals-status aria-live="polite"></p>
 
-            <label class="cfg-field cfg-field--toggle">
-                <input type="checkbox" data-device-bt-enabled ${btEnabled ? 'checked' : ''}>
-                <span class="cfg-field__label">Bluetooth enabled</span>
-            </label>
-            <label class="cfg-field cfg-field--narrow"
-                   data-device-bt-mode-wrap ${btEnabled ? '' : 'hidden'}>
-                <span class="cfg-field__label">Pairing mode</span>
-                <select class="cfg-field__input" data-device-bt-mode>
-                    ${btModeOptions}
-                </select>
-            </label>
-            <label class="cfg-field cfg-field--narrow"
-                   data-device-bt-pin-wrap ${(btEnabled && btMode === 'FIXED_PIN') ? '' : 'hidden'}>
-                <span class="cfg-field__label">Fixed PIN</span>
-                <input class="cfg-field__input" type="number" min="0" max="999999"
-                       placeholder="e.g. 123456" data-device-bt-pin>
-            </label>
-            <div class="cfg-card__actions">
-                <button class="terminal-button terminal-button--primary"
-                        type="button" data-device-bt-save>
-                    Set Bluetooth
-                </button>
+                    <label class="cfg-field cfg-field--toggle">
+                        <input type="checkbox" data-device-bt-enabled ${btEnabled ? 'checked' : ''}>
+                        <span class="cfg-field__label">Bluetooth enabled</span>
+                    </label>
+                    <label class="cfg-field cfg-field--narrow"
+                           data-device-bt-mode-wrap ${btEnabled ? '' : 'hidden'}>
+                        <span class="cfg-field__label">Pairing mode</span>
+                        <select class="cfg-field__input" data-device-bt-mode>
+                            ${btModeOptions}
+                        </select>
+                    </label>
+                    <label class="cfg-field cfg-field--narrow"
+                           data-device-bt-pin-wrap ${(btEnabled && btMode === 'FIXED_PIN') ? '' : 'hidden'}>
+                        <span class="cfg-field__label">Fixed PIN</span>
+                        <input class="cfg-field__input" type="number" min="0" max="999999"
+                               placeholder="e.g. 123456" data-device-bt-pin>
+                    </label>
+                    <div class="cfg-card__actions">
+                        <button class="terminal-button terminal-button--primary"
+                                type="button" data-device-bt-save>
+                            Set Bluetooth
+                        </button>
+                    </div>
+                    <p class="cfg-status" data-device-bt-status aria-live="polite"></p>
+                </div>
             </div>
-            <p class="cfg-status" data-device-bt-status aria-live="polite"></p>
         `;
     }
 
