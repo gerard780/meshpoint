@@ -584,6 +584,7 @@ def _add_dapnet_source(coordinator: PipelineCoordinator, config: AppConfig):
         coordinator.capture_coordinator.add_source(
             DapnetSerialSource(
                 serial_port=dev.serial_port, serial_baud=dev.serial_baud, label=dev.label,
+                status_poll_interval_s=config.dapnet.status_poll_interval_s,
             )
         )
 

@@ -89,6 +89,7 @@ def enrich_config_payload(cfg: AppConfig, base: dict) -> dict:
     base["dapnet"] = {
         "blacklist_capcodes": list(cfg.dapnet.blacklist_capcodes or []),
         "ignore_capcodes": list(cfg.dapnet.ignore_capcodes or []),
+        "status_poll_interval_s": cfg.dapnet.status_poll_interval_s,
     }
     base["radio_advanced"] = {
         "spectral_scan_interval_seconds": radio.spectral_scan_interval_seconds,

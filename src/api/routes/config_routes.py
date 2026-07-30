@@ -179,13 +179,15 @@ def _serial_status_entry(src) -> dict:
 def _dapnet_status_entry(src) -> dict:
     """Topbar status for one DAPNET/POCSAG companion capture source.
 
-    Board/callsign/freq/hostname/wifi_ip all come from the source's
-    cached reply to the one-shot {"cmd":"status"} query it sends at
-    connect (see DapnetSerialSource.status) -- {} until that reply
+    Board/callsign/freq/hostname/wifi_ip/tx_count/last_tx_ok/uptime_ms
+    all come from the source's cached reply to its {"cmd":"status"}
+    query (see DapnetSerialSource.status) -- {} until the first reply
     arrives (or if the companion's firmware predates the "cmd"
-    handler). hostname/wifi_ip are static for the life of the
-    connection (unlike a counter/uptime, which would freeze at
-    whatever it was at connect time -- not added here for that reason).
+    handler). tx_count/last_tx_ok/uptime_ms only stay current because
+    this query now repeats periodically (DapnetConfig.
+    status_poll_interval_s) rather than firing once at connect --
+    board/callsign/freq/hostname/wifi_ip would already be safe as a
+    one-shot value, these wouldn't.
     """
     status = getattr(src, "status", {}) or {}
     return {
@@ -196,6 +198,9 @@ def _dapnet_status_entry(src) -> dict:
         "frequency_mhz": status.get("freq"),
         "hostname": status.get("hostname"),
         "wifi_ip": status.get("wifi_ip"),
+        "tx_count": status.get("tx_count"),
+        "last_tx_ok": status.get("last_tx_ok"),
+        "uptime_ms": status.get("uptime_ms"),
     }
 
 

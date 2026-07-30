@@ -283,12 +283,28 @@ callsign/board rather than failing.
 
 `hostname`/`wifi_ip` are only shown on the Configuration → POCSAG
 readout tiles (a "Web UI" link straight to the companion's own web
-dashboard), not the topbar chip, which stays compact. Deliberately
-static-ish fields only, by design: this query is one-shot (fires once
-at connect, never again), so anything that changes over time — TX
-count, uptime, free heap — would freeze at whatever it was at connect
-time and never update, misleadingly. A periodic-poll redesign would be
-needed before those are worth adding; not done yet.
+dashboard), not the topbar chip, which stays compact.
+
+**Periodic status poll (live TX count/uptime).** The status query no
+longer fires only once -- it repeats every `dapnet.status_poll_interval_s`
+seconds (default 60), still strictly request/response (never an
+unsolicited device push), which is what makes genuinely live fields
+like `tx_count`/`last_tx_ok`/`uptime_ms` meaningful instead of frozen
+at whatever they were at connect time. Edit the interval from
+Configuration → POCSAG's "DAPNET settings" card (10-3600s); unlike the
+two capcode lists in that same card, changing it needs a service
+restart (`DapnetSerialSource` only reads it once, at construction).
+
+```yaml
+dapnet:
+  status_poll_interval_s: 60   # 10-3600
+```
+
+TX Count, Last TX (Never/OK/Failed), and Uptime show up as three more
+readout tiles alongside Callsign/Frequency/Hardware/Web UI. Uptime
+wraps to a small number every ~49.7 days (ESP32 `millis()` overflow)
+-- a real device limitation, not a display bug, if it ever shows a
+suspiciously small value on a long-running companion.
 
 **Setting the callsign from the dashboard.** Each connected device's
 readout tile on `Configuration → POCSAG` also has a "Set callsign"

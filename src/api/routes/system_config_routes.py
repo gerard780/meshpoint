@@ -107,6 +107,7 @@ class RadioAdvancedUpdate(BaseModel):
 class DapnetUpdate(BaseModel):
     blacklist_capcodes: list[int] = Field(..., max_length=200)
     ignore_capcodes: list[int] = Field(..., max_length=200)
+    status_poll_interval_s: int = Field(60, ge=10, le=3600)
 
 
 @router.get("/serial-ports")
@@ -539,9 +540,9 @@ async def update_dapnet(
     _claims: SessionClaims = Depends(require_admin),
     audit: AuditLogWriter = Depends(get_audit_writer),
 ):
-    """Replace the DAPNET blacklist/ignore capcode lists.
+    """Replace the DAPNET blacklist/ignore capcode lists and status-poll interval.
 
-    Takes effect immediately -- the coordinator reads
+    The capcode lists take effect immediately -- the coordinator reads
     ``config.dapnet`` fresh on every packet, no capture-source restart
     needed (unlike the USB device list PUTs above, which reconfigure
     an already-running connection). ``blacklist_capcodes`` are shown
@@ -553,16 +554,27 @@ async def update_dapnet(
     reads straight from storage). Purging both lists here (via
     PacketRepository.delete_dapnet_capcodes) makes "never stored"
     hold immediately for both tiers, not just going forward.
+
+    ``status_poll_interval_s`` is different: DapnetSerialSource reads
+    it once, at construction, to start its periodic {"cmd":"status"}
+    poll loop -- unlike the capcode lists there's no live re-read, so
+    changing it only takes effect on the next service restart.
     """
     if _config is None:
         raise HTTPException(503, "Config not loaded")
 
+    poll_interval_changed = (
+        req.status_poll_interval_s != _config.dapnet.status_poll_interval_s
+    )
+
     _config.dapnet.blacklist_capcodes = req.blacklist_capcodes
     _config.dapnet.ignore_capcodes = req.ignore_capcodes
+    _config.dapnet.status_poll_interval_s = req.status_poll_interval_s
 
     updates = {
         "blacklist_capcodes": req.blacklist_capcodes,
         "ignore_capcodes": req.ignore_capcodes,
+        "status_poll_interval_s": req.status_poll_interval_s,
     }
     with audit.timed_action(
         user=_claims.subject, action="config.dapnet_update", params=updates,
@@ -577,7 +589,11 @@ async def update_dapnet(
     if _packet_repo is not None and to_purge:
         purged = await _packet_repo.delete_dapnet_capcodes(to_purge)
 
-    return {"saved": True, "restart_required": False, "purged": purged}
+    return {
+        "saved": True,
+        "restart_required": poll_interval_changed,
+        "purged": purged,
+    }
 
 
 def _meshcore_usb_dict(mc_usb) -> dict:

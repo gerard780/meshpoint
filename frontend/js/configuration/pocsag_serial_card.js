@@ -76,11 +76,11 @@ class PocsagSerialConfigCard {
 
                 <article class="cfg-card">
                     <header class="cfg-card__head">
-                        <h3 class="cfg-card__title">DAPNET capcode filters</h3>
+                        <h3 class="cfg-card__title">DAPNET settings</h3>
                         <p class="cfg-card__hint">
-                            Two independent lists, both take effect immediately (no restart
-                            needed). Both are capcode filters on the decoded DAPNET/POCSAG page
-                            feed, not the serial connection above.
+                            Neither of the two lists below is a serial-connection setting --
+                            both are capcode filters on the decoded DAPNET/POCSAG page feed,
+                            and take effect immediately (no restart needed).
                         </p>
                     </header>
                     <label class="cfg-field">
@@ -103,10 +103,20 @@ class PocsagSerialConfigCard {
                             Pure noise you never want to see at all.
                         </span>
                     </label>
+                    <label class="cfg-field cfg-field--narrow">
+                        <span class="cfg-field__label">Status poll interval (seconds)</span>
+                        <input class="cfg-field__input" type="number" min="10" max="3600"
+                               data-dapnet-poll-interval>
+                        <span class="cfg-field__hint">
+                            How often each connected companion is re-asked for its status
+                            (TX count, uptime, etc.) -- default 60s. Unlike the two lists
+                            above, this needs a service restart to take effect.
+                        </span>
+                    </label>
                     <div class="cfg-card__actions">
                         <button class="terminal-button terminal-button--primary"
                                 type="button" data-dapnet-save>
-                            Save capcode filters
+                            Save DAPNET settings
                         </button>
                     </div>
                     <p class="cfg-status" data-dapnet-status aria-live="polite"></p>
@@ -168,6 +178,10 @@ class PocsagSerialConfigCard {
         if (ignoreEl) {
             ignoreEl.value = (Array.isArray(dapnet.ignore_capcodes) ? dapnet.ignore_capcodes : []).join(', ');
         }
+        const pollIntervalEl = this._root.querySelector('[data-dapnet-poll-interval]');
+        if (pollIntervalEl) {
+            pollIntervalEl.value = dapnet.status_poll_interval_s ?? 60;
+        }
     }
 
     /** Parses "200, 208, 216" into [200, 208, 216], dropping anything
@@ -189,15 +203,19 @@ class PocsagSerialConfigCard {
 
         const blacklistEl = this._root.querySelector('[data-dapnet-blacklist]');
         const ignoreEl = this._root.querySelector('[data-dapnet-ignore]');
+        const pollIntervalEl = this._root.querySelector('[data-dapnet-poll-interval]');
 
         const result = await this._api.put('/api/config/dapnet', {
             blacklist_capcodes: this._parseCapcodeList(blacklistEl?.value),
             ignore_capcodes: this._parseCapcodeList(ignoreEl?.value),
+            status_poll_interval_s: Number(pollIntervalEl?.value) || 60,
         });
 
         if (result) {
             status.dataset.kind = 'success';
-            status.textContent = 'Saved.';
+            status.textContent = result.restart_required
+                ? 'Saved. Restart the service from Settings → System for the new poll interval to apply.'
+                : 'Saved.';
             await this._api.refresh();
         } else {
             status.dataset.kind = 'error';
@@ -348,9 +366,10 @@ class PocsagSerialConfigCard {
 
     /** Live connection/board readouts for one row -- same `cfg-mc-readout`
      * tiles Serial/MeshCore use, but only the fields DAPNET actually has:
-     * DapnetSerialSource's one-shot {"cmd":"status"} reply carries just
-     * board/callsign/freq, no LoRa params (POCSAG is fixed-frequency FSK,
-     * not LoRa) and no firmware version. */
+     * no LoRa params (POCSAG is fixed-frequency FSK, not LoRa) and no
+     * firmware version. tx_count/last_tx_ok/uptime_ms only stay current
+     * because the status query now repeats periodically -- see
+     * DapnetSerialSource's own docstring. */
     _deviceReadoutsHtml(live) {
         if (!live || !live.connected) {
             return `<p class="cfg-companion__offline-hint">Not connected.</p>`;
@@ -372,6 +391,18 @@ class PocsagSerialConfigCard {
                 <div class="cfg-mc-readout">
                     <span class="cfg-mc-readout__label">Web UI</span>
                     <span class="cfg-mc-readout__value">${this._webUiHtml(live)}</span>
+                </div>
+                <div class="cfg-mc-readout">
+                    <span class="cfg-mc-readout__label">TX Count</span>
+                    <span class="cfg-mc-readout__value">${live.tx_count ?? '--'}</span>
+                </div>
+                <div class="cfg-mc-readout">
+                    <span class="cfg-mc-readout__label">Last TX</span>
+                    <span class="cfg-mc-readout__value">${this._fmtLastTx(live)}</span>
+                </div>
+                <div class="cfg-mc-readout">
+                    <span class="cfg-mc-readout__label">Uptime</span>
+                    <span class="cfg-mc-readout__value">${this._fmtUptime(live.uptime_ms)}</span>
                 </div>
             </div>
         `;
@@ -459,6 +490,28 @@ class PocsagSerialConfigCard {
     _fmtBoard(board) {
         const labels = { ttgo: 'TTGO LoRa32', heltec: 'Heltec V3' };
         return labels[board] || board || '--';
+    }
+
+    _fmtLastTx(live) {
+        if (!live.tx_count) return 'Never';
+        return live.last_tx_ok ? 'OK' : 'Failed';
+    }
+
+    /** uptime_ms wraps to a small number every ~49.7 days (ESP32
+     * millis() overflow) -- a real device limitation, not a display
+     * bug, if it ever shows a suspiciously small value on a
+     * long-running companion. */
+    _fmtUptime(ms) {
+        const n = Number(ms);
+        if (!Number.isFinite(n) || n < 0) return '--';
+        const totalSec = Math.floor(n / 1000);
+        const days = Math.floor(totalSec / 86400);
+        const hours = Math.floor((totalSec % 86400) / 3600);
+        const mins = Math.floor((totalSec % 3600) / 60);
+        if (days > 0) return `${days}d ${hours}h`;
+        if (hours > 0) return `${hours}h ${mins}m`;
+        if (mins > 0) return `${mins}m`;
+        return `${totalSec}s`;
     }
 
     _reindexDevices() {

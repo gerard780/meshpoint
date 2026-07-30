@@ -615,12 +615,19 @@ class DapnetConfig:
       page but never written to the packets table.
     - ``ignore_capcodes``: pure noise the user never wants to see at
       all -- neither persisted nor shown live.
+
+    ``status_poll_interval_s`` is unrelated to either tier -- it's how
+    often (in seconds) DapnetSerialSource re-sends its {"cmd":"status"}
+    query after the initial one-shot at connect, to keep tx_count/
+    last_tx_ok/uptime_ms fresh. Global, not per-device -- no real
+    reason one companion would want a different cadence than another.
     """
 
     blacklist_capcodes: list[int] = field(
         default_factory=lambda: [200, 208, 216, 224]
     )
     ignore_capcodes: list[int] = field(default_factory=lambda: [4512, 4520])
+    status_poll_interval_s: int = 60
 
 
 @dataclass

@@ -415,6 +415,11 @@ void setupWebServer();
 // (defined earlier in the file, alongside handleSerialJsonLine()) to
 // persist a serial-set callsign to NVS the same way /api/callsign does.
 extern Preferences prefs;
+// Same reason -- txCount/lastTxOk are declared right before
+// sendPocsagAlpha(), further down than sendStatusReply() (which reports
+// them for the dashboard's periodic status poll).
+extern int txCount;
+extern bool lastTxOk;
 
 
 // ---------- WiFi / NTP / OTA ----------
@@ -913,23 +918,29 @@ void checkSerialInput() {
   }
 }
 
-// One-shot status reply for a Meshpoint-side capture source to query
-// once at connect (not a periodic broadcast -- this shares the same
-// serial line as real page JSON, so keeping it request/response-only
-// avoids adding chatter that could be mistaken for a decoded page).
+// Status reply for a Meshpoint-side capture source to query -- once at
+// connect, and again periodically (dapnet.status_poll_interval_s,
+// default 60s) so tx_count/last_tx_ok/uptime_ms stay current. Still
+// strictly request/response, never an unsolicited broadcast -- the
+// Meshpoint side decides the cadence and sends {"cmd":"status"} each
+// time, keeping this shared serial line free of chatter that could be
+// mistaken for a decoded page.
 void sendStatusReply() {
   JsonDocument out;
   out["type"] = "status";
   out["board"] = BOARD_NAME_STR;
   out["callsign"] = getCallsign();
   out["freq"] = POCSAG_FREQ_MHZ;
-  // hostname/wifi_ip are static-ish (unchanged for the life of the WiFi
-  // connection) -- safe to include in this one-shot reply, unlike a
-  // counter/uptime value that would freeze at whatever it was at
-  // connect time and never update again (see the "poll" discussion --
-  // deliberately not added here yet).
   out["hostname"] = MDNS_HOSTNAME;
   out["wifi_ip"] = wifiConnected ? WiFi.localIP().toString() : "";
+  // Genuinely live values -- meaningful now that Meshpoint re-queries
+  // this periodically instead of only once at connect. uptime_ms wraps
+  // to a small number every ~49.7 days (uint32_t millis() overflow) --
+  // a real ESP32 limitation, not a bug here; not worth working around
+  // for a device that gets power-cycled far more often than that.
+  out["tx_count"] = txCount;
+  out["last_tx_ok"] = lastTxOk;
+  out["uptime_ms"] = millis();
   serializeJson(out, Serial);
   Serial.println();
 }
