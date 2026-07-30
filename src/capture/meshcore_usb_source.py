@@ -67,6 +67,14 @@ class MeshcoreUsbCaptureSource(CaptureSource):
         self._resolved_port: Optional[str] = None
         self._health_task: Optional[asyncio.Task] = None
         self._reconnect_task: Optional[asyncio.Task] = None
+        # Guards against two reconnect attempts running concurrently --
+        # e.g. the health-check loop's own inline _reconnect() call
+        # racing with a dashboard-command timeout's _trigger_reconnect()
+        # firing moments later. Both would otherwise call _disconnect()/
+        # _connect() on the same serial port at once, risking an
+        # orphaned MeshCore object and redundant DTR reset pulses on
+        # what may be an already-marginal DTR line. See _reconnect().
+        self._reconnect_in_progress: bool = False
         self._last_rf_signal: Optional[SignalMetrics] = None
         self._last_event_at: float = 0.0
         self._on_connected_callback = None
@@ -254,33 +262,55 @@ class MeshcoreUsbCaptureSource(CaptureSource):
         recovers from a stuck USB-CDC state that otherwise requires
         a manual unplug/replug. On boards where DTR is not wired
         to RESET the pulse is a harmless no-op.
+
+        Guarded against re-entrancy (self._reconnect_in_progress): two
+        different triggers can both decide a reconnect is needed within
+        the same window -- the health-check loop's own inline call and
+        a dashboard-command timeout's _trigger_reconnect(), for
+        instance. Without this guard both would call _disconnect()/
+        _connect() on the same port concurrently, risking an orphaned
+        MeshCore object from whichever attempt loses the race, and
+        doubling up DTR reset pulses on what confirmed live testing
+        showed can be a marginal line on some ports (only MeshCore's
+        capture source touches DTR at all -- the identical port/cable/
+        board worked fine under both Meshtastic and DAPNET firmware,
+        neither of which ever pulses it).
         """
-        await self._disconnect()
-        delay = _RECONNECT_BASE_DELAY_SECONDS
-        attempt = 0
-
-        while self._running:
-            logger.info(
-                "MeshCore USB reconnecting in %ds...", delay
+        if self._reconnect_in_progress:
+            logger.debug(
+                "MeshCore USB reconnect already in progress, skipping duplicate trigger"
             )
-            await asyncio.sleep(delay)
-            if not self._running:
-                return
+            return
+        self._reconnect_in_progress = True
+        try:
+            await self._disconnect()
+            delay = _RECONNECT_BASE_DELAY_SECONDS
+            attempt = 0
 
-            attempt += 1
-            if attempt >= 2 and self._resolved_port:
-                await asyncio.to_thread(
-                    self._pulse_dtr_reset, self._resolved_port
+            while self._running:
+                logger.info(
+                    "MeshCore USB reconnecting in %ds...", delay
                 )
-                # Give the chip a moment to come back from reset.
-                await asyncio.sleep(2.0)
+                await asyncio.sleep(delay)
+                if not self._running:
+                    return
 
-            await self._connect(self._resolved_port)
-            if self._connected:
-                logger.info("MeshCore USB reconnected successfully")
-                return
+                attempt += 1
+                if attempt >= 2 and self._resolved_port:
+                    await asyncio.to_thread(
+                        self._pulse_dtr_reset, self._resolved_port
+                    )
+                    # Give the chip a moment to come back from reset.
+                    await asyncio.sleep(2.0)
 
-            delay = min(delay * 2, _RECONNECT_MAX_DELAY_SECONDS)
+                await self._connect(self._resolved_port)
+                if self._connected:
+                    logger.info("MeshCore USB reconnected successfully")
+                    return
+
+                delay = min(delay * 2, _RECONNECT_MAX_DELAY_SECONDS)
+        finally:
+            self._reconnect_in_progress = False
 
     def _pulse_dtr_reset(self, port: str) -> None:
         """Toggle DTR low to soft-reset an ESP32 companion. Best-effort.
@@ -473,7 +503,19 @@ class MeshcoreUsbCaptureSource(CaptureSource):
         whose command channel silently died kept reporting connected
         while every subsequent command (rename, radio change, health
         probes) timed out, with nothing recovering it on its own.
+
+        No-ops if a reconnect is already running (_reconnect_in_progress)
+        -- e.g. the health-check loop's own inline reconnect already
+        kicked in moments earlier. Avoids cancelling _health_task and
+        spawning a second concurrent attempt for no benefit, since
+        _reconnect() itself would just no-op the duplicate anyway.
         """
+        if self._reconnect_in_progress:
+            logger.debug(
+                "MeshCore companion %r: %s -- reconnect already in progress, skipping",
+                self.name, reason,
+            )
+            return
         logger.warning(
             "MeshCore companion %r: %s -- reconnecting now", self.name, reason,
         )
