@@ -923,6 +923,13 @@ void sendStatusReply() {
   out["board"] = BOARD_NAME_STR;
   out["callsign"] = getCallsign();
   out["freq"] = POCSAG_FREQ_MHZ;
+  // hostname/wifi_ip are static-ish (unchanged for the life of the WiFi
+  // connection) -- safe to include in this one-shot reply, unlike a
+  // counter/uptime value that would freeze at whatever it was at
+  // connect time and never update again (see the "poll" discussion --
+  // deliberately not added here yet).
+  out["hostname"] = MDNS_HOSTNAME;
+  out["wifi_ip"] = wifiConnected ? WiFi.localIP().toString() : "";
   serializeJson(out, Serial);
   Serial.println();
 }

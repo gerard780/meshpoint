@@ -190,6 +190,8 @@ class DapnetSerialSource(CaptureSource):
                     "board": data.get("board"),
                     "callsign": data.get("callsign"),
                     "freq": data.get("freq"),
+                    "hostname": data.get("hostname"),
+                    "wifi_ip": data.get("wifi_ip"),
                 }
                 continue
             if (

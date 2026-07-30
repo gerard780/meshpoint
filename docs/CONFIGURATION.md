@@ -270,15 +270,25 @@ mechanism, independent of the existing role-based
 **Topbar status chip.** `DapnetSerialSource` sends a one-shot
 `{"cmd":"status"}` query right after connecting; the companion (a
 recent-enough build of `extra/pocsag_companion.ino`) replies
-`{"type":"status","board":"ttgo"|"heltec","callsign":"...","freq":439.9875}`,
-cached and exposed via `GET /api/config`'s `dapnet_status` array (one
-entry per configured companion — distinct from the `dapnet` key
-above, which is the saved blacklist/ignore config, not live status).
-Shows as a small topbar badge (callsign, frequency, board), same
-visual style as the Meshtastic USB chip, hidden entirely when no
-POCSAG companion is configured. Older companion firmware without the
-`"cmd"` handler simply never replies — the chip then just shows `----`
-for callsign/board rather than failing.
+`{"type":"status","board":"ttgo"|"heltec","callsign":"...","freq":439.9875,
+"hostname":"pocsag-companion","wifi_ip":"192.168.x.x"}`, cached and
+exposed via `GET /api/config`'s `dapnet_status` array (one entry per
+configured companion — distinct from the `dapnet` key above, which is
+the saved blacklist/ignore config, not live status). Shows as a small
+topbar badge (callsign, frequency, board), same visual style as the
+Meshtastic USB chip, hidden entirely when no POCSAG companion is
+configured. Older companion firmware without the `"cmd"` handler
+simply never replies — the chip then just shows `----` for
+callsign/board rather than failing.
+
+`hostname`/`wifi_ip` are only shown on the Configuration → POCSAG
+readout tiles (a "Web UI" link straight to the companion's own web
+dashboard), not the topbar chip, which stays compact. Deliberately
+static-ish fields only, by design: this query is one-shot (fires once
+at connect, never again), so anything that changes over time — TX
+count, uptime, free heap — would freeze at whatever it was at connect
+time and never update, misleadingly. A periodic-poll redesign would be
+needed before those are worth adding; not done yet.
 
 **Setting the callsign from the dashboard.** Each connected device's
 readout tile on `Configuration → POCSAG` also has a "Set callsign"
