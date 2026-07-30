@@ -462,6 +462,30 @@ class MeshcoreUsbCaptureSource(CaptureSource):
             self._device_info_cache = info
         return info
 
+    def _trigger_reconnect(self, reason: str) -> None:
+        """Mark this companion disconnected and kick off recovery NOW,
+        via the same backoff+DTR-reset-pulse machinery that already
+        handles unexpected drops (_reconnect()) -- instead of leaving a
+        dead connection sitting there as "connected" until the
+        health-check loop eventually notices (which can take minutes,
+        and can be masked indefinitely by ongoing passive RX activity,
+        see _has_recent_event_activity()). Confirmed live: a companion
+        whose command channel silently died kept reporting connected
+        while every subsequent command (rename, radio change, health
+        probes) timed out, with nothing recovering it on its own.
+        """
+        logger.warning(
+            "MeshCore companion %r: %s -- reconnecting now", self.name, reason,
+        )
+        if self._health_task:
+            self._health_task.cancel()
+            self._health_task = None
+        self._connected = False
+        self._reconnect_task = asyncio.create_task(
+            self._reconnect_until_connected(),
+            name="meshcore-command-timeout-reconnect",
+        )
+
     async def set_companion_name(self, name: str) -> SendResult:
         """Rename THIS companion via its own connection.
 
@@ -472,6 +496,9 @@ class MeshcoreUsbCaptureSource(CaptureSource):
         if not self.connected:
             return SendResult(success=False, error="Not connected")
         result = await send_set_companion_name(self._meshcore, name)
+        if result.timed_out:
+            self._trigger_reconnect("set_name timed out")
+            return result
         await self.restart_auto_fetching()
         if result.success:
             logger.info("MeshCore companion %r renamed to %r", self.name, (name or "").strip())
@@ -491,26 +518,23 @@ class MeshcoreUsbCaptureSource(CaptureSource):
         + DTR reset pulse). The reboot the command triggers WILL kill
         this connection -- that's expected, not an error condition, so
         it's handled here rather than left for the health-check loop
-        to eventually notice (which could take minutes).
+        to eventually notice (which could take minutes). A TIMEOUT
+        (as opposed to a clean firmware rejection) gets the same
+        treatment -- it means the connection was already wedged before
+        we even asked, so there's nothing to gain by leaving it marked
+        connected.
         """
         if not self.connected:
             return SendResult(success=False, error="Not connected")
         result = await send_set_radio_params(self._meshcore, freq, bw, sf, cr)
+        if result.timed_out:
+            self._trigger_reconnect("set_radio timed out")
+            return result
         if not result.success:
             return result
 
-        logger.info(
-            "MeshCore companion %r radio set to %.3f MHz / BW%.1f / SF%d / CR%d "
-            "-- rebooting, reconnect will follow",
-            self.name, freq, bw, sf, cr,
-        )
-        if self._health_task:
-            self._health_task.cancel()
-            self._health_task = None
-        self._connected = False
-        self._reconnect_task = asyncio.create_task(
-            self._reconnect_until_connected(),
-            name="meshcore-post-radio-reconnect",
+        self._trigger_reconnect(
+            f"radio set to {freq:.3f} MHz / BW{bw:.1f} / SF{sf} / CR{cr} -- rebooting"
         )
         return result
 
@@ -519,6 +543,9 @@ class MeshcoreUsbCaptureSource(CaptureSource):
         if not self.connected:
             return SendResult(success=False, error="Not connected")
         result = await send_companion_advert(self._meshcore, flood=flood)
+        if result.timed_out:
+            self._trigger_reconnect("advert send timed out")
+            return result
         await self.restart_auto_fetching()
         return result
 
@@ -530,6 +557,9 @@ class MeshcoreUsbCaptureSource(CaptureSource):
         if not self.connected:
             return SendResult(success=False, error="Not connected")
         result = await send_mc_direct_message(self._meshcore, destination, text)
+        if result.timed_out:
+            self._trigger_reconnect("direct message send timed out")
+            return result
         await self.restart_auto_fetching()
         return result
 
@@ -538,6 +568,9 @@ class MeshcoreUsbCaptureSource(CaptureSource):
         if not self.connected:
             return SendResult(success=False, error="Not connected")
         result = await send_mc_channel_message(self._meshcore, channel, text)
+        if result.timed_out:
+            self._trigger_reconnect("channel message send timed out")
+            return result
         await self.restart_auto_fetching()
         return result
 

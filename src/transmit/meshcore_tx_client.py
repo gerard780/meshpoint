@@ -44,11 +44,25 @@ MESHCORE_MAX_USER_CHANNELS = MESHCORE_MAX_DEVICE_SLOTS - 1
 
 @dataclass
 class SendResult:
-    """Outcome of a MeshCore send attempt."""
+    """Outcome of a MeshCore send attempt.
+
+    ``timed_out`` is distinct from a plain ``success=False``: a firmware
+    ERROR response (e.g. "name in use") means the connection is healthy
+    and just rejected the request -- no action needed. A timeout means
+    we got NO answer at all within the deadline, which is real evidence
+    the connection itself is wedged (confirmed live: a companion whose
+    command channel died kept reporting `connected=True` and silently
+    swallowed every subsequent command -- set_name, set_radio, health
+    probes -- until something forced a reconnect). Callers use this
+    flag to trigger an immediate reconnect instead of waiting on the
+    health-check loop, which can be masked for a long time by ongoing
+    passive RX activity (see MeshcoreUsbCaptureSource._has_recent_event_activity).
+    """
 
     success: bool
     event_type: str = ""
     error: str = ""
+    timed_out: bool = False
 
 
 @dataclass
@@ -194,7 +208,7 @@ async def send_set_radio_params(mc, freq: float, bw: float, sf: int, cr: int) ->
     try:
         result = await asyncio.wait_for(mc.commands.set_radio(freq, bw, sf, cr), timeout=10.0)
     except asyncio.TimeoutError:
-        return SendResult(success=False, error="set_radio timed out")
+        return SendResult(success=False, error="set_radio timed out", timed_out=True)
     except Exception as exc:
         logger.exception("MeshCore set_radio failed")
         return SendResult(success=False, error=str(exc))
@@ -254,7 +268,7 @@ async def send_set_companion_name(mc, name: str) -> SendResult:
     try:
         result = await asyncio.wait_for(mc.commands.set_name(cleaned), timeout=10.0)
     except asyncio.TimeoutError:
-        return SendResult(success=False, error="set_name timed out")
+        return SendResult(success=False, error="set_name timed out", timed_out=True)
     except Exception as exc:
         logger.exception("MeshCore set_name failed")
         return SendResult(success=False, error=str(exc))
@@ -303,7 +317,7 @@ async def send_companion_advert(mc, flood: bool = False) -> SendResult:
         logger.info("MeshCore advert sent: %s", event_type)
         return SendResult(success=True, event_type=event_type)
     except asyncio.TimeoutError:
-        return SendResult(success=False, error="Advert timed out")
+        return SendResult(success=False, error="Advert timed out", timed_out=True)
     except Exception as exc:
         logger.exception("MeshCore advert send failed")
         return SendResult(success=False, error=str(exc))
@@ -326,7 +340,7 @@ async def send_mc_channel_message(mc, channel: int, text: str) -> SendResult:
         logger.info("MeshCore channel %d message sent: %s", channel, event_type)
         return SendResult(success=True, event_type=event_type)
     except asyncio.TimeoutError:
-        return SendResult(success=False, error="Send timed out")
+        return SendResult(success=False, error="Send timed out", timed_out=True)
     except Exception as exc:
         logger.exception("MeshCore channel send failed")
         return SendResult(success=False, error=str(exc))
@@ -347,7 +361,7 @@ async def send_mc_direct_message(mc, destination, text: str) -> SendResult:
         logger.info("MeshCore DM sent: %s", event_type)
         return SendResult(success=True, event_type=event_type)
     except asyncio.TimeoutError:
-        return SendResult(success=False, error="Send timed out")
+        return SendResult(success=False, error="Send timed out", timed_out=True)
     except Exception as exc:
         logger.exception("MeshCore DM send failed")
         return SendResult(success=False, error=str(exc))

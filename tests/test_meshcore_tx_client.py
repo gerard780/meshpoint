@@ -307,6 +307,10 @@ class TestSetCompanionName(unittest.IsolatedAsyncioTestCase):
         result = await self._run("Mesh Lab East")
         self.assertFalse(result.success)
         self.assertIn("name in use", result.error)
+        # A clean firmware rejection is NOT the same as a dead
+        # connection -- timed_out must stay False so the caller doesn't
+        # unnecessarily reconnect a perfectly healthy companion.
+        self.assertFalse(result.timed_out)
         # Cache must NOT update if the rename was rejected -- otherwise
         # the dashboard would show a name the device doesn't actually
         # have.
@@ -343,6 +347,11 @@ class TestSetCompanionName(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(result.success)
         self.assertIn("timed out", result.error)
+        # timed_out=True is what tells MeshcoreUsbCaptureSource to treat
+        # this as a dead connection and reconnect immediately, rather
+        # than leaving it marked connected -- distinct from a clean
+        # firmware ERROR response, which doesn't set this flag.
+        self.assertTrue(result.timed_out)
         # On timeout we don't know whether the firmware accepted the
         # name; do not update the cache.
         self.assertEqual(self.mc.self_info["name"], "old-name")
@@ -440,6 +449,7 @@ class TestSendSetRadioParams(unittest.IsolatedAsyncioTestCase):
         result = await self._run()
         self.assertFalse(result.success)
         self.assertIn("bad params", result.error)
+        self.assertFalse(result.timed_out)
         self.reboot_mock.assert_not_called()
 
     async def test_error_with_no_payload(self):
@@ -475,6 +485,7 @@ class TestSendSetRadioParams(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(result.success)
         self.assertIn("timed out", result.error)
+        self.assertTrue(result.timed_out)
         self.reboot_mock.assert_not_called()
 
 
