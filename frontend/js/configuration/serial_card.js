@@ -433,7 +433,6 @@ class SerialConfigCard {
                        value="${baud}" data-device-baud>
             </label>
             ${this._identityHtml(data, live)}
-            ${this._regionEditHtml(live)}
             ${this._readoutsHtml(live)}
         `;
 
@@ -464,6 +463,26 @@ class SerialConfigCard {
             });
         }
 
+        const saveBtBtn = div.querySelector('[data-device-bt-save]');
+        if (saveBtBtn) {
+            saveBtBtn.addEventListener('click', () => {
+                this._saveDeviceBluetooth(div, data.label || '');
+            });
+        }
+
+        const btEnabledEl = div.querySelector('[data-device-bt-enabled]');
+        const btModeWrap = div.querySelector('[data-device-bt-mode-wrap]');
+        const btModeEl = div.querySelector('[data-device-bt-mode]');
+        const btPinWrap = div.querySelector('[data-device-bt-pin-wrap]');
+        const syncBtVisibility = () => {
+            if (btModeWrap) btModeWrap.hidden = !btEnabledEl?.checked;
+            if (btPinWrap) {
+                btPinWrap.hidden = !(btEnabledEl?.checked && btModeEl?.value === 'FIXED_PIN');
+            }
+        };
+        if (btEnabledEl) btEnabledEl.addEventListener('change', syncBtVisibility);
+        if (btModeEl) btModeEl.addEventListener('change', syncBtVisibility);
+
         const portInput = div.querySelector('[data-device-port]');
         if (portInput) {
             portInput.addEventListener('input', () => this._updateResolvedPort(portInput));
@@ -488,24 +507,32 @@ class SerialConfigCard {
         'ITU3_2M', 'ITU1_70CM', 'ITU2_70CM', 'ITU3_70CM', 'ITU2_125CM',
     ];
 
-    /** Sets this stick's LoRa region over its already-open serial
-     * connection (PUT /api/config/serial/region) -- most useful right
-     * after a fresh Meshtastic flash, since region starts UNSET and the
-     * device won't transmit at all until it's set. Always shown when
-     * connected (not just while UNSET), so it doubles as a way to
-     * change region later too. Not persisted to local.yaml, unlike the
-     * name fields below -- see the backend route's own docstring for
-     * why (region durably lives in the device's own NVS; re-applying
-     * it to a swapped-in blank replacement is a much rarer need than
-     * re-applying a name). */
-    _regionEditHtml(live) {
+    /** Inner fragment (no box of its own) for setting this stick's LoRa
+     * region over its already-open serial connection (PUT
+     * /api/config/serial/region) -- most useful right after a fresh
+     * Meshtastic flash, since region starts UNSET and the device won't
+     * transmit at all until it's set. Always shown when connected (not
+     * just while UNSET), so it doubles as a way to change region later
+     * too. Not persisted to local.yaml, unlike the name fields --
+     * see the backend route's own docstring for why (region durably
+     * lives in the device's own NVS; re-applying it to a swapped-in
+     * blank replacement is a much rarer need than re-applying a name).
+     *
+     * Spliced into _identityHtml's own box rather than given a
+     * separate `.cfg-mc-identity` wrapper -- two consecutive boxes
+     * (Name, then Region) looked like nested/stacked boxes-within-boxes
+     * for no reason, since both are "quick identity/radio config for
+     * this stick" in the same spirit. A thin divider (.cfg-mc-identity__
+     * divider) marks the seam instead. */
+    _regionEditFragment(live) {
         if (!live || !live.connected) return '';
         const current = live.region && live.region !== 'UNSET' ? live.region : '';
         const optionsHtml = SerialConfigCard._REGION_CODES.map((r) => (
             `<option value="${r}" ${r === current ? 'selected' : ''}>${r.replace(/_/g, ' ')}</option>`
         )).join('');
         return `
-            <div class="cfg-mc-identity" data-device-region-edit>
+            <div class="cfg-mc-identity__divider"></div>
+            <div data-device-region-edit>
                 <label class="cfg-field cfg-field--inline cfg-field--narrow">
                     <span class="cfg-field__label">LoRa region</span>
                     <select class="cfg-field__input" data-device-region-input>
@@ -561,6 +588,98 @@ class SerialConfigCard {
         button.disabled = false;
     }
 
+    /** Inner fragment for this stick's Bluetooth config (PUT
+     * /api/config/serial/bluetooth) -- deliberately gives the user the
+     * actual choice rather than picking one on their behalf: a USB-only
+     * capture stick may not need Bluetooth at all (uncheck "Enabled"),
+     * or someone wanting occasional phone-app access can pick their own
+     * fixed PIN instead of the random-PIN-on-screen default. Mirrors
+     * _regionEditFragment's "spliced into the same box, not its own"
+     * treatment and its not-persisted-to-local.yaml reasoning. */
+    _bluetoothEditFragment(live) {
+        if (!live || !live.connected) return '';
+        const enabled = live.bluetooth_enabled !== false; // default to checked if unknown
+        const mode = live.bluetooth_mode || 'RANDOM_PIN';
+        const modes = [
+            ['RANDOM_PIN', 'Random PIN (shown on device)'],
+            ['FIXED_PIN', 'Fixed PIN (set your own)'],
+            ['NO_PIN', 'No PIN'],
+        ];
+        const modeOptions = modes.map(([value, label]) => (
+            `<option value="${value}" ${value === mode ? 'selected' : ''}>${label}</option>`
+        )).join('');
+        return `
+            <div class="cfg-mc-identity__divider"></div>
+            <div data-device-bluetooth-edit>
+                <label class="cfg-field cfg-field--toggle">
+                    <input type="checkbox" data-device-bt-enabled ${enabled ? 'checked' : ''}>
+                    <span class="cfg-field__label">Bluetooth enabled</span>
+                </label>
+                <label class="cfg-field cfg-field--inline cfg-field--narrow"
+                       data-device-bt-mode-wrap ${enabled ? '' : 'hidden'}>
+                    <span class="cfg-field__label">Pairing mode</span>
+                    <select class="cfg-field__input" data-device-bt-mode>
+                        ${modeOptions}
+                    </select>
+                </label>
+                <label class="cfg-field cfg-field--inline cfg-field--narrow"
+                       data-device-bt-pin-wrap ${(enabled && mode === 'FIXED_PIN') ? '' : 'hidden'}>
+                    <span class="cfg-field__label">Fixed PIN</span>
+                    <input class="cfg-field__input" type="number" min="0" max="999999"
+                           placeholder="e.g. 123456" data-device-bt-pin>
+                </label>
+                <div class="cfg-card__actions">
+                    <button class="terminal-button terminal-button--primary"
+                            type="button" data-device-bt-save>
+                        Set Bluetooth
+                    </button>
+                </div>
+                <p class="cfg-status" data-device-bt-status aria-live="polite"></p>
+            </div>
+        `;
+    }
+
+    async _saveDeviceBluetooth(deviceDiv, label) {
+        const enabledEl = deviceDiv.querySelector('[data-device-bt-enabled]');
+        const modeEl = deviceDiv.querySelector('[data-device-bt-mode]');
+        const pinEl = deviceDiv.querySelector('[data-device-bt-pin]');
+        const status = deviceDiv.querySelector('[data-device-bt-status]');
+        const button = deviceDiv.querySelector('[data-device-bt-save]');
+        if (!enabledEl || !status) return;
+
+        const enabled = enabledEl.checked;
+        const mode = enabled ? modeEl?.value : null;
+        let fixedPin = null;
+        if (enabled && mode === 'FIXED_PIN') {
+            const pinValue = (pinEl?.value || '').trim();
+            if (!pinValue) {
+                status.dataset.kind = 'error';
+                status.textContent = 'Enter a PIN.';
+                return;
+            }
+            fixedPin = Number(pinValue);
+        }
+
+        button.disabled = true;
+        status.dataset.kind = 'pending';
+        status.textContent = 'Setting Bluetooth…';
+
+        const result = await this._api.put('/api/config/serial/bluetooth', {
+            label, enabled, mode, fixed_pin: fixedPin,
+        });
+
+        if (result) {
+            status.dataset.kind = 'success';
+            status.textContent = enabled ? 'Bluetooth updated.' : 'Bluetooth disabled.';
+            this._api.toast('Bluetooth config updated');
+            await this._api.refresh();
+        } else {
+            status.dataset.kind = 'error';
+            status.textContent = 'Save failed.';
+        }
+        button.disabled = false;
+    }
+
     _identityHtml(data, live) {
         const longValue = this._esc(data.long_name || (live && live.long_name) || '');
         const shortValue = this._esc(data.short_name || (live && live.short_name) || '');
@@ -593,6 +712,8 @@ class SerialConfigCard {
                     </button>
                 </div>
                 <p class="cfg-status" data-device-name-status aria-live="polite"></p>
+                ${this._regionEditFragment(live)}
+                ${this._bluetoothEditFragment(live)}
             </div>
         `;
     }

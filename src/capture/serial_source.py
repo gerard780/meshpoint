@@ -280,6 +280,66 @@ class SerialCaptureSource(CaptureSource):
         logger.info("%s: region set to %s", self.name, region)
         return {"success": True, "region": region}
 
+    def set_bluetooth(
+        self, enabled: bool, mode: Optional[str] = None, fixed_pin: Optional[int] = None,
+    ) -> dict:
+        """Set this stick's Bluetooth config over its already-open
+        serial connection -- same ``Node.writeConfig()`` mechanism (and
+        the same non-blocking guarantee) as ``set_region()``/
+        ``set_owner()``.
+
+        Deliberately leaves the choice to the user rather than picking
+        one on their behalf: a USB-only capture stick arguably has no
+        need for Bluetooth at all, but someone who still wants
+        occasional phone-app access can pick a fixed PIN instead of
+        disabling it outright.
+
+        ``mode`` is a ``Config.BluetoothConfig.PairingMode`` enum NAME
+        (``"RANDOM_PIN"``/``"FIXED_PIN"``/``"NO_PIN"``) -- optional,
+        left unchanged if not given. ``fixed_pin`` only means anything
+        when mode is (or already is) ``"FIXED_PIN"``.
+        """
+        iface = self._interface
+        if iface is None or not self._connected:
+            return {"success": False, "error": "Not connected"}
+
+        mode_value = None
+        if mode is not None:
+            try:
+                from meshtastic.protobuf import config_pb2
+                mode_value = config_pb2.Config.BluetoothConfig.PairingMode.Value(mode)
+            except ValueError:
+                return {"success": False, "error": f"Unknown pairing mode: {mode}"}
+
+        if fixed_pin is not None and not (0 <= fixed_pin <= 999999):
+            return {"success": False, "error": "PIN must be a 6-digit number (0-999999)"}
+
+        try:
+            node = iface.localNode
+            node.localConfig.bluetooth.enabled = enabled
+            if mode_value is not None:
+                node.localConfig.bluetooth.mode = mode_value
+            if fixed_pin is not None:
+                node.localConfig.bluetooth.fixed_pin = fixed_pin
+            node.writeConfig("bluetooth")
+        except SystemExit:
+            logger.error(
+                "%s: writeConfig(bluetooth) unexpectedly hit sys.exit (should be "
+                "unreachable -- 'bluetooth' is always a valid config_name)", self.name,
+            )
+            return {"success": False, "error": "Internal error setting Bluetooth config"}
+        except Exception as exc:
+            logger.exception("%s: set_bluetooth failed", self.name)
+            return {"success": False, "error": str(exc)}
+
+        self._radio_info["bluetooth_enabled"] = enabled
+        if mode is not None:
+            self._radio_info["bluetooth_mode"] = mode
+        logger.info(
+            "%s: bluetooth set (enabled=%s mode=%s)", self.name, enabled, mode,
+        )
+        return {"success": True, "enabled": enabled, "mode": mode, "fixed_pin": fixed_pin}
+
     async def start(self) -> None:
         try:
             import meshtastic.serial_interface
@@ -354,6 +414,7 @@ class SerialCaptureSource(CaptureSource):
             "own_node_num": None,
             "firmware_version": None, "hw_model": None,
             "tx_power": None,
+            "bluetooth_enabled": None, "bluetooth_mode": None,
         }
         try:
             from meshtastic.protobuf import config_pb2
@@ -385,6 +446,15 @@ class SerialCaptureSource(CaptureSource):
                     info["coding_rate"] = f"4/{int(lora.coding_rate)}"
         except Exception:
             logger.debug("Could not read LoRa config from serial interface", exc_info=True)
+        try:
+            from meshtastic.protobuf import config_pb2 as _config_pb2
+            bluetooth = interface.localNode.localConfig.bluetooth
+            info["bluetooth_enabled"] = bool(bluetooth.enabled)
+            info["bluetooth_mode"] = _config_pb2.Config.BluetoothConfig.PairingMode.Name(
+                bluetooth.mode,
+            )
+        except Exception:
+            logger.debug("Could not read Bluetooth config from serial interface", exc_info=True)
         try:
             info["short_name"] = interface.getShortName()
             info["long_name"] = interface.getLongName()

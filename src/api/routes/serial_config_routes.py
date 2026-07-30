@@ -307,6 +307,43 @@ async def update_serial_region(
     return {"saved": True, "region": result.get("region")}
 
 
+class SerialBluetoothUpdate(BaseModel):
+    label: str = ""
+    enabled: bool
+    mode: Optional[str] = None
+    fixed_pin: Optional[int] = None
+
+
+@router.put("/bluetooth")
+async def update_serial_bluetooth(
+    req: SerialBluetoothUpdate,
+    _claims: SessionClaims = Depends(require_admin),
+) -> dict:
+    """Set one Meshtastic USB stick's Bluetooth config (enabled +
+    pairing mode/PIN) over its live serial connection.
+
+    User's own choice, not a fixed policy: a USB-only stick may not
+    need Bluetooth at all (enabled=False), or someone wanting occasional
+    phone-app access can pick their own fixed PIN (mode="FIXED_PIN" +
+    fixed_pin) instead of the random-PIN-on-screen default. Not
+    persisted to local.yaml -- same reasoning as region (durably lives
+    in the device's own NVS; this only ever pushes to whichever device
+    is connected right now).
+    """
+    source = _resolve_serial_source(req.label)
+    if source is None or not source.connected:
+        raise HTTPException(503, "Serial device not connected")
+
+    result = source.set_bluetooth(req.enabled, req.mode, req.fixed_pin)
+    if not result["success"]:
+        logger.warning(
+            "Dashboard set_bluetooth failed for %s: %s", source.name, result["error"],
+        )
+        raise HTTPException(400, result["error"] or "Device rejected Bluetooth change")
+
+    return {"saved": True, "enabled": result.get("enabled"), "mode": result.get("mode")}
+
+
 class SerialAdvertRequest(BaseModel):
     label: str = ""
 
