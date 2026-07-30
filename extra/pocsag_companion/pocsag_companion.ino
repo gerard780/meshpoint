@@ -420,6 +420,12 @@ extern Preferences prefs;
 // them for the dashboard's periodic status poll).
 extern int txCount;
 extern bool lastTxOk;
+// Same reason -- rebootRequested/rebootRequestedAt are declared much
+// further down (right before the web dashboard's /api/reboot handler),
+// needed by handleRebootCommand() defined up near the other serial
+// command handlers.
+extern bool rebootRequested;
+extern unsigned long rebootRequestedAt;
 
 
 // ---------- WiFi / NTP / OTA ----------
@@ -432,16 +438,23 @@ extern bool lastTxOk;
 bool wifiConnected = false;
 
 void setupWifiNtpOta() {
-  if (strlen(WIFI_SSID) == 0 || String(WIFI_SSID) == "YOUR_WIFI_SSID") {
-    Serial.println("[wifi] no credentials configured in secrets.h, skipping WiFi/NTP/OTA");
+  // Reads via the runtime getters (NVS override if set via {"cmd":"set_wifi"},
+  // else the secrets.h compile-time default loaded into them at boot) --
+  // never the raw WIFI_SSID/WIFI_PASSWORD macros directly, so a serial-set
+  // override actually takes effect on the next reboot.
+  String ssid = getWifiSsid();
+  String pass = getWifiPassword();
+
+  if (ssid.length() == 0 || ssid == "YOUR_WIFI_SSID") {
+    Serial.println("[wifi] no credentials configured, skipping WiFi/NTP/OTA");
     return;
   }
 
   WiFi.mode(WIFI_STA);
   WiFi.setHostname(MDNS_HOSTNAME);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  WiFi.begin(ssid.c_str(), pass.c_str());
 
-  Serial.print("[wifi] connecting to "); Serial.print(WIFI_SSID);
+  Serial.print("[wifi] connecting to "); Serial.print(ssid);
   unsigned long start = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - start < WIFI_CONNECT_TIMEOUT_MS) {
     delay(250);
@@ -908,13 +921,14 @@ void checkSerialInput() {
     if (c == '\n' || c == '\r') {
       serialLineBuf.trim();
       if (serialLineBuf.length() > 0) {
-        // A set_web_password command carries the new password in
+        // set_web_password/set_wifi both carry a real secret in
         // cleartext (same as every other command on this line) -- this
         // log line is the one place that would otherwise echo it back
-        // verbatim, so redact specifically this command instead of
-        // logging its raw contents like every other line.
-        if (serialLineBuf.indexOf("set_web_password") >= 0) {
-          Serial.println("[serial] received line: (set_web_password command, redacted)");
+        // verbatim, so redact specifically these two instead of
+        // logging their raw contents like every other line.
+        if (serialLineBuf.indexOf("set_web_password") >= 0 ||
+            serialLineBuf.indexOf("set_wifi") >= 0) {
+          Serial.println("[serial] received line: (credential command, redacted)");
         } else {
           Serial.print("[serial] received line: \""); Serial.print(serialLineBuf); Serial.println("\"");
         }
@@ -1038,6 +1052,54 @@ void handleResetCredentialsCommand() {
   Serial.println();
 }
 
+// Saves new WiFi credentials for the NEXT reboot -- setupWifiNtpOta()
+// only ever runs once, in setup(), so this alone does not reconnect;
+// pair with {"cmd":"reboot"} below to actually apply it. SSID is
+// echoed back on success (not sensitive, unlike a password); the
+// password itself never is, and this command's line is redacted from
+// checkSerialInput()'s log the same way set_web_password's is.
+void handleSetWifiCommand(JsonDocument &doc) {
+  String ssid = doc["ssid"] | "";
+  String pass = doc["password"] | ""; // empty is valid -- open networks have no password
+  ssid.trim();
+
+  JsonDocument out;
+  out["type"] = "set_wifi_result";
+
+  if (ssid.length() == 0) {
+    out["ok"] = false;
+    out["error"] = "ssid is required";
+  } else {
+    setWifiCredentials(ssid, pass);
+    prefs.putString("wifi_ssid", ssid);
+    prefs.putString("wifi_pass", pass);
+    out["ok"] = true;
+    out["ssid"] = ssid;
+  }
+
+  serializeJson(out, Serial);
+  Serial.println();
+}
+
+// Lets Meshpoint trigger a reboot over serial -- e.g. right after
+// saving new WiFi credentials above -- without needing the web
+// dashboard's own Reboot button, which is the whole point: bad WiFi
+// credentials could otherwise make the web dashboard unreachable too,
+// while the USB serial connection keeps working regardless of WiFi
+// state. Same delayed-restart mechanism /api/reboot already uses:
+// send the reply first, let loop() call ESP.restart() a little later
+// (REBOOT_DELAY_MS), so this reply actually reaches Meshpoint over
+// serial before the reboot happens.
+void handleRebootCommand() {
+  JsonDocument out;
+  out["type"] = "reboot_result";
+  out["ok"] = true;
+  serializeJson(out, Serial);
+  Serial.println();
+  rebootRequested = true;
+  rebootRequestedAt = millis();
+}
+
 void handleSerialJsonLine(const String &line) {
   JsonDocument doc;
   DeserializationError err = deserializeJson(doc, line);
@@ -1062,6 +1124,14 @@ void handleSerialJsonLine(const String &line) {
   }
   if (cmd == "reset_credentials") {
     handleResetCredentialsCommand();
+    return;
+  }
+  if (cmd == "set_wifi") {
+    handleSetWifiCommand(doc);
+    return;
+  }
+  if (cmd == "reboot") {
+    handleRebootCommand();
     return;
   }
 
@@ -1283,6 +1353,41 @@ String getWebPassword() {
 void setWebPassword(const String &newPassword) {
   xSemaphoreTake(stateMutex, portMAX_DELAY);
   webPassword = newPassword;
+  xSemaphoreGive(stateMutex);
+}
+
+// WiFi credentials -- start as the secrets.h compile-time defaults,
+// overridable at runtime via NVS the same way callsign/web password
+// are. Unlike those two, a change here does NOT take effect
+// immediately: setupWifiNtpOta() only ever runs once, in setup(), so
+// a new SSID/password needs a reboot to actually connect with (see
+// handleRebootCommand() below, which lets Meshpoint trigger that
+// without needing the web dashboard at all -- the whole point, since
+// bad WiFi credentials could otherwise make the web dashboard
+// unreachable too).
+String wifiSsid = WIFI_SSID;
+String wifiPass = WIFI_PASSWORD;
+
+String getWifiSsid() {
+  String s;
+  xSemaphoreTake(stateMutex, portMAX_DELAY);
+  s = wifiSsid;
+  xSemaphoreGive(stateMutex);
+  return s;
+}
+
+String getWifiPassword() {
+  String p;
+  xSemaphoreTake(stateMutex, portMAX_DELAY);
+  p = wifiPass;
+  xSemaphoreGive(stateMutex);
+  return p;
+}
+
+void setWifiCredentials(const String &ssid, const String &pass) {
+  xSemaphoreTake(stateMutex, portMAX_DELAY);
+  wifiSsid = ssid;
+  wifiPass = pass;
   xSemaphoreGive(stateMutex);
 }
 
@@ -1987,6 +2092,10 @@ void setup() {
   prefs.begin(PREFS_NAMESPACE, false);
   setCallsign(prefs.getString("callsign", ""));
   setWebPassword(prefs.getString("web_password", WEB_PASSWORD));
+  setWifiCredentials(
+    prefs.getString("wifi_ssid", WIFI_SSID),
+    prefs.getString("wifi_pass", WIFI_PASSWORD)
+  );
   displayTimeoutMs = prefs.getUInt("dispTimeoutMs", DISPLAY_TIMEOUT_MS_DEFAULT);
 
   configureForRx();

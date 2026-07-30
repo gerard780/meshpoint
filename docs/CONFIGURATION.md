@@ -346,6 +346,36 @@ destructive — TX is blocked again immediately until a new callsign is
 set. A successful reset also clears the readout tile's cached
 callsign right away, rather than waiting for the next status poll.
 
+**Setting WiFi credentials + reboot from the dashboard.** A separate
+"Save WiFi Credentials" field pair sends
+`{"cmd":"set_wifi","ssid":"...","password":"..."}` — this is the
+piece that lets a brand-new companion be configured entirely through
+Meshpoint, without ever hand-editing `secrets.h` before the first
+flash or opening the companion's own web dashboard: USB serial keeps
+working regardless of WiFi state, so a board with blank or wrong WiFi
+credentials is still fully reachable for this. Deliberately its own
+separate action from callsign/password/reset above — changing WiFi
+takes the companion off its current network until it reboots with the
+new credentials, a bigger consequence than any of those.
+
+Saving does **not** reconnect by itself — `setupWifiNtpOta()` only
+ever runs once, at boot — so a successful save offers a confirm-modal
+"reboot now?" prompt, which (if accepted) sends a second command,
+`{"cmd":"reboot"}`, over the same serial connection. The password
+field is handled exactly like the web password: never cached,
+persisted, or logged by Meshpoint, and the companion's reply only ever
+echoes the SSID back (not sensitive), never the password.
+
+**Not yet confirmed on real hardware**: whether Meshpoint's own serial
+connection survives the companion's reboot. Both current boards use a
+separate USB-UART bridge chip, which typically stays enumerated
+through an ESP32 reset — but if a board ever used the chip's native
+USB instead, it would re-enumerate and could need a Meshpoint
+**service restart** to reconnect (`DapnetSerialSource` has no
+reconnect loop, matching `SerialCaptureSource`'s own documented
+limitation). If the reboot command times out or the readout tile goes
+stale afterward, that's the mechanism to check first.
+
 **DAPNET capcode filters** (`Configuration → POCSAG`'s second card,
 `dapnet:` config section) — two independent, immediately-applied
 tiers (no restart needed) for decoded pages, keyed on capcode:

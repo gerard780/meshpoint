@@ -158,3 +158,85 @@ async def reset_dapnet_credentials(
 
     source.note_new_callsign("")
     return {"saved": True}
+
+
+class DapnetWifiUpdate(BaseModel):
+    label: str = ""
+    ssid: str
+    password: str = ""  # empty is valid -- open networks have no password
+
+
+@router.put("/wifi")
+async def update_dapnet_wifi(
+    req: DapnetWifiUpdate,
+    _claims: SessionClaims = Depends(require_admin),
+) -> dict:
+    """Set one POCSAG companion's WiFi SSID/password over its live
+    serial connection.
+
+    Deliberately a SEPARATE action from callsign/web-password/reset:
+    this one takes the companion off its current network until it
+    reboots with the new credentials, unlike the others which never
+    touch connectivity. Handled as a secret the same way the web
+    password is -- never cached, persisted, or logged on the Meshpoint
+    side, and the companion's own reply never echoes the password back
+    (only the SSID, which isn't sensitive).
+
+    Saving alone does NOT reconnect -- setupWifiNtpOta() only runs once
+    at boot. Call POST .../reboot afterward (or the companion's own web
+    Reboot button, if still reachable) to actually apply it.
+    """
+    source = _resolve_dapnet_source(req.label)
+    if source is None or not source.connected:
+        raise HTTPException(503, "POCSAG companion not connected")
+
+    result = await source.send_command(
+        {"cmd": "set_wifi", "ssid": req.ssid, "password": req.password},
+        expect_type="set_wifi_result",
+        timeout=5.0,
+    )
+    if result is None:
+        raise HTTPException(503, "No reply from companion (timed out)")
+    if not result.get("ok"):
+        raise HTTPException(400, result.get("error") or "Rejected by companion")
+
+    return {"saved": True, "ssid": result.get("ssid", "")}
+
+
+class DapnetRebootRequest(BaseModel):
+    label: str = ""
+
+
+@router.post("/reboot")
+async def reboot_dapnet_companion(
+    req: DapnetRebootRequest,
+    _claims: SessionClaims = Depends(require_admin),
+) -> dict:
+    """Reboot one POCSAG companion over its live serial connection --
+    e.g. right after saving new WiFi credentials, without needing the
+    companion's own web dashboard (which the whole WiFi-set flow exists
+    to route around in the first place, since bad credentials could
+    make that dashboard unreachable too).
+
+    NOTE: whether Meshpoint's own connection to this companion survives
+    the reboot depends on the board's USB hardware -- a separate USB-
+    UART bridge chip (common on these boards) keeps the OS-level serial
+    device enumerated through an ESP32 reset; a board using the chip's
+    own native USB instead would re-enumerate and could require a
+    Meshpoint service restart to reconnect (DapnetSerialSource has no
+    reconnect loop, matching SerialCaptureSource's own documented
+    limitation). Not yet confirmed either way on real hardware.
+    """
+    source = _resolve_dapnet_source(req.label)
+    if source is None or not source.connected:
+        raise HTTPException(503, "POCSAG companion not connected")
+
+    result = await source.send_command(
+        {"cmd": "reboot"}, expect_type="reboot_result", timeout=5.0,
+    )
+    if result is None:
+        raise HTTPException(503, "No reply from companion (timed out)")
+    if not result.get("ok"):
+        raise HTTPException(400, result.get("error") or "Rejected by companion")
+
+    return {"saved": True}

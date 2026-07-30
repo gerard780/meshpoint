@@ -340,6 +340,7 @@ class PocsagSerialConfigCard {
             ${this._deviceReadoutsHtml(live)}
             ${this._callsignEditHtml(live)}
             ${this._webPasswordEditHtml(live)}
+            ${this._wifiEditHtml(live)}
             ${this._resetCredentialsHtml(live)}
         `;
 
@@ -366,6 +367,13 @@ class PocsagSerialConfigCard {
         if (webPasswordSaveBtn) {
             webPasswordSaveBtn.addEventListener('click', () => {
                 this._saveWebPassword(div, data.label || '');
+            });
+        }
+
+        const wifiSaveBtn = div.querySelector('[data-wifi-save]');
+        if (wifiSaveBtn) {
+            wifiSaveBtn.addEventListener('click', () => {
+                this._saveWifi(div, data.label || '');
             });
         }
 
@@ -582,12 +590,12 @@ class PocsagSerialConfigCard {
         const button = deviceDiv.querySelector('[data-reset-credentials]');
         if (!status) return;
 
-        if (!window.confirm(
-            'Reset this companion\'s callsign and web dashboard password back to '
-            + 'defaults? TX will be blocked again until a new callsign is set.',
-        )) {
-            return;
-        }
+        const ok = await window.confirmModal({
+            label: 'Reset callsign & password',
+            description: 'Reset this companion\'s callsign and web dashboard password '
+                + 'back to defaults? TX will be blocked again until a new callsign is set.',
+        });
+        if (!ok) return;
 
         button.disabled = true;
         status.dataset.kind = 'pending';
@@ -605,6 +613,113 @@ class PocsagSerialConfigCard {
             status.textContent = 'Reset failed.';
         }
         button.disabled = false;
+    }
+
+    /** WiFi SSID/password, deliberately its OWN separate control (not
+     * folded into the callsign/password edit blocks above, and not the
+     * reset button either) -- unlike everything else on this row, this
+     * one takes the companion off its current network until it reboots
+     * with the new credentials, so it gets its own explicit confirm
+     * step plus a save-then-optionally-reboot flow rather than sharing
+     * a button with lower-stakes actions. Password field cleared
+     * immediately on send, success or not, same as the web password
+     * control. */
+    _wifiEditHtml(live) {
+        if (!live || !live.connected) return '';
+        return `
+            <div class="cfg-mc-identity" data-wifi-edit>
+                <label class="cfg-field cfg-field--inline">
+                    <span class="cfg-field__label">WiFi SSID</span>
+                    <input class="cfg-field__input" type="text"
+                           placeholder="Network name"
+                           data-wifi-ssid-input>
+                </label>
+                <label class="cfg-field cfg-field--inline">
+                    <span class="cfg-field__label">WiFi password</span>
+                    <input class="cfg-field__input" type="password"
+                           autocomplete="new-password"
+                           placeholder="Leave blank for an open network"
+                           data-wifi-password-input>
+                </label>
+                <div class="cfg-card__actions">
+                    <button class="terminal-button terminal-button--primary"
+                            type="button" data-wifi-save>
+                        Save WiFi Credentials
+                    </button>
+                </div>
+                <p class="cfg-field__hint">
+                    Takes effect on the companion's next reboot, not immediately --
+                    it stays connected to its CURRENT WiFi (or none) until then.
+                </p>
+                <p class="cfg-status" data-wifi-status aria-live="polite"></p>
+            </div>
+        `;
+    }
+
+    async _saveWifi(deviceDiv, label) {
+        const ssidInput = deviceDiv.querySelector('[data-wifi-ssid-input]');
+        const passwordInput = deviceDiv.querySelector('[data-wifi-password-input]');
+        const status = deviceDiv.querySelector('[data-wifi-status]');
+        const button = deviceDiv.querySelector('[data-wifi-save]');
+        if (!ssidInput || !status) return;
+
+        const ssid = (ssidInput.value || '').trim();
+        const password = passwordInput.value || '';
+        passwordInput.value = ''; // never leave it sitting in the DOM, success or not
+        if (!ssid) {
+            status.dataset.kind = 'error';
+            status.textContent = 'Enter an SSID.';
+            return;
+        }
+
+        const ok = await window.confirmModal({
+            label: 'Save new WiFi credentials',
+            description: `Save "${ssid}" as this companion's WiFi network? It will `
+                + 'stay on its CURRENT network (or offline) until you reboot it -- '
+                + 'you\'ll be offered that as a next step.',
+        });
+        if (!ok) return;
+
+        button.disabled = true;
+        status.dataset.kind = 'pending';
+        status.textContent = 'Sending to companion…';
+
+        const result = await this._api.put('/api/config/dapnet/wifi', { label, ssid, password });
+
+        if (result) {
+            status.dataset.kind = 'success';
+            status.textContent = `Saved. Reboot now to connect to "${result.ssid}"?`;
+            ssidInput.value = '';
+            button.disabled = false;
+            const rebootNow = await window.confirmModal({
+                label: 'Reboot companion now?',
+                description: 'Apply the new WiFi credentials immediately? The companion '
+                    + 'will restart -- POCSAG decode pauses briefly, and Meshpoint may need '
+                    + 'a service restart afterward if its serial connection doesn\'t survive '
+                    + 'the reboot.',
+            });
+            if (rebootNow) {
+                await this._rebootCompanion(deviceDiv, label);
+            }
+        } else {
+            status.dataset.kind = 'error';
+            status.textContent = 'Save failed.';
+            button.disabled = false;
+        }
+    }
+
+    async _rebootCompanion(deviceDiv, label) {
+        const status = deviceDiv.querySelector('[data-wifi-status]');
+        const result = await this._api.post('/api/config/dapnet/reboot', { label });
+        if (result) {
+            status.dataset.kind = 'success';
+            status.textContent = 'Rebooting…';
+            this._api.toast('Companion rebooting with new WiFi credentials');
+        } else {
+            status.dataset.kind = 'error';
+            status.textContent = 'Reboot command failed -- saved credentials will still '
+                + 'apply next time it reboots some other way.';
+        }
     }
 
     _fmtFreq(mhz) {
