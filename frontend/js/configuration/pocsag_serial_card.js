@@ -443,7 +443,7 @@ class PocsagSerialConfigCard {
                 <label class="cfg-field cfg-field--inline">
                     <span class="cfg-field__label">Set callsign (required before TX)</span>
                     <input class="cfg-field__input" type="text" maxlength="8"
-                           placeholder="e.g. PD2EMC"
+                           placeholder="e.g. AB1CDE"
                            data-callsign-input>
                 </label>
                 <div class="cfg-card__actions">
