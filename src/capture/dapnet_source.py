@@ -11,8 +11,8 @@ seconds (default 60, see ``DapnetConfig.status_poll_interval_s`` --
 still request/response, never an unsolicited device broadcast, so this
 shared serial line stays free of chatter that could be mistaken for a
 decoded page) -- answered with ``{"type":"status","board":...,
-"callsign":...,"freq":...,"hostname":...,"wifi_ip":...,"tx_count":...,
-"last_tx_ok":...,"uptime_ms":...}`` -- and an on-demand
+"callsign":...,"freq":...,"hostname":...,"wifi_ssid":...,"wifi_ip":...,
+"tx_count":...,"last_tx_ok":...,"uptime_ms":...}`` -- and an on-demand
 ``{"cmd":"set_callsign",...}`` a dashboard save can trigger (answered
 with ``{"type":"set_callsign_result","ok":...}``), both via
 ``send_command()``.
@@ -238,6 +238,7 @@ class DapnetSerialSource(CaptureSource):
                     "callsign": data.get("callsign"),
                     "freq": data.get("freq"),
                     "hostname": data.get("hostname"),
+                    "wifi_ssid": data.get("wifi_ssid"),
                     "wifi_ip": data.get("wifi_ip"),
                     "tx_count": data.get("tx_count"),
                     "last_tx_ok": data.get("last_tx_ok"),

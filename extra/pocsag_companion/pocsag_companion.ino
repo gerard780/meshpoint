@@ -955,6 +955,7 @@ void sendStatusReply() {
   out["callsign"] = getCallsign();
   out["freq"] = POCSAG_FREQ_MHZ;
   out["hostname"] = MDNS_HOSTNAME;
+  out["wifi_ssid"] = wifiConnected ? WiFi.SSID() : "";
   out["wifi_ip"] = wifiConnected ? WiFi.localIP().toString() : "";
   // Genuinely live values -- meaningful now that Meshpoint re-queries
   // this periodically instead of only once at connect. uptime_ms wraps
@@ -1563,6 +1564,29 @@ const char INDEX_HTML[] = R"HTMLPAGE(
 
   <div class="grid">
     <div class="card">
+      <h2>Hardware</h2>
+      <div class="kv"><span>Board</span><span id="hwBoard">--</span></div>
+      <div class="kv"><span>Chip</span><span id="hwChip">--</span></div>
+      <div class="kv"><span>Cores / Freq</span><span id="hwCores">--</span></div>
+      <div class="kv"><span>Flash</span><span id="hwFlash">--</span></div>
+      <div class="kv"><span>Free Heap</span><span id="hwHeap">--</span></div>
+      <div class="kv"><span>Sketch Used / Free</span><span id="hwSketch">--</span></div>
+      <div class="kv"><span>SDK</span><span id="hwSdk">--</span></div>
+    </div>
+
+    <div class="card">
+      <h2>Connection</h2>
+      <div class="kv"><span>SSID</span><span id="connSsid">--</span></div>
+      <div class="kv"><span>IP</span><span id="connIp">--</span></div>
+      <div class="kv"><span>Gateway</span><span id="connGw">--</span></div>
+      <div class="kv"><span>Subnet</span><span id="connSubnet">--</span></div>
+      <div class="kv"><span>DNS</span><span id="connDns">--</span></div>
+      <div class="kv"><span>MAC</span><span id="connMac">--</span></div>
+      <div class="kv"><span>RSSI</span><span id="connRssi">--</span></div>
+      <div class="kv"><span>Hostname</span><span id="connHost">--</span></div>
+    </div>
+
+    <div class="card">
       <h2>In / Outgoing Log</h2>
       <div id="log"></div>
     </div>
@@ -1595,29 +1619,6 @@ const char INDEX_HTML[] = R"HTMLPAGE(
       <button onclick="applyTimeout()">Apply</button>
       <div class="result" id="timeoutResult"></div>
       <div class="hint">GPIO)HTMLPAGE" TOSTRING(BUTTON_GPIO) R"HTMLPAGE( (BOOT button) also toggles the display manually at any time.</div>
-    </div>
-
-    <div class="card">
-      <h2>Hardware</h2>
-      <div class="kv"><span>Board</span><span id="hwBoard">--</span></div>
-      <div class="kv"><span>Chip</span><span id="hwChip">--</span></div>
-      <div class="kv"><span>Cores / Freq</span><span id="hwCores">--</span></div>
-      <div class="kv"><span>Flash</span><span id="hwFlash">--</span></div>
-      <div class="kv"><span>Free Heap</span><span id="hwHeap">--</span></div>
-      <div class="kv"><span>Sketch Used / Free</span><span id="hwSketch">--</span></div>
-      <div class="kv"><span>SDK</span><span id="hwSdk">--</span></div>
-    </div>
-
-    <div class="card">
-      <h2>Connection</h2>
-      <div class="kv"><span>SSID</span><span id="connSsid">--</span></div>
-      <div class="kv"><span>IP</span><span id="connIp">--</span></div>
-      <div class="kv"><span>Gateway</span><span id="connGw">--</span></div>
-      <div class="kv"><span>Subnet</span><span id="connSubnet">--</span></div>
-      <div class="kv"><span>DNS</span><span id="connDns">--</span></div>
-      <div class="kv"><span>MAC</span><span id="connMac">--</span></div>
-      <div class="kv"><span>RSSI</span><span id="connRssi">--</span></div>
-      <div class="kv"><span>Hostname</span><span id="connHost">--</span></div>
     </div>
   </div>
 </div>

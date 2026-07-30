@@ -197,6 +197,7 @@ def _dapnet_status_entry(src) -> dict:
         "callsign": status.get("callsign"),
         "frequency_mhz": status.get("freq"),
         "hostname": status.get("hostname"),
+        "wifi_ssid": status.get("wifi_ssid"),
         "wifi_ip": status.get("wifi_ip"),
         "tx_count": status.get("tx_count"),
         "last_tx_ok": status.get("last_tx_ok"),

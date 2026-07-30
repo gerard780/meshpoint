@@ -306,6 +306,11 @@ wraps to a small number every ~49.7 days (ESP32 `millis()` overflow)
 -- a real device limitation, not a display bug, if it ever shows a
 suspiciously small value on a long-running companion.
 
+A **WiFi SSID** tile sits next to Web UI, sourced from the same
+periodic status reply -- lets you confirm which network the companion
+is actually connected to right on this page, without needing to open
+its own web dashboard's Connection card.
+
 **Setting the callsign from the dashboard.** Each connected device's
 readout tile on `Configuration → POCSAG` also has a "Set callsign"
 field — saving it sends `{"cmd":"set_callsign","callsign":"..."}` over

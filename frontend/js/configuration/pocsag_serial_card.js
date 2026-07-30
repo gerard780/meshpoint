@@ -12,11 +12,11 @@
  * a free-text display name/label. It DOES show live readouts (same
  * `cfg-mc-readout` tiles as Serial/MeshCore), sourced from
  * `config.dapnet_status` -- the same per-device connected/board/
- * callsign/frequency_mhz/hostname/wifi_ip data the topbar's DAPNET
- * chip partly consumes too (DapnetSerialSource's one-shot
- * {"cmd":"status"} reply). hostname/wifi_ip (a clickable link to the
- * companion's own web UI) only show here, not on the topbar chip --
- * kept that one compact.
+ * callsign/frequency_mhz/hostname/wifi_ssid/wifi_ip data the topbar's
+ * DAPNET chip partly consumes too (DapnetSerialSource's periodic
+ * {"cmd":"status"} query). hostname/wifi_ssid/wifi_ip (the last as a
+ * clickable link to the companion's own web UI) only show here, not
+ * on the topbar chip -- kept that one compact.
  * There's no bandwidth/SF/TX-power/firmware equivalent here (POCSAG is
  * fixed-frequency FSK, not LoRa, and the sketch's status reply doesn't
  * report a firmware version), so the tile set is deliberately smaller
@@ -415,6 +415,10 @@ class PocsagSerialConfigCard {
                 <div class="cfg-mc-readout">
                     <span class="cfg-mc-readout__label">Web UI</span>
                     <span class="cfg-mc-readout__value">${this._webUiHtml(live)}</span>
+                </div>
+                <div class="cfg-mc-readout">
+                    <span class="cfg-mc-readout__label">WiFi SSID</span>
+                    <span class="cfg-mc-readout__value">${this._esc(live.wifi_ssid || '--')}</span>
                 </div>
                 <div class="cfg-mc-readout">
                     <span class="cfg-mc-readout__label">TX Count</span>
