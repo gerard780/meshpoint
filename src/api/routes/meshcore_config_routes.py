@@ -26,6 +26,7 @@ from pydantic import BaseModel
 
 from src.api.auth.dependencies import require_admin
 from src.api.auth.jwt_session import SessionClaims
+from src.cli.meshcore_radio_config import REGION_PRESETS
 from src.config import AppConfig, save_section_to_yaml
 
 logger = logging.getLogger(__name__)
@@ -299,6 +300,63 @@ async def update_companion_name(
         "name": cleaned,
         "event_type": event_type,
     }
+
+
+class CompanionRadioUpdate(BaseModel):
+    preset: str
+    label: str = ""
+
+
+@router.put("/companion-radio")
+async def update_companion_radio(
+    req: CompanionRadioUpdate,
+    _claims: SessionClaims = Depends(require_admin),
+) -> dict:
+    """Set one USB companion's radio frequency/bandwidth/SF/CR from a
+    named REGION_PRESETS key, then reboot it to apply -- same shape as
+    Configuration -> Serial's own Region control (a named-preset select
+    + Set button), and same "not persisted to local.yaml" reasoning as
+    ``update_serial_region``: radio params live durably in the
+    companion's own flash (NVS), not Meshpoint's config, so there's
+    nothing to save here beyond pushing it to the device.
+
+    Unlike the standalone ``meshpoint meshcore-radio`` CLI, this goes
+    through the companion's own already-open connection
+    (``MeshcoreUsbCaptureSource.set_radio_params``) instead of
+    stopping the whole service to steal the port -- see that method's
+    docstring for why the CLI's cold-reconnect approach can fail on
+    ESP32-S3 boards. The reboot this triggers WILL disconnect the
+    companion for a while (the source's own reconnect loop picks it
+    back up); ``rebooting: true`` in the response tells the frontend
+    to expect a "reconnecting" readout rather than an immediate value
+    refresh.
+    """
+    if _config is None:
+        raise HTTPException(503, "Config not loaded")
+
+    preset = REGION_PRESETS.get(req.preset.upper())
+    if preset is None:
+        raise HTTPException(400, f"Unknown preset: {req.preset}")
+
+    source = _resolve_companion_source(req.label)
+    if source is None or not source.connected:
+        raise HTTPException(503, "MeshCore companion not connected")
+
+    result = await source.set_radio_params(
+        preset.frequency_mhz, preset.bandwidth_khz,
+        preset.spreading_factor, preset.coding_rate,
+    )
+    if not result.success:
+        logger.warning(
+            "Dashboard set_radio_params failed for %s: %s", source.name, result.error
+        )
+        raise HTTPException(400, result.error or "Companion rejected radio params")
+
+    logger.info(
+        "MeshCore companion %r radio set to preset %r via dashboard",
+        source.name, req.preset,
+    )
+    return {"saved": True, "preset": req.preset, "rebooting": True}
 
 
 class CompanionAdvertRequest(BaseModel):

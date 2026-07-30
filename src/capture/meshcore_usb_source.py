@@ -29,6 +29,7 @@ from src.transmit.meshcore_tx_client import (
     send_mc_channel_message,
     send_mc_direct_message,
     send_set_companion_name,
+    send_set_radio_params,
 )
 
 logger = logging.getLogger(__name__)
@@ -474,6 +475,43 @@ class MeshcoreUsbCaptureSource(CaptureSource):
         await self.restart_auto_fetching()
         if result.success:
             logger.info("MeshCore companion %r renamed to %r", self.name, (name or "").strip())
+        return result
+
+    async def set_radio_params(self, freq: float, bw: float, sf: int, cr: int) -> SendResult:
+        """Set THIS companion's radio frequency/bandwidth/SF/CR and reboot
+        it to apply, over its own already-open connection.
+
+        Unlike the standalone `meshpoint meshcore-radio` CLI (which has
+        to stop the whole meshpoint service, steal the port, and cold-
+        connect within a fixed handshake timeout -- and can fail on
+        ESP32-S3 boards that need longer than that to come back up),
+        this reuses the live connection the source already holds and
+        hands recovery off to the SAME reconnect machinery that
+        already handles unexpected disconnects (_reconnect(): backoff
+        + DTR reset pulse). The reboot the command triggers WILL kill
+        this connection -- that's expected, not an error condition, so
+        it's handled here rather than left for the health-check loop
+        to eventually notice (which could take minutes).
+        """
+        if not self.connected:
+            return SendResult(success=False, error="Not connected")
+        result = await send_set_radio_params(self._meshcore, freq, bw, sf, cr)
+        if not result.success:
+            return result
+
+        logger.info(
+            "MeshCore companion %r radio set to %.3f MHz / BW%.1f / SF%d / CR%d "
+            "-- rebooting, reconnect will follow",
+            self.name, freq, bw, sf, cr,
+        )
+        if self._health_task:
+            self._health_task.cancel()
+            self._health_task = None
+        self._connected = False
+        self._reconnect_task = asyncio.create_task(
+            self._reconnect_until_connected(),
+            name="meshcore-post-radio-reconnect",
+        )
         return result
 
     async def send_advert(self, flood: bool = False) -> SendResult:
