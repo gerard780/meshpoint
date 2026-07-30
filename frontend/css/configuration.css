@@ -480,16 +480,6 @@ select.cfg-field__input option:checked {
     align-items: center;
 }
 
-/* Marks a seam between two logically-distinct control groups sharing
-   one .cfg-mc-identity box (e.g. Name fields, then LoRa region) --
-   avoids two consecutive separately-boxed .cfg-mc-identity blocks
-   looking like nested boxes-within-boxes. */
-.cfg-mc-identity__divider {
-    height: 1px;
-    background: rgba(255, 255, 255, 0.08);
-    margin: 4px 0;
-}
-
 .cfg-mc-identity .cfg-field__hint {
     margin: 0;
     font-size: 11px;

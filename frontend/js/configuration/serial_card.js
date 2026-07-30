@@ -433,6 +433,7 @@ class SerialConfigCard {
                        value="${baud}" data-device-baud>
             </label>
             ${this._identityHtml(data, live)}
+            ${this._radioControlsHtml(live)}
             ${this._readoutsHtml(live)}
         `;
 
@@ -497,6 +498,8 @@ class SerialConfigCard {
         if (btEnabledEl) btEnabledEl.addEventListener('change', syncBtVisibility);
         if (btModeEl) btModeEl.addEventListener('change', syncBtVisibility);
 
+        this._wireRadioControls(div, live);
+
         const portInput = div.querySelector('[data-device-port]');
         if (portInput) {
             portInput.addEventListener('input', () => this._updateResolvedPort(portInput));
@@ -521,54 +524,228 @@ class SerialConfigCard {
         'ITU3_2M', 'ITU1_70CM', 'ITU2_70CM', 'ITU3_70CM', 'ITU2_125CM',
     ];
 
-    /** Inner fragment (no box of its own) for setting this stick's LoRa
-     * region over its already-open serial connection (PUT
-     * /api/config/serial/region) -- most useful right after a fresh
-     * Meshtastic flash, since region starts UNSET and the device won't
-     * transmit at all until it's set. Always shown when connected (not
-     * just while UNSET), so it doubles as a way to change region later
-     * too. Not persisted to local.yaml, unlike the name fields --
-     * see the backend route's own docstring for why (region durably
-     * lives in the device's own NVS; re-applying it to a swapped-in
-     * blank replacement is a much rarer need than re-applying a name).
-     *
-     * Spliced into _identityHtml's own box rather than given a
-     * separate `.cfg-mc-identity` wrapper -- two consecutive boxes
-     * (Name, then Region) looked like nested/stacked boxes-within-boxes
-     * for no reason, since both are "quick identity/radio config for
-     * this stick" in the same spirit. A thin divider (.cfg-mc-identity__
-     * divider) marks the seam instead. */
-    _regionEditFragment(live) {
+    /** Named ModemPreset values this control exposes -- matches the
+     * same preset list Configuration -> Radio's own concentrator page
+     * shows (LongFast/LongTurbo/.../ShortTurbo), not the full modern
+     * Meshtastic enum (which also has Lite/Narrow/Tiny/MediumTurbo
+     * variants not offered there either). "Custom" is deliberately not
+     * included -- that's a fully custom spread-factor/bandwidth/coding-
+     * rate config, not a named preset, and isn't exposed from here. */
+    static _MODEM_PRESETS = [
+        { value: 'LONG_FAST', label: 'LongFast' },
+        { value: 'LONG_TURBO', label: 'LongTurbo' },
+        { value: 'LONG_MODERATE', label: 'LongModerate' },
+        { value: 'LONG_SLOW', label: 'LongSlow' },
+        { value: 'VERY_LONG_SLOW', label: 'VeryLongSlow' },
+        { value: 'MEDIUM_FAST', label: 'MediumFast' },
+        { value: 'MEDIUM_SLOW', label: 'MediumSlow' },
+        { value: 'SHORT_FAST', label: 'ShortFast' },
+        { value: 'SHORT_SLOW', label: 'ShortSlow' },
+        { value: 'SHORT_TURBO', label: 'ShortTurbo' },
+    ];
+
+    /** Same preset-minutes list as NodeInfoConfigCard/TelemetryBroadcastCard
+     * (Configuration -> Radio's own broadcast-interval cards) -- reused
+     * verbatim so a device row's chip-row looks and behaves identically
+     * to those, not a different-looking control for the same idea. */
+    static _INTERVAL_PRESETS = [
+        { minutes: 0, label: 'Off', off: true },
+        { minutes: 5, label: '5m' },
+        { minutes: 30, label: '30m' },
+        { minutes: 60, label: '1h' },
+        { minutes: 180, label: '3h' },
+        { minutes: 360, label: '6h' },
+        { minutes: 720, label: '12h' },
+        { minutes: 1440, label: '24h' },
+    ];
+
+    /** This stick's radio/security config -- LoRa region, modem preset
+     * (chip row), NodeInfo/telemetry broadcast intervals (chip row +
+     * custom-minutes fallback, exactly the same pattern Configuration ->
+     * Radio's own NodeInfoConfigCard/TelemetryBroadcastCard use), and
+     * Bluetooth. Deliberately rendered as PLAIN .cfg-field elements with
+     * no extra bordered wrapper (earlier draft nested these in their own
+     * `.cfg-mc-identity` box(es), which looked inconsistent with every
+     * other settings page in the app -- .cfg-companion itself already
+     * provides the one border a device row needs). Always shown when
+     * connected (not just while unconfigured), so this also serves as a
+     * way to change any of these later. None of these persist to
+     * local.yaml -- all live durably in the device's own NVS, and
+     * re-applying them to a swapped-in blank replacement is a much
+     * rarer need than re-applying the name (which does persist, see
+     * _identityHtml). */
+    _radioControlsHtml(live) {
         if (!live || !live.connected) return '';
-        const current = live.region && live.region !== 'UNSET' ? live.region : '';
-        const optionsHtml = SerialConfigCard._REGION_CODES.map((r) => (
-            `<option value="${r}" ${r === current ? 'selected' : ''}>${r.replace(/_/g, ' ')}</option>`
+        const region = live.region && live.region !== 'UNSET' ? live.region : '';
+        const regionOptions = SerialConfigCard._REGION_CODES.map((r) => (
+            `<option value="${r}" ${r === region ? 'selected' : ''}>${r.replace(/_/g, ' ')}</option>`
         )).join('');
+
+        const btEnabled = live.bluetooth_enabled !== false; // default checked if unknown
+        const btMode = live.bluetooth_mode || 'RANDOM_PIN';
+        const btModeOptions = [
+            ['RANDOM_PIN', 'Random PIN (shown on device)'],
+            ['FIXED_PIN', 'Fixed PIN (set your own)'],
+            ['NO_PIN', 'No PIN'],
+        ].map(([value, label]) => (
+            `<option value="${value}" ${value === btMode ? 'selected' : ''}>${label}</option>`
+        )).join('');
+
         return `
-            <div class="cfg-mc-identity__divider"></div>
-            <div data-device-region-edit>
-                <label class="cfg-field cfg-field--inline cfg-field--narrow">
-                    <span class="cfg-field__label">LoRa region</span>
-                    <select class="cfg-field__input" data-device-region-input>
-                        <option value="" disabled ${current ? '' : 'selected'}>-- select --</option>
-                        ${optionsHtml}
-                    </select>
-                </label>
-                <div class="cfg-card__actions">
-                    <button class="terminal-button terminal-button--primary"
-                            type="button" data-device-region-save>
-                        Set Region
-                    </button>
-                </div>
-                ${live.region === 'UNSET' ? `
-                    <p class="cfg-field__hint">
-                        Region is UNSET -- this stick will not transmit at all until
-                        a region is set (Meshtastic's factory default on a fresh flash).
-                    </p>
-                ` : ''}
-                <p class="cfg-status" data-device-region-status aria-live="polite"></p>
+            <label class="cfg-field cfg-field--narrow">
+                <span class="cfg-field__label">LoRa region</span>
+                <select class="cfg-field__input" data-device-region-input>
+                    <option value="" disabled ${region ? '' : 'selected'}>-- select --</option>
+                    ${regionOptions}
+                </select>
+            </label>
+            ${live.region === 'UNSET' ? `
+                <p class="cfg-field__hint">
+                    Region is UNSET -- this stick will not transmit at all until
+                    a region is set (Meshtastic's factory default on a fresh flash).
+                </p>
+            ` : ''}
+            <div class="cfg-card__actions">
+                <button class="terminal-button terminal-button--primary"
+                        type="button" data-device-region-save>
+                    Set Region
+                </button>
             </div>
+            <p class="cfg-status" data-device-region-status aria-live="polite"></p>
+
+            <div class="cfg-field">
+                <span class="cfg-field__label">Modem preset</span>
+                <div class="cfg-chip-row" data-device-preset-chips></div>
+            </div>
+            <div class="cfg-card__actions">
+                <button class="terminal-button terminal-button--primary"
+                        type="button" data-device-preset-save>
+                    Set Preset
+                </button>
+            </div>
+            <p class="cfg-status" data-device-preset-status aria-live="polite"></p>
+
+            <div class="cfg-field">
+                <span class="cfg-field__label">NodeInfo broadcast interval</span>
+                <div class="cfg-chip-row" data-device-ni-chips></div>
+            </div>
+            <label class="cfg-field cfg-field--narrow">
+                <span class="cfg-field__label">Custom (minutes)</span>
+                <input class="cfg-field__input" type="number" min="0" max="1440"
+                       data-device-ni-input>
+            </label>
+
+            <div class="cfg-field">
+                <span class="cfg-field__label">Telemetry broadcast interval</span>
+                <div class="cfg-chip-row" data-device-tel-chips></div>
+            </div>
+            <label class="cfg-field cfg-field--narrow">
+                <span class="cfg-field__label">Custom (minutes)</span>
+                <input class="cfg-field__input" type="number" min="0" max="1440"
+                       data-device-tel-input>
+            </label>
+            <div class="cfg-card__actions">
+                <button class="terminal-button terminal-button--primary"
+                        type="button" data-device-intervals-save>
+                    Set Intervals
+                </button>
+            </div>
+            <p class="cfg-status" data-device-intervals-status aria-live="polite"></p>
+
+            <label class="cfg-field cfg-field--toggle">
+                <input type="checkbox" data-device-bt-enabled ${btEnabled ? 'checked' : ''}>
+                <span class="cfg-field__label">Bluetooth enabled</span>
+            </label>
+            <label class="cfg-field cfg-field--inline cfg-field--narrow"
+                   data-device-bt-mode-wrap ${btEnabled ? '' : 'hidden'}>
+                <span class="cfg-field__label">Pairing mode</span>
+                <select class="cfg-field__input" data-device-bt-mode>
+                    ${btModeOptions}
+                </select>
+            </label>
+            <label class="cfg-field cfg-field--inline cfg-field--narrow"
+                   data-device-bt-pin-wrap ${(btEnabled && btMode === 'FIXED_PIN') ? '' : 'hidden'}>
+                <span class="cfg-field__label">Fixed PIN</span>
+                <input class="cfg-field__input" type="number" min="0" max="999999"
+                       placeholder="e.g. 123456" data-device-bt-pin>
+            </label>
+            <div class="cfg-card__actions">
+                <button class="terminal-button terminal-button--primary"
+                        type="button" data-device-bt-save>
+                    Set Bluetooth
+                </button>
+            </div>
+            <p class="cfg-status" data-device-bt-status aria-live="polite"></p>
         `;
+    }
+
+    /** Wires up the modem-preset and both interval chip-rows for one
+     * device row -- called once per row from _addDeviceRow, mirroring
+     * NodeInfoConfigCard's own _renderChips/_setActiveChip pattern
+     * (click a chip -> highlight it + populate the paired custom-minutes
+     * input; typing in the custom input directly highlights a matching
+     * chip if any, clears selection otherwise). */
+    _wireRadioControls(div, live) {
+        const presetChips = div.querySelector('[data-device-preset-chips]');
+        if (presetChips) {
+            presetChips.innerHTML = SerialConfigCard._MODEM_PRESETS.map((p) => (
+                `<button type="button" class="cfg-chip" data-preset="${p.value}">${p.label}</button>`
+            )).join('');
+            const current = live?.modem_preset;
+            presetChips.querySelectorAll('[data-preset]').forEach((chip) => {
+                chip.classList.toggle('cfg-chip--selected', chip.dataset.preset === current);
+                chip.addEventListener('click', () => {
+                    presetChips.querySelectorAll('[data-preset]').forEach((c) => (
+                        c.classList.toggle('cfg-chip--selected', c === chip)
+                    ));
+                });
+            });
+        }
+
+        this._wireIntervalChips(
+            div, '[data-device-ni-chips]', '[data-device-ni-input]',
+            live?.node_info_broadcast_secs,
+        );
+        this._wireIntervalChips(
+            div, '[data-device-tel-chips]', '[data-device-tel-input]',
+            live?.telemetry_device_update_interval,
+        );
+    }
+
+    _wireIntervalChips(div, chipsSelector, inputSelector, currentSecs) {
+        const chipsEl = div.querySelector(chipsSelector);
+        const inputEl = div.querySelector(inputSelector);
+        if (!chipsEl || !inputEl) return;
+
+        chipsEl.innerHTML = SerialConfigCard._INTERVAL_PRESETS.map((p) => {
+            const offCls = p.off ? ' cfg-chip--off' : '';
+            return `<button type="button" class="cfg-chip${offCls}"
+                    data-minutes="${p.minutes}">${p.label}</button>`;
+        }).join('');
+
+        const currentMinutes = currentSecs != null ? Math.round(currentSecs / 60) : null;
+        inputEl.value = currentMinutes != null ? String(currentMinutes) : '';
+
+        const setActive = (minutes) => {
+            chipsEl.querySelectorAll('[data-minutes]').forEach((chip) => {
+                chip.classList.toggle(
+                    'cfg-chip--selected', parseInt(chip.dataset.minutes, 10) === minutes,
+                );
+            });
+        };
+        setActive(currentMinutes);
+
+        chipsEl.querySelectorAll('[data-minutes]').forEach((chip) => {
+            chip.addEventListener('click', () => {
+                const minutes = parseInt(chip.dataset.minutes, 10);
+                inputEl.value = String(minutes);
+                setActive(minutes);
+            });
+        });
+        inputEl.addEventListener('input', () => {
+            const minutes = parseInt(inputEl.value, 10);
+            setActive(isNaN(minutes) ? null : minutes);
+        });
     }
 
     async _saveDeviceRegion(deviceDiv, label) {
@@ -602,55 +779,37 @@ class SerialConfigCard {
         button.disabled = false;
     }
 
-    /** Inner fragment for this stick's Bluetooth config (PUT
-     * /api/config/serial/bluetooth) -- deliberately gives the user the
-     * actual choice rather than picking one on their behalf: a USB-only
-     * capture stick may not need Bluetooth at all (uncheck "Enabled"),
-     * or someone wanting occasional phone-app access can pick their own
-     * fixed PIN instead of the random-PIN-on-screen default. Mirrors
-     * _regionEditFragment's "spliced into the same box, not its own"
-     * treatment and its not-persisted-to-local.yaml reasoning. */
-    _bluetoothEditFragment(live) {
-        if (!live || !live.connected) return '';
-        const enabled = live.bluetooth_enabled !== false; // default to checked if unknown
-        const mode = live.bluetooth_mode || 'RANDOM_PIN';
-        const modes = [
-            ['RANDOM_PIN', 'Random PIN (shown on device)'],
-            ['FIXED_PIN', 'Fixed PIN (set your own)'],
-            ['NO_PIN', 'No PIN'],
-        ];
-        const modeOptions = modes.map(([value, label]) => (
-            `<option value="${value}" ${value === mode ? 'selected' : ''}>${label}</option>`
-        )).join('');
-        return `
-            <div class="cfg-mc-identity__divider"></div>
-            <div data-device-bluetooth-edit>
-                <label class="cfg-field cfg-field--toggle">
-                    <input type="checkbox" data-device-bt-enabled ${enabled ? 'checked' : ''}>
-                    <span class="cfg-field__label">Bluetooth enabled</span>
-                </label>
-                <label class="cfg-field cfg-field--inline cfg-field--narrow"
-                       data-device-bt-mode-wrap ${enabled ? '' : 'hidden'}>
-                    <span class="cfg-field__label">Pairing mode</span>
-                    <select class="cfg-field__input" data-device-bt-mode>
-                        ${modeOptions}
-                    </select>
-                </label>
-                <label class="cfg-field cfg-field--inline cfg-field--narrow"
-                       data-device-bt-pin-wrap ${(enabled && mode === 'FIXED_PIN') ? '' : 'hidden'}>
-                    <span class="cfg-field__label">Fixed PIN</span>
-                    <input class="cfg-field__input" type="number" min="0" max="999999"
-                           placeholder="e.g. 123456" data-device-bt-pin>
-                </label>
-                <div class="cfg-card__actions">
-                    <button class="terminal-button terminal-button--primary"
-                            type="button" data-device-bt-save>
-                        Set Bluetooth
-                    </button>
-                </div>
-                <p class="cfg-status" data-device-bt-status aria-live="polite"></p>
-            </div>
-        `;
+    async _saveDeviceModemPreset(deviceDiv, label) {
+        const chipsEl = deviceDiv.querySelector('[data-device-preset-chips]');
+        const status = deviceDiv.querySelector('[data-device-preset-status]');
+        const button = deviceDiv.querySelector('[data-device-preset-save]');
+        if (!chipsEl || !status) return;
+
+        const selected = chipsEl.querySelector('.cfg-chip--selected');
+        if (!selected) {
+            status.dataset.kind = 'error';
+            status.textContent = 'Pick a preset.';
+            return;
+        }
+
+        button.disabled = true;
+        status.dataset.kind = 'pending';
+        status.textContent = 'Setting modem preset…';
+
+        const result = await this._api.put('/api/config/serial/modem-preset', {
+            label, modem_preset: selected.dataset.preset,
+        });
+
+        if (result) {
+            status.dataset.kind = 'success';
+            status.textContent = `Preset set to ${result.modem_preset}.`;
+            this._api.toast('Modem preset updated');
+            await this._api.refresh();
+        } else {
+            status.dataset.kind = 'error';
+            status.textContent = 'Save failed.';
+        }
+        button.disabled = false;
     }
 
     async _saveDeviceBluetooth(deviceDiv, label) {
@@ -694,121 +853,9 @@ class SerialConfigCard {
         button.disabled = false;
     }
 
-    /** Named ModemPreset values this control exposes -- matches the
-     * same preset list Configuration -> Radio's own concentrator page
-     * shows (LongFast/LongTurbo/.../ShortTurbo), not the full modern
-     * Meshtastic enum (which also has Lite/Narrow/Tiny/MediumTurbo
-     * variants not offered there either). "Custom" is deliberately not
-     * included -- that's a fully custom spread-factor/bandwidth/coding-
-     * rate config, not a named preset, and isn't exposed from here. */
-    static _MODEM_PRESETS = [
-        ['LONG_FAST', 'LongFast'], ['LONG_TURBO', 'LongTurbo'],
-        ['LONG_MODERATE', 'LongModerate'], ['LONG_SLOW', 'LongSlow'],
-        ['VERY_LONG_SLOW', 'VeryLongSlow (RX only)'],
-        ['MEDIUM_FAST', 'MediumFast'], ['MEDIUM_SLOW', 'MediumSlow'],
-        ['SHORT_FAST', 'ShortFast'], ['SHORT_SLOW', 'ShortSlow'],
-        ['SHORT_TURBO', 'ShortTurbo'],
-    ];
-
-    /** Inner fragment for setting this stick's modem preset (PUT
-     * /api/config/serial/modem-preset) -- same live-connection/no-
-     * persistence pattern as region and Bluetooth above. */
-    _modemPresetEditFragment(live) {
-        if (!live || !live.connected) return '';
-        const current = live.modem_preset || '';
-        const optionsHtml = SerialConfigCard._MODEM_PRESETS.map(([value, label]) => (
-            `<option value="${value}" ${value === current ? 'selected' : ''}>${label}</option>`
-        )).join('');
-        return `
-            <div class="cfg-mc-identity__divider"></div>
-            <div data-device-preset-edit>
-                <label class="cfg-field cfg-field--inline cfg-field--narrow">
-                    <span class="cfg-field__label">Modem preset</span>
-                    <select class="cfg-field__input" data-device-preset-input>
-                        ${optionsHtml}
-                    </select>
-                </label>
-                <div class="cfg-card__actions">
-                    <button class="terminal-button terminal-button--primary"
-                            type="button" data-device-preset-save>
-                        Set Preset
-                    </button>
-                </div>
-                <p class="cfg-status" data-device-preset-status aria-live="polite"></p>
-            </div>
-        `;
-    }
-
-    async _saveDeviceModemPreset(deviceDiv, label) {
-        const input = deviceDiv.querySelector('[data-device-preset-input]');
-        const status = deviceDiv.querySelector('[data-device-preset-status]');
-        const button = deviceDiv.querySelector('[data-device-preset-save]');
-        if (!input || !status) return;
-
-        button.disabled = true;
-        status.dataset.kind = 'pending';
-        status.textContent = 'Setting modem preset…';
-
-        const result = await this._api.put('/api/config/serial/modem-preset', {
-            label, modem_preset: input.value,
-        });
-
-        if (result) {
-            status.dataset.kind = 'success';
-            status.textContent = `Preset set to ${result.modem_preset}.`;
-            this._api.toast('Modem preset updated');
-            await this._api.refresh();
-        } else {
-            status.dataset.kind = 'error';
-            status.textContent = 'Save failed.';
-        }
-        button.disabled = false;
-    }
-
-    /** Inner fragment for this stick's OWN NodeInfo/telemetry broadcast
-     * intervals (PUT /api/config/serial/broadcast-intervals) -- NOT the
-     * same subsystem as Meshpoint's own concentrator broadcast-interval
-     * cards (Configuration -> Radio), which schedule Meshpoint's own
-     * directly-driven radio; this is the attached stick's own firmware-
-     * internal timing, independent of that. Minutes in the UI (matching
-     * the concentrator cards' own convention), converted to/from the
-     * seconds the underlying config fields actually use. 0 = off/paused,
-     * matching Meshtastic's own convention for these fields. */
-    _broadcastIntervalsEditFragment(live) {
-        if (!live || !live.connected) return '';
-        const nodeInfoMin = live.node_info_broadcast_secs != null
-            ? Math.round(live.node_info_broadcast_secs / 60) : '';
-        const telemetryMin = live.telemetry_device_update_interval != null
-            ? Math.round(live.telemetry_device_update_interval / 60) : '';
-        return `
-            <div class="cfg-mc-identity__divider"></div>
-            <div data-device-intervals-edit>
-                <label class="cfg-field cfg-field--inline cfg-field--narrow">
-                    <span class="cfg-field__label">NodeInfo interval (min, 0=off)</span>
-                    <input class="cfg-field__input" type="number" min="0" max="1440"
-                           placeholder="15" value="${nodeInfoMin}"
-                           data-device-nodeinfo-interval>
-                </label>
-                <label class="cfg-field cfg-field--inline cfg-field--narrow">
-                    <span class="cfg-field__label">Telemetry interval (min, 0=off)</span>
-                    <input class="cfg-field__input" type="number" min="0" max="1440"
-                           placeholder="15" value="${telemetryMin}"
-                           data-device-telemetry-interval>
-                </label>
-                <div class="cfg-card__actions">
-                    <button class="terminal-button terminal-button--primary"
-                            type="button" data-device-intervals-save>
-                        Set Intervals
-                    </button>
-                </div>
-                <p class="cfg-status" data-device-intervals-status aria-live="polite"></p>
-            </div>
-        `;
-    }
-
     async _saveDeviceBroadcastIntervals(deviceDiv, label) {
-        const nodeInfoEl = deviceDiv.querySelector('[data-device-nodeinfo-interval]');
-        const telemetryEl = deviceDiv.querySelector('[data-device-telemetry-interval]');
+        const nodeInfoEl = deviceDiv.querySelector('[data-device-ni-input]');
+        const telemetryEl = deviceDiv.querySelector('[data-device-tel-input]');
         const status = deviceDiv.querySelector('[data-device-intervals-status]');
         const button = deviceDiv.querySelector('[data-device-intervals-save]');
         if (!status) return;
@@ -875,10 +922,6 @@ class SerialConfigCard {
                     </button>
                 </div>
                 <p class="cfg-status" data-device-name-status aria-live="polite"></p>
-                ${this._regionEditFragment(live)}
-                ${this._modemPresetEditFragment(live)}
-                ${this._broadcastIntervalsEditFragment(live)}
-                ${this._bluetoothEditFragment(live)}
             </div>
         `;
     }
