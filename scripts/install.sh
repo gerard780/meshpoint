@@ -400,6 +400,20 @@ else
     pip3 install --upgrade "meshtastic[cli]" --break-system-packages
 fi
 
+# esptool as a bare system command -- NOT the copy arduino-cli's esp32
+# core already bundles (buried inside /opt/arduino-cli/data/packages/
+# esp32/tools/esptool_py/<version>/, never on PATH). Meshtastic's own
+# official flashing scripts (device-install.sh/device-update.sh) and
+# manual `esptool` invocations both expect a plain `esptool` command,
+# same as arduino-cli itself needed its own install rather than reusing
+# some other copy.
+if command -v esptool &>/dev/null; then
+    info "esptool already installed, skipping"
+else
+    info "Installing esptool..."
+    pip3 install --upgrade esptool --break-system-packages
+fi
+
 if command -v meshcore-cli &>/dev/null; then
     info "MeshCore CLI already installed, skipping"
 else
