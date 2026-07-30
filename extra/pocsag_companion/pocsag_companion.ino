@@ -2173,6 +2173,7 @@ void setup() {
   if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
     Serial.println("OLED FAIL");
   }
+  display.setRotation(2); // 0=normal, 2=180 degrees (Adafruit_GFX)
   oled("POCSAG companion", "starting...");
 
   SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_CS);
