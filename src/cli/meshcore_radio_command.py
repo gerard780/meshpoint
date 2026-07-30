@@ -1,8 +1,9 @@
 """Standalone CLI command to configure MeshCore companion radio frequency.
 
 Allows switching the MeshCore USB companion's radio region without
-re-running the full setup wizard.  Supports preset regions (US, EU, ANZ)
-and custom manual entry.
+re-running the full setup wizard. Supports the full MeshCore community
+preset list (see REGION_PRESETS in meshcore_radio_config.py) plus
+custom manual entry.
 """
 
 from __future__ import annotations
@@ -28,7 +29,17 @@ _LOCAL_CONFIG_PATH = Path("config/local.yaml")
 
 PRESET_CHOICES = list(REGION_PRESETS.keys()) + ["custom"]
 
-_REGION_MAP = {"EU_868": "EU"}
+# Short aliases for the three presets REGION_PRESETS used to expose
+# directly as "US"/"EU"/"ANZ" before it grew to the full MeshCore
+# community list -- keeps `--region US` etc. working, and "EU_868"
+# maps to Meshpoint's own overall radio.region naming (see
+# wizard_meshcore.py's meshcore_region_map, same mapping).
+_REGION_MAP = {
+    "US": "USA_CANADA",
+    "EU": "EU_UK_NARROW",
+    "EU_868": "EU_UK_NARROW",
+    "ANZ": "AUSTRALIA_NARROW",
+}
 
 
 def run_meshcore_radio(args: argparse.Namespace) -> None:

@@ -24,10 +24,31 @@ class RadioPreset:
     coding_rate: int
 
 
+# Sourced from the official MeshCore client's own "Select Radio Settings"
+# picker ("These presets are suggested by the community") -- transcribed
+# from the app directly rather than guessed, so these match what a real
+# MeshCore user would pick from the community-maintained list.
 REGION_PRESETS: dict[str, RadioPreset] = {
-    "US": RadioPreset("US  (910.525 MHz / BW62.5 / SF7 / CR5)", 910.525, 62.5, 7, 5),
-    "EU": RadioPreset("EU  (869.618 MHz / BW62.5 / SF8 / CR8)", 869.618, 62.5, 8, 8),
-    "ANZ": RadioPreset("ANZ (916.575 MHz / BW62.5 / SF7 / CR8)", 916.575, 62.5, 7, 8),
+    "AUSTRALIA": RadioPreset("Australia (915.800 MHz / BW250 / SF10 / CR5)", 915.800, 250.0, 10, 5),
+    "AUSTRALIA_NARROW": RadioPreset("Australia (Narrow) (916.575 MHz / BW62.5 / SF7 / CR8)", 916.575, 62.5, 7, 8),
+    "AUSTRALIA_MID": RadioPreset("Australia (Mid) (915.075 MHz / BW125 / SF9 / CR5)", 915.075, 125.0, 9, 5),
+    "AUSTRALIA_SA_WA": RadioPreset("Australia: SA, WA (923.125 MHz / BW62.5 / SF8 / CR8)", 923.125, 62.5, 8, 8),
+    "AUSTRALIA_QLD": RadioPreset("Australia: QLD (923.125 MHz / BW62.5 / SF8 / CR5)", 923.125, 62.5, 8, 5),
+    "BRAZIL": RadioPreset("Brazil (923.125 MHz / BW62.5 / SF8 / CR8)", 923.125, 62.5, 8, 8),
+    "CZECH_NARROW": RadioPreset("Czech Republic (Narrow) (869.432 MHz / BW62.5 / SF7 / CR5)", 869.432, 62.5, 7, 5),
+    "EU_433_LONG_RANGE": RadioPreset("EU 433MHz (Long Range) (433.650 MHz / BW250 / SF11 / CR5)", 433.650, 250.0, 11, 5),
+    "EU_433_NARROW": RadioPreset("EU 433MHz (Narrow) (433.650 MHz / BW62.5 / SF8 / CR8)", 433.650, 62.5, 8, 8),
+    "EU_UK_NARROW": RadioPreset("EU/UK (Narrow) (869.618 MHz / BW62.5 / SF8 / CR8)", 869.618, 62.5, 8, 8),
+    "EU_UK_DEPRECATED": RadioPreset("EU/UK (Deprecated) (869.525 MHz / BW250 / SF11 / CR5)", 869.525, 250.0, 11, 5),
+    "NETHERLANDS": RadioPreset("Netherlands (869.618 MHz / BW62.5 / SF7 / CR5)", 869.618, 62.5, 7, 5),
+    "NEW_ZEALAND": RadioPreset("New Zealand (917.375 MHz / BW250 / SF11 / CR5)", 917.375, 250.0, 11, 5),
+    "NEW_ZEALAND_NARROW": RadioPreset("New Zealand (Narrow) (917.375 MHz / BW62.5 / SF7 / CR5)", 917.375, 62.5, 7, 5),
+    "PORTUGAL_433": RadioPreset("Portugal 433 (433.375 MHz / BW62.5 / SF9 / CR6)", 433.375, 62.5, 9, 6),
+    "PORTUGAL_868": RadioPreset("Portugal 868 (869.618 MHz / BW62.5 / SF7 / CR6)", 869.618, 62.5, 7, 6),
+    "SWITZERLAND": RadioPreset("Switzerland (869.618 MHz / BW62.5 / SF8 / CR8)", 869.618, 62.5, 8, 8),
+    "USA_CANADA": RadioPreset("USA/Canada (Recommended) (910.525 MHz / BW62.5 / SF7 / CR5)", 910.525, 62.5, 7, 5),
+    "VIETNAM_NARROW": RadioPreset("Vietnam (Narrow) (920.250 MHz / BW62.5 / SF8 / CR5)", 920.250, 62.5, 8, 5),
+    "VIETNAM_DEPRECATED": RadioPreset("Vietnam (Deprecated) (920.250 MHz / BW250 / SF11 / CR5)", 920.250, 250.0, 11, 5),
 }
 
 _REBOOT_WAIT_SECONDS = 4

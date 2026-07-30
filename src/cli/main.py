@@ -86,7 +86,8 @@ def main() -> None:
     mc.add_argument(
         "region",
         nargs="?",
-        help="Region preset (US, EU, ANZ) or 'custom'",
+        help="Region preset key (e.g. EU_UK_NARROW, USA_CANADA, EU_433_NARROW; "
+             "omit to pick from a menu) or 'custom'",
     )
     mc.add_argument(
         "--port",

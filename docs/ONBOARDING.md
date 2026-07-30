@@ -275,9 +275,12 @@ Source  concentrator (SX1302), MeshCore USB node
 To switch the MeshCore companion to a different region without re-running the full setup wizard:
 
 ```bash
-meshpoint meshcore-radio         # interactive menu (US, EU, ANZ, Custom)
-meshpoint meshcore-radio EU      # apply EU preset directly
-meshpoint meshcore-radio custom  # enter manual frequency/BW/SF/CR
+meshpoint meshcore-radio                # interactive menu -- the full MeshCore
+                                         # community preset list (20 regions,
+                                         # incl. EU 433MHz Long Range/Narrow), + Custom
+meshpoint meshcore-radio EU             # short alias for the EU/UK (Narrow) preset
+meshpoint meshcore-radio EU_433_NARROW  # or any preset key directly
+meshpoint meshcore-radio custom         # enter manual frequency/BW/SF/CR
 ```
 
 The command auto-detects the USB port, stops the service, configures the radio, waits for the companion to reboot, updates the config if the USB port changed, and restarts the service.
