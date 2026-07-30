@@ -202,6 +202,26 @@ select.cfg-field__input option:checked {
 .cfg-status[data-kind="success"] { color: #44d39a; }
 .cfg-status[data-kind="pending"] { color: rgba(243, 244, 246, 0.7); }
 
+/* Live compile/flash output (Configuration → POCSAG's "Companion firmware"
+   card) -- same monospace dark-panel look as Settings → Updates'
+   .update-progress__terminal-body, standalone rather than nested in a
+   larger terminal wrapper since this one's hidden/shown on its own. */
+.cfg-firmware-output {
+    margin: 12px 0 0;
+    padding: 10px 12px;
+    max-height: 260px;
+    overflow: auto;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    line-height: 1.45;
+    color: rgba(243, 244, 246, 0.82);
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
 .cfg-preview {
     background: rgba(0, 0, 0, 0.25);
     border: 1px solid rgba(255, 255, 255, 0.08);
