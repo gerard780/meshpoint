@@ -376,6 +376,20 @@ reconnect loop, matching `SerialCaptureSource`'s own documented
 limitation). If the reboot command times out or the readout tile goes
 stale afterward, that's the mechanism to check first.
 
+**Verifying it worked: the companion's own web dashboard.** Open
+`pocsag-companion.local` (or its IP) directly — the login screen now
+shows the saved callsign + hostname before you even enter the
+password (via a new unauthenticated `GET /api/whoami`, nothing
+sensitive), so you can confirm you're looking at the right physical
+board when more than one is on the network. Once logged in, two new
+cards close the loop on the WiFi feature above: **Hardware** (chip
+model/revision/cores/frequency, flash size, free heap, sketch
+space, SDK version) and **Connection** (SSID, IP, gateway, subnet,
+DNS, MAC, RSSI, hostname) — the latter is the actual way to confirm a
+serial-set WiFi credential resolved correctly, rather than assuming.
+This is a `extra/pocsag_companion.ino`-only change; nothing on the
+Meshpoint side reads this data.
+
 **DAPNET capcode filters** (`Configuration → POCSAG`'s second card,
 `dapnet:` config section) — two independent, immediately-applied
 tiers (no restart needed) for decoded pages, keyed on capcode:

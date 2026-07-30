@@ -1500,6 +1500,10 @@ const char INDEX_HTML[] = R"HTMLPAGE(
   button:active { opacity:0.8; }
   button:disabled { opacity:0.5; cursor:default; }
   .hint { font-size:11px; color: var(--text-muted); margin-top:8px; }
+  .kv { display:flex; justify-content:space-between; gap:8px; font-size:12px; padding:3px 0; border-bottom:1px solid rgba(255,255,255,0.04); }
+  .kv span:first-child { color: var(--text-secondary); }
+  .kv span:last-child { color: var(--text-primary); text-align:right; word-break:break-all; }
+  #whoami { font-size:11px; color: var(--text-muted); margin: -4px 0 10px 0; }
   .result { font-size:12px; margin-top:8px; min-height:14px; }
   .result.ok { color: var(--accent-green); }
   .result.err { color: var(--accent-red); }
@@ -1519,6 +1523,7 @@ const char INDEX_HTML[] = R"HTMLPAGE(
 <div id="authOverlay" class="modal-overlay">
   <div class="card">
     <h2>POCSAG COMPANION</h2>
+    <div id="whoami">--</div>
     <label for="pw">Password</label>
     <input type="password" id="pw" autocomplete="off" spellcheck="false">
     <button onclick="tryLogin()">Unlock</button>
@@ -1529,7 +1534,7 @@ const char INDEX_HTML[] = R"HTMLPAGE(
 <div id="clearConfirmModal" class="modal-overlay hidden">
   <div class="card">
     <h2 style="color:var(--accent-red)">CLEAR ALL SETTINGS?</h2>
-    <p>Wipes callsign and screen timeout back to defaults. This cannot be undone.</p>
+    <p>Wipes callsign, web password, and screen timeout back to defaults. This cannot be undone.</p>
     <button class="danger" onclick="confirmClearSettings()">Clear Settings</button>
     <button class="secondary" onclick="document.getElementById('clearConfirmModal').classList.add('hidden')">Cancel</button>
     <div class="result" id="clearConfirmResult"></div>
@@ -1539,7 +1544,7 @@ const char INDEX_HTML[] = R"HTMLPAGE(
 <div id="rebootModal" class="modal-overlay hidden">
   <div class="card">
     <h2 style="color:var(--accent-red)">SETTINGS CLEARED</h2>
-    <p>Callsign and screen timeout were reset to defaults. Reboot now to test a clean boot, or reboot later yourself.</p>
+    <p>Callsign, web password, and screen timeout were reset to defaults. Reboot now to test a clean boot, or reboot later yourself.</p>
     <button onclick="rebootNow()">Reboot Now</button>
     <button class="secondary" onclick="document.getElementById('rebootModal').classList.add('hidden')">Later</button>
     <div class="result" id="rebootResult"></div>
@@ -1580,7 +1585,7 @@ const char INDEX_HTML[] = R"HTMLPAGE(
       <button onclick="saveCallsign()">Save</button>
       <div class="result" id="callsignResult"></div>
       <button class="danger" onclick="clearSettings()">Clear Settings</button>
-      <div class="hint">Wipes callsign + screen timeout back to defaults -- for testing a clean install.</div>
+      <div class="hint">Wipes callsign, web password, + screen timeout back to defaults -- for testing a clean install.</div>
     </div>
 
     <div class="card">
@@ -1591,6 +1596,29 @@ const char INDEX_HTML[] = R"HTMLPAGE(
       <div class="result" id="timeoutResult"></div>
       <div class="hint">GPIO)HTMLPAGE" TOSTRING(BUTTON_GPIO) R"HTMLPAGE( (BOOT button) also toggles the display manually at any time.</div>
     </div>
+
+    <div class="card">
+      <h2>Hardware</h2>
+      <div class="kv"><span>Board</span><span id="hwBoard">--</span></div>
+      <div class="kv"><span>Chip</span><span id="hwChip">--</span></div>
+      <div class="kv"><span>Cores / Freq</span><span id="hwCores">--</span></div>
+      <div class="kv"><span>Flash</span><span id="hwFlash">--</span></div>
+      <div class="kv"><span>Free Heap</span><span id="hwHeap">--</span></div>
+      <div class="kv"><span>Sketch Used / Free</span><span id="hwSketch">--</span></div>
+      <div class="kv"><span>SDK</span><span id="hwSdk">--</span></div>
+    </div>
+
+    <div class="card">
+      <h2>Connection</h2>
+      <div class="kv"><span>SSID</span><span id="connSsid">--</span></div>
+      <div class="kv"><span>IP</span><span id="connIp">--</span></div>
+      <div class="kv"><span>Gateway</span><span id="connGw">--</span></div>
+      <div class="kv"><span>Subnet</span><span id="connSubnet">--</span></div>
+      <div class="kv"><span>DNS</span><span id="connDns">--</span></div>
+      <div class="kv"><span>MAC</span><span id="connMac">--</span></div>
+      <div class="kv"><span>RSSI</span><span id="connRssi">--</span></div>
+      <div class="kv"><span>Hostname</span><span id="connHost">--</span></div>
+    </div>
   </div>
 </div>
 
@@ -1598,6 +1626,15 @@ const char INDEX_HTML[] = R"HTMLPAGE(
 let pw = sessionStorage.getItem('pocsagPw') || '';
 let timeoutTouched = false;
 let callsignTouched = false;
+
+// Unauthenticated -- lets multiple companions on the same network be
+// told apart at a glance, before a password is even entered. Neither
+// field is sensitive: callsign is public ham-radio info by definition,
+// hostname is already broadcast in the clear via mDNS anyway.
+fetch('/api/whoami').then(r => r.json()).then(d => {
+  document.getElementById('whoami').textContent =
+    (d.callsign || 'No callsign set') + ' · ' + d.hostname + '.local';
+}).catch(() => {});
 
 function authHeaders() {
   return { 'X-Auth-Password': pw };
@@ -1688,6 +1725,23 @@ async function pollStatus() {
     // so the button doesn't invite a doomed send.
     document.getElementById('sendBtn').disabled = !s.callsign;
     document.getElementById('noCallsignHint').style.display = s.callsign ? 'none' : 'block';
+
+    document.getElementById('hwBoard').textContent = s.board;
+    document.getElementById('hwChip').textContent = s.chipModel + ' rev' + s.chipRevision;
+    document.getElementById('hwCores').textContent = s.chipCores + ' / ' + s.cpuFreqMHz + ' MHz';
+    document.getElementById('hwFlash').textContent = s.flashSizeMB + ' MB';
+    document.getElementById('hwHeap').textContent = Math.round(s.freeHeap / 1024) + ' KB free';
+    document.getElementById('hwSketch').textContent = s.sketchSizeKB + ' KB / ' + s.freeSketchSpaceKB + ' KB';
+    document.getElementById('hwSdk').textContent = s.sdkVersion;
+
+    document.getElementById('connSsid').textContent = s.wifiSsid || '--';
+    document.getElementById('connIp').textContent = s.wifiIp || '--';
+    document.getElementById('connGw').textContent = s.wifiGateway || '--';
+    document.getElementById('connSubnet').textContent = s.wifiSubnet || '--';
+    document.getElementById('connDns').textContent = s.wifiDns || '--';
+    document.getElementById('connMac').textContent = s.wifiMac || '--';
+    document.getElementById('connRssi').textContent = s.wifi ? (s.wifiRssi + ' dBm') : '--';
+    document.getElementById('connHost').textContent = s.hostname + '.local';
   } catch (e) {}
 }
 
@@ -1810,6 +1864,46 @@ void setupWebServer() {
     doc["txCount"] = txCount;
     doc["displayTimeoutMs"] = displayTimeoutMs;
     doc["callsign"] = getCallsign();
+
+    // Hardware card -- static for the board's lifetime except freeHeap,
+    // cheap to read every poll (all built into the ESP32 core, no new
+    // dependency).
+    doc["board"] = BOARD_NAME_STR;
+    doc["chipModel"] = ESP.getChipModel();
+    doc["chipRevision"] = ESP.getChipRevision();
+    doc["chipCores"] = ESP.getChipCores();
+    doc["cpuFreqMHz"] = ESP.getCpuFreqMHz();
+    doc["flashSizeMB"] = ESP.getFlashChipSize() / (1024.0 * 1024.0);
+    doc["freeHeap"] = ESP.getFreeHeap();
+    doc["sketchSizeKB"] = ESP.getSketchSize() / 1024;
+    doc["freeSketchSpaceKB"] = ESP.getFreeSketchSpace() / 1024;
+    doc["sdkVersion"] = ESP.getSdkVersion();
+
+    // Connection card -- lets a WiFi credential change (set over serial
+    // from Meshpoint, see handleSetWifiCommand) actually be VERIFIED
+    // here rather than just assumed. Blank when not connected, same
+    // convention sendStatusReply()'s own wifi_ip already uses.
+    doc["wifiSsid"] = wifiConnected ? WiFi.SSID() : "";
+    doc["wifiIp"] = wifiConnected ? WiFi.localIP().toString() : "";
+    doc["wifiGateway"] = wifiConnected ? WiFi.gatewayIP().toString() : "";
+    doc["wifiSubnet"] = wifiConnected ? WiFi.subnetMask().toString() : "";
+    doc["wifiDns"] = wifiConnected ? WiFi.dnsIP().toString() : "";
+    doc["wifiMac"] = WiFi.macAddress();
+    doc["wifiRssi"] = wifiConnected ? WiFi.RSSI() : 0;
+
+    String json;
+    serializeJson(doc, json);
+    request->send(200, "application/json", json);
+  });
+
+  // Deliberately NOT gated by checkAuth() -- shown on the login screen
+  // itself, before a password is entered. Neither field is sensitive:
+  // callsign is public ham-radio info by definition, hostname is
+  // already broadcast in the clear via mDNS anyway.
+  server.on("/api/whoami", HTTP_GET, [](AsyncWebServerRequest *request) {
+    JsonDocument doc;
+    doc["callsign"] = getCallsign();
+    doc["hostname"] = MDNS_HOSTNAME;
     String json;
     serializeJson(doc, json);
     request->send(200, "application/json", json);
