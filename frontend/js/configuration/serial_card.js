@@ -656,14 +656,14 @@ class SerialConfigCard {
                 <input type="checkbox" data-device-bt-enabled ${btEnabled ? 'checked' : ''}>
                 <span class="cfg-field__label">Bluetooth enabled</span>
             </label>
-            <label class="cfg-field cfg-field--inline cfg-field--narrow"
+            <label class="cfg-field cfg-field--narrow"
                    data-device-bt-mode-wrap ${btEnabled ? '' : 'hidden'}>
                 <span class="cfg-field__label">Pairing mode</span>
                 <select class="cfg-field__input" data-device-bt-mode>
                     ${btModeOptions}
                 </select>
             </label>
-            <label class="cfg-field cfg-field--inline cfg-field--narrow"
+            <label class="cfg-field cfg-field--narrow"
                    data-device-bt-pin-wrap ${(btEnabled && btMode === 'FIXED_PIN') ? '' : 'hidden'}>
                 <span class="cfg-field__label">Fixed PIN</span>
                 <input class="cfg-field__input" type="number" min="0" max="999999"
@@ -895,14 +895,14 @@ class SerialConfigCard {
         const shortValue = this._esc(data.short_name || (live && live.short_name) || '');
         return `
             <div class="cfg-mc-identity" data-device-identity>
-                <label class="cfg-field cfg-field--inline">
+                <label class="cfg-field">
                     <span class="cfg-field__label">Long name</span>
                     <input class="cfg-field__input" type="text"
                            data-device-long-name maxlength="36"
                            value="${longValue}"
                            placeholder="My Meshpoint 433">
                 </label>
-                <label class="cfg-field cfg-field--inline cfg-field--narrow">
+                <label class="cfg-field">
                     <span class="cfg-field__label">Short name</span>
                     <input class="cfg-field__input" type="text"
                            data-device-short-name maxlength="4"

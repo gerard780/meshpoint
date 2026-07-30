@@ -579,7 +579,7 @@ class PocsagSerialConfigCard {
         if (!live || !live.connected) return '';
         return `
             <div class="cfg-mc-identity" data-callsign-edit>
-                <label class="cfg-field cfg-field--inline">
+                <label class="cfg-field">
                     <span class="cfg-field__label">Set callsign (required before TX)</span>
                     <input class="cfg-field__input" type="text" maxlength="8"
                            placeholder="e.g. AB1CDE"
@@ -639,7 +639,7 @@ class PocsagSerialConfigCard {
         if (!live || !live.connected) return '';
         return `
             <div class="cfg-mc-identity" data-web-password-edit>
-                <label class="cfg-field cfg-field--inline">
+                <label class="cfg-field">
                     <span class="cfg-field__label">Set web dashboard password</span>
                     <input class="cfg-field__input" type="password"
                            autocomplete="new-password"
@@ -751,13 +751,13 @@ class PocsagSerialConfigCard {
         if (!live || !live.connected) return '';
         return `
             <div class="cfg-mc-identity" data-wifi-edit>
-                <label class="cfg-field cfg-field--inline">
+                <label class="cfg-field">
                     <span class="cfg-field__label">WiFi SSID</span>
                     <input class="cfg-field__input" type="text"
                            placeholder="Network name"
                            data-wifi-ssid-input>
                 </label>
-                <label class="cfg-field cfg-field--inline">
+                <label class="cfg-field">
                     <span class="cfg-field__label">WiFi password</span>
                     <input class="cfg-field__input" type="password"
                            autocomplete="new-password"
