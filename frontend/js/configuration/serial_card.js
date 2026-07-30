@@ -433,6 +433,7 @@ class SerialConfigCard {
                        value="${baud}" data-device-baud>
             </label>
             ${this._identityHtml(data, live)}
+            ${this._regionEditHtml(live)}
             ${this._readoutsHtml(live)}
         `;
 
@@ -456,6 +457,13 @@ class SerialConfigCard {
             });
         }
 
+        const saveRegionBtn = div.querySelector('[data-device-region-save]');
+        if (saveRegionBtn) {
+            saveRegionBtn.addEventListener('click', () => {
+                this._saveDeviceRegion(div, data.label || '');
+            });
+        }
+
         const portInput = div.querySelector('[data-device-port]');
         if (portInput) {
             portInput.addEventListener('input', () => this._updateResolvedPort(portInput));
@@ -464,6 +472,93 @@ class SerialConfigCard {
 
         this._devicesEl.appendChild(div);
         this._syncAddBtn();
+    }
+
+    /** Every Config.LoRaConfig.RegionCode value except UNSET (0) --
+     * that one's Meshtastic's own factory-default "not configured yet"
+     * state, not something you'd deliberately pick from this dropdown.
+     * Straight from meshtastic/protobufs' config.proto, not a curated
+     * subset like the Meshtastic-firmware-flash board list -- this is a
+     * small, genuinely complete enum, not a sprawling hardware catalog. */
+    static _REGION_CODES = [
+        'US', 'EU_433', 'EU_868', 'CN', 'JP', 'ANZ', 'KR', 'TW', 'RU', 'IN',
+        'NZ_865', 'TH', 'LORA_24', 'UA_433', 'MY_433', 'MY_919', 'SG_923',
+        'PH_433', 'PH_868', 'PH_915', 'ANZ_433', 'KZ_433', 'KZ_863', 'NP_865',
+        'BR_902', 'ITU1_2M', 'ITU2_2M', 'EU_866', 'EU_874', 'EU_917', 'EU_N_868',
+        'ITU3_2M', 'ITU1_70CM', 'ITU2_70CM', 'ITU3_70CM', 'ITU2_125CM',
+    ];
+
+    /** Sets this stick's LoRa region over its already-open serial
+     * connection (PUT /api/config/serial/region) -- most useful right
+     * after a fresh Meshtastic flash, since region starts UNSET and the
+     * device won't transmit at all until it's set. Always shown when
+     * connected (not just while UNSET), so it doubles as a way to
+     * change region later too. Not persisted to local.yaml, unlike the
+     * name fields below -- see the backend route's own docstring for
+     * why (region durably lives in the device's own NVS; re-applying
+     * it to a swapped-in blank replacement is a much rarer need than
+     * re-applying a name). */
+    _regionEditHtml(live) {
+        if (!live || !live.connected) return '';
+        const current = live.region && live.region !== 'UNSET' ? live.region : '';
+        const optionsHtml = SerialConfigCard._REGION_CODES.map((r) => (
+            `<option value="${r}" ${r === current ? 'selected' : ''}>${r.replace(/_/g, ' ')}</option>`
+        )).join('');
+        return `
+            <div class="cfg-mc-identity" data-device-region-edit>
+                <label class="cfg-field cfg-field--inline cfg-field--narrow">
+                    <span class="cfg-field__label">LoRa region</span>
+                    <select class="cfg-field__input" data-device-region-input>
+                        <option value="" disabled ${current ? '' : 'selected'}>-- select --</option>
+                        ${optionsHtml}
+                    </select>
+                </label>
+                <div class="cfg-card__actions">
+                    <button class="terminal-button terminal-button--primary"
+                            type="button" data-device-region-save>
+                        Set Region
+                    </button>
+                </div>
+                ${live.region === 'UNSET' ? `
+                    <p class="cfg-field__hint">
+                        Region is UNSET -- this stick will not transmit at all until
+                        a region is set (Meshtastic's factory default on a fresh flash).
+                    </p>
+                ` : ''}
+                <p class="cfg-status" data-device-region-status aria-live="polite"></p>
+            </div>
+        `;
+    }
+
+    async _saveDeviceRegion(deviceDiv, label) {
+        const input = deviceDiv.querySelector('[data-device-region-input]');
+        const status = deviceDiv.querySelector('[data-device-region-status]');
+        const button = deviceDiv.querySelector('[data-device-region-save]');
+        if (!input || !status) return;
+
+        const region = input.value;
+        if (!region) {
+            status.dataset.kind = 'error';
+            status.textContent = 'Pick a region.';
+            return;
+        }
+
+        button.disabled = true;
+        status.dataset.kind = 'pending';
+        status.textContent = 'Setting region…';
+
+        const result = await this._api.put('/api/config/serial/region', { label, region });
+
+        if (result) {
+            status.dataset.kind = 'success';
+            status.textContent = `Region set to ${result.region}.`;
+            this._api.toast('LoRa region updated');
+            await this._api.refresh();
+        } else {
+            status.dataset.kind = 'error';
+            status.textContent = 'Save failed.';
+        }
+        button.disabled = false;
     }
 
     _identityHtml(data, live) {

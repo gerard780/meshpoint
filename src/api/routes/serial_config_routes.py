@@ -270,6 +270,43 @@ async def update_serial_identity(
     }
 
 
+class SerialRegionUpdate(BaseModel):
+    label: str = ""
+    region: str
+
+
+@router.put("/region")
+async def update_serial_region(
+    req: SerialRegionUpdate,
+    _claims: SessionClaims = Depends(require_admin),
+) -> dict:
+    """Set one Meshtastic USB stick's LoRa region over its live serial
+    connection -- most useful right after flashing a board fresh
+    (Configuration -> Serial's "Meshtastic firmware" card), since
+    Meshtastic's factory default is region UNSET and it will not
+    transmit at all until this is set.
+
+    Unlike update_serial_identity, this is NOT persisted to local.yaml
+    -- region lives durably in the device's own NVS same as the name
+    does, but swapping in a different blank stick on this same
+    configured port is a much rarer event than a rename, so there's no
+    apply-on-reconnect path here (yet); this only ever pushes to
+    whichever device is connected right now.
+    """
+    source = _resolve_serial_source(req.label)
+    if source is None or not source.connected:
+        raise HTTPException(503, "Serial device not connected")
+
+    result = source.set_region(req.region)
+    if not result["success"]:
+        logger.warning(
+            "Dashboard set_region failed for %s: %s", source.name, result["error"],
+        )
+        raise HTTPException(400, result["error"] or "Device rejected region change")
+
+    return {"saved": True, "region": result.get("region")}
+
+
 class SerialAdvertRequest(BaseModel):
     label: str = ""
 

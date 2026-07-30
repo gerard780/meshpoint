@@ -229,6 +229,57 @@ class SerialCaptureSource(CaptureSource):
         )
         return {"success": True, "long_name": long_clean, "short_name": short_clean}
 
+    def set_region(self, region: str) -> dict:
+        """Set this stick's LoRa region over the already-open serial
+        connection -- e.g. for a freshly-flashed board with region
+        UNSET (Meshtastic's factory default; it will not transmit at
+        all until this is set).
+
+        Same ``Node.writeConfig()`` AdminMessage mechanism as
+        ``set_owner()``'s ``setOwner()`` call, and the same reasoning
+        applies for why this doesn't block the event loop: writeConfig
+        only sets ``onResponse=self.onAckNak`` (which DOES wait) when
+        ``self != self.iface.localNode`` -- for the directly-attached
+        device (always true here) it's unconditionally ``None``,
+        confirmed by reading meshtastic-python's own node.py source
+        before relying on it, not guessed.
+
+        ``region`` is a ``Config.LoRaConfig.RegionCode`` enum NAME
+        (e.g. ``"EU_433"``), not its int value -- validated against the
+        real enum so a typo fails cleanly instead of silently writing 0
+        (UNSET) or raising deep inside protobuf.
+        """
+        iface = self._interface
+        if iface is None or not self._connected:
+            return {"success": False, "error": "Not connected"}
+
+        try:
+            from meshtastic.protobuf import config_pb2
+            region_value = config_pb2.Config.LoRaConfig.RegionCode.Value(region)
+        except ValueError:
+            return {"success": False, "error": f"Unknown region: {region}"}
+
+        try:
+            node = iface.localNode
+            node.localConfig.lora.region = region_value
+            node.writeConfig("lora")
+        except SystemExit:
+            logger.error(
+                "%s: writeConfig(lora) unexpectedly hit sys.exit (should be "
+                "unreachable -- 'lora' is always a valid config_name)", self.name,
+            )
+            return {"success": False, "error": "Internal error setting region"}
+        except Exception as exc:
+            logger.exception("%s: set_region failed", self.name)
+            return {"success": False, "error": str(exc)}
+
+        # Same immediate-cache-update reasoning as set_owner() above --
+        # don't wait for the region to round-trip back through the
+        # receive stream before the readout tile reflects it.
+        self._radio_info["region"] = region
+        logger.info("%s: region set to %s", self.name, region)
+        return {"success": True, "region": region}
+
     async def start(self) -> None:
         try:
             import meshtastic.serial_interface
