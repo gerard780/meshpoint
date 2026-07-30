@@ -340,6 +340,7 @@ class PocsagSerialConfigCard {
             ${this._deviceReadoutsHtml(live)}
             ${this._callsignEditHtml(live)}
             ${this._webPasswordEditHtml(live)}
+            ${this._resetCredentialsHtml(live)}
         `;
 
         div.querySelector('.cfg-companion__remove').addEventListener('click', () => {
@@ -365,6 +366,13 @@ class PocsagSerialConfigCard {
         if (webPasswordSaveBtn) {
             webPasswordSaveBtn.addEventListener('click', () => {
                 this._saveWebPassword(div, data.label || '');
+            });
+        }
+
+        const resetCredentialsBtn = div.querySelector('[data-reset-credentials]');
+        if (resetCredentialsBtn) {
+            resetCredentialsBtn.addEventListener('click', () => {
+                this._resetCredentials(div, data.label || '');
             });
         }
 
@@ -545,6 +553,56 @@ class PocsagSerialConfigCard {
         } else {
             status.dataset.kind = 'error';
             status.textContent = 'Save failed.';
+        }
+        button.disabled = false;
+    }
+
+    /** Resets callsign + web dashboard password back to defaults, over
+     * the same serial connection (POST /api/config/dapnet/reset-
+     * credentials) -- deliberately narrower than the companion's own
+     * "Clear Settings" button, which also resets screen timeout; this
+     * one only touches the two credentials, matching what was asked
+     * for. Destructive enough to warrant a confirm() guard, same
+     * pattern the companion's own web dashboard uses for its button. */
+    _resetCredentialsHtml(live) {
+        if (!live || !live.connected) return '';
+        return `
+            <div class="cfg-card__actions" data-reset-credentials-edit>
+                <button class="terminal-button terminal-button--danger"
+                        type="button" data-reset-credentials>
+                    Reset Callsign &amp; Password
+                </button>
+            </div>
+            <p class="cfg-status" data-reset-credentials-status aria-live="polite"></p>
+        `;
+    }
+
+    async _resetCredentials(deviceDiv, label) {
+        const status = deviceDiv.querySelector('[data-reset-credentials-status]');
+        const button = deviceDiv.querySelector('[data-reset-credentials]');
+        if (!status) return;
+
+        if (!window.confirm(
+            'Reset this companion\'s callsign and web dashboard password back to '
+            + 'defaults? TX will be blocked again until a new callsign is set.',
+        )) {
+            return;
+        }
+
+        button.disabled = true;
+        status.dataset.kind = 'pending';
+        status.textContent = 'Sending to companion…';
+
+        const result = await this._api.post('/api/config/dapnet/reset-credentials', { label });
+
+        if (result) {
+            status.dataset.kind = 'success';
+            status.textContent = 'Callsign and password reset to defaults.';
+            this._api.toast('Companion credentials reset');
+            await this._api.refresh();
+        } else {
+            status.dataset.kind = 'error';
+            status.textContent = 'Reset failed.';
         }
         button.disabled = false;
     }

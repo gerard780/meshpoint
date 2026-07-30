@@ -336,6 +336,16 @@ time this is set, persisted in NVS and surviving reboots; until then,
 companion's own "Clear Settings" button resets it back to that
 default, same as it already does for the callsign.
 
+**Resetting callsign + password from the dashboard.** A "Reset
+Callsign & Password" button sends `{"cmd":"reset_credentials"}` —
+clears the callsign back to empty and the web password back to the
+`secrets.h` default, without touching screen timeout (deliberately
+narrower than the companion's own "Clear Settings" button, which
+resets all three). Guarded by a browser confirmation dialog since it's
+destructive — TX is blocked again immediately until a new callsign is
+set. A successful reset also clears the readout tile's cached
+callsign right away, rather than waiting for the next status poll.
+
 **DAPNET capcode filters** (`Configuration → POCSAG`'s second card,
 `dapnet:` config section) — two independent, immediately-applied
 tiers (no restart needed) for decoded pages, keyed on capcode:

@@ -120,3 +120,41 @@ async def update_dapnet_web_password(
         raise HTTPException(400, result.get("error") or "Rejected by companion")
 
     return {"saved": True}
+
+
+class DapnetResetCredentialsRequest(BaseModel):
+    label: str = ""
+
+
+@router.post("/reset-credentials")
+async def reset_dapnet_credentials(
+    req: DapnetResetCredentialsRequest,
+    _claims: SessionClaims = Depends(require_admin),
+) -> dict:
+    """Reset one POCSAG companion's callsign and web dashboard password
+    back to their defaults (empty, and the secrets.h WEB_PASSWORD),
+    without touching screen-timeout or anything else -- a Meshpoint-
+    triggerable equivalent to a slice of the companion's own "Clear
+    Settings" button. POST, not PUT: this is an action to trigger, not
+    a value to set (no request body field beyond which device).
+
+    A successful reply clears the cached callsign immediately (same
+    reasoning as update_dapnet_callsign) so the readout tile doesn't
+    keep showing the old value until the next status poll.
+    """
+    source = _resolve_dapnet_source(req.label)
+    if source is None or not source.connected:
+        raise HTTPException(503, "POCSAG companion not connected")
+
+    result = await source.send_command(
+        {"cmd": "reset_credentials"},
+        expect_type="reset_credentials_result",
+        timeout=5.0,
+    )
+    if result is None:
+        raise HTTPException(503, "No reply from companion (timed out)")
+    if not result.get("ok"):
+        raise HTTPException(400, result.get("error") or "Rejected by companion")
+
+    source.note_new_callsign("")
+    return {"saved": True}

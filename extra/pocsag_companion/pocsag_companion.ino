@@ -1018,6 +1018,26 @@ void handleSetWebPasswordCommand(JsonDocument &doc) {
   Serial.println();
 }
 
+// Resets callsign + web password back to their defaults (empty, and the
+// secrets.h WEB_PASSWORD respectively) -- a Meshpoint-triggerable
+// equivalent to a slice of the web dashboard's own "Clear Settings"
+// button, deliberately narrower: unlike that button this does NOT touch
+// displayTimeoutMs, since only credentials were asked for here.
+// prefs.remove() (not prefs.clear(), which would wipe the whole
+// namespace) so screen-timeout persistence is left untouched.
+void handleResetCredentialsCommand() {
+  prefs.remove("callsign");
+  prefs.remove("web_password");
+  setCallsign("");
+  setWebPassword(WEB_PASSWORD);
+
+  JsonDocument out;
+  out["type"] = "reset_credentials_result";
+  out["ok"] = true;
+  serializeJson(out, Serial);
+  Serial.println();
+}
+
 void handleSerialJsonLine(const String &line) {
   JsonDocument doc;
   DeserializationError err = deserializeJson(doc, line);
@@ -1038,6 +1058,10 @@ void handleSerialJsonLine(const String &line) {
   }
   if (cmd == "set_web_password") {
     handleSetWebPasswordCommand(doc);
+    return;
+  }
+  if (cmd == "reset_credentials") {
+    handleResetCredentialsCommand();
     return;
   }
 
