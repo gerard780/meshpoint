@@ -321,6 +321,21 @@ build with the `set_callsign` command (added alongside the status
 query above); older builds will just time out after 5s with "No reply
 from companion".
 
+**Setting the web dashboard password from the dashboard.** The same
+row also has a "Set web dashboard password" field, sending
+`{"cmd":"set_web_password","password":"..."}` the same way. Unlike the
+callsign, this value is handled as a real secret end to end: the
+companion's reply never echoes it back, Meshpoint never caches,
+persists, or logs it anywhere (not in `local.yaml`, not in the status
+cache, not in an audit-log entry), and the companion's own serial
+console log — which otherwise echoes every incoming command
+verbatim — specifically redacts this one. `WEB_PASSWORD` (the
+`secrets.h` compile-time default) becomes a runtime value the first
+time this is set, persisted in NVS and surviving reboots; until then,
+`checkAuth()` still compares against the `secrets.h` default. The
+companion's own "Clear Settings" button resets it back to that
+default, same as it already does for the callsign.
+
 **DAPNET capcode filters** (`Configuration → POCSAG`'s second card,
 `dapnet:` config section) — two independent, immediately-applied
 tiers (no restart needed) for decoded pages, keyed on capcode:

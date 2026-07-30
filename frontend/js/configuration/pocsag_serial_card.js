@@ -339,6 +339,7 @@ class PocsagSerialConfigCard {
             </label>
             ${this._deviceReadoutsHtml(live)}
             ${this._callsignEditHtml(live)}
+            ${this._webPasswordEditHtml(live)}
         `;
 
         div.querySelector('.cfg-companion__remove').addEventListener('click', () => {
@@ -357,6 +358,13 @@ class PocsagSerialConfigCard {
         if (callsignSaveBtn) {
             callsignSaveBtn.addEventListener('click', () => {
                 this._saveCallsign(div, data.label || '');
+            });
+        }
+
+        const webPasswordSaveBtn = div.querySelector('[data-web-password-save]');
+        if (webPasswordSaveBtn) {
+            webPasswordSaveBtn.addEventListener('click', () => {
+                this._saveWebPassword(div, data.label || '');
             });
         }
 
@@ -474,6 +482,66 @@ class PocsagSerialConfigCard {
             this._api.toast('Callsign updated on the companion');
             input.value = '';
             await this._api.refresh();
+        } else {
+            status.dataset.kind = 'error';
+            status.textContent = 'Save failed.';
+        }
+        button.disabled = false;
+    }
+
+    /** Editable web dashboard login password, set the same way as the
+     * callsign (PUT /api/config/dapnet/web-password) -- but the value
+     * is never cached/echoed anywhere on this side (unlike callsign,
+     * there's no readout tile showing it, and the save response never
+     * carries it back either). type="password" so it doesn't render in
+     * plain text, and the field is cleared immediately after a send
+     * (success or failure) rather than left sitting in the DOM. */
+    _webPasswordEditHtml(live) {
+        if (!live || !live.connected) return '';
+        return `
+            <div class="cfg-mc-identity" data-web-password-edit>
+                <label class="cfg-field cfg-field--inline">
+                    <span class="cfg-field__label">Set web dashboard password</span>
+                    <input class="cfg-field__input" type="password"
+                           autocomplete="new-password"
+                           placeholder="New password"
+                           data-web-password-input>
+                </label>
+                <div class="cfg-card__actions">
+                    <button class="terminal-button terminal-button--primary"
+                            type="button" data-web-password-save>
+                        Set Password
+                    </button>
+                </div>
+                <p class="cfg-status" data-web-password-status aria-live="polite"></p>
+            </div>
+        `;
+    }
+
+    async _saveWebPassword(deviceDiv, label) {
+        const input = deviceDiv.querySelector('[data-web-password-input]');
+        const status = deviceDiv.querySelector('[data-web-password-status]');
+        const button = deviceDiv.querySelector('[data-web-password-save]');
+        if (!input || !status) return;
+
+        const password = input.value || '';
+        input.value = ''; // never leave it sitting in the DOM, success or not
+        if (!password) {
+            status.dataset.kind = 'error';
+            status.textContent = 'Enter a password.';
+            return;
+        }
+
+        button.disabled = true;
+        status.dataset.kind = 'pending';
+        status.textContent = 'Sending to companion…';
+
+        const result = await this._api.put('/api/config/dapnet/web-password', { label, password });
+
+        if (result) {
+            status.dataset.kind = 'success';
+            status.textContent = 'Password updated on the companion.';
+            this._api.toast('Web dashboard password updated');
         } else {
             status.dataset.kind = 'error';
             status.textContent = 'Save failed.';

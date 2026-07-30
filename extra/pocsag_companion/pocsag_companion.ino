@@ -908,7 +908,16 @@ void checkSerialInput() {
     if (c == '\n' || c == '\r') {
       serialLineBuf.trim();
       if (serialLineBuf.length() > 0) {
-        Serial.print("[serial] received line: \""); Serial.print(serialLineBuf); Serial.println("\"");
+        // A set_web_password command carries the new password in
+        // cleartext (same as every other command on this line) -- this
+        // log line is the one place that would otherwise echo it back
+        // verbatim, so redact specifically this command instead of
+        // logging its raw contents like every other line.
+        if (serialLineBuf.indexOf("set_web_password") >= 0) {
+          Serial.println("[serial] received line: (set_web_password command, redacted)");
+        } else {
+          Serial.print("[serial] received line: \""); Serial.print(serialLineBuf); Serial.println("\"");
+        }
         handleSerialJsonLine(serialLineBuf);
       }
       serialLineBuf = "";
@@ -983,6 +992,32 @@ void handleSetCallsignCommand(JsonDocument &doc) {
   Serial.println();
 }
 
+// Sets the web dashboard's login password (checkAuth()'s X-Auth-Password
+// comparison) over serial. Unlike the callsign command, the reply never
+// echoes the new value back -- nothing about a password should appear
+// in a JSON line, even on success, when the incoming command already
+// had to be redacted from checkSerialInput()'s own log line above.
+// Deliberately not trimmed/case-folded like callsign -- a password's
+// exact characters (including case) are the point; only rejects empty.
+void handleSetWebPasswordCommand(JsonDocument &doc) {
+  String pw = doc["password"] | "";
+
+  JsonDocument out;
+  out["type"] = "set_web_password_result";
+
+  if (pw.length() == 0) {
+    out["ok"] = false;
+    out["error"] = "password is required";
+  } else {
+    setWebPassword(pw);
+    prefs.putString("web_password", pw);
+    out["ok"] = true;
+  }
+
+  serializeJson(out, Serial);
+  Serial.println();
+}
+
 void handleSerialJsonLine(const String &line) {
   JsonDocument doc;
   DeserializationError err = deserializeJson(doc, line);
@@ -999,6 +1034,10 @@ void handleSerialJsonLine(const String &line) {
   }
   if (cmd == "set_callsign") {
     handleSetCallsignCommand(doc);
+    return;
+  }
+  if (cmd == "set_web_password") {
+    handleSetWebPasswordCommand(doc);
     return;
   }
 
@@ -1202,6 +1241,27 @@ void setCallsign(const String &newCallsign) {
   xSemaphoreGive(stateMutex);
 }
 
+// Web dashboard login password -- starts as the secrets.h compile-time
+// default (WEB_PASSWORD), overridable at runtime via NVS the same way
+// callsign is, so a serial-set password survives a reboot and doesn't
+// require reflashing to change from the shared default. checkAuth()
+// compares against this, not the raw WEB_PASSWORD macro, once set.
+String webPassword = WEB_PASSWORD;
+
+String getWebPassword() {
+  String p;
+  xSemaphoreTake(stateMutex, portMAX_DELAY);
+  p = webPassword;
+  xSemaphoreGive(stateMutex);
+  return p;
+}
+
+void setWebPassword(const String &newPassword) {
+  xSemaphoreTake(stateMutex, portMAX_DELAY);
+  webPassword = newPassword;
+  xSemaphoreGive(stateMutex);
+}
+
 // Rejects two things that would otherwise pass the "non-empty" check but
 // aren't a real callsign: "N0CALL" (the well-known ham-radio placeholder/
 // example callsign -- if someone saves it, TX should stay blocked exactly
@@ -1245,7 +1305,7 @@ void checkWebSendPending() {
 // constant-time comparison for.
 bool checkAuth(AsyncWebServerRequest *request) {
   if (!request->hasHeader("X-Auth-Password") ||
-      request->getHeader("X-Auth-Password")->value() != WEB_PASSWORD) {
+      request->getHeader("X-Auth-Password")->value() != getWebPassword()) {
     request->send(401, "application/json", "{\"ok\":false,\"error\":\"unauthorized\"}");
     return false;
   }
@@ -1747,12 +1807,13 @@ void setupWebServer() {
 
   server.on("/api/clear-settings", HTTP_POST, [](AsyncWebServerRequest *request) {
     if (!checkAuth(request)) return;
-    prefs.clear(); // wipes the whole "pocsag" NVS namespace -- callsign +
-                    // dispTimeoutMs, nothing else is stored under it
+    prefs.clear(); // wipes the whole "pocsag" NVS namespace -- callsign,
+                    // dispTimeoutMs, and web_password, nothing else stored under it
     setCallsign("");
+    setWebPassword(WEB_PASSWORD);
     displayTimeoutMs = DISPLAY_TIMEOUT_MS_DEFAULT;
     lastDisplayActivity = millis();
-    Serial.println("[web] settings cleared -- callsign + screen timeout reset to defaults");
+    Serial.println("[web] settings cleared -- callsign, web password, and screen timeout reset to defaults");
     request->send(200, "application/json", "{\"ok\":true}");
   });
 
@@ -1901,6 +1962,7 @@ void setup() {
 
   prefs.begin(PREFS_NAMESPACE, false);
   setCallsign(prefs.getString("callsign", ""));
+  setWebPassword(prefs.getString("web_password", WEB_PASSWORD));
   displayTimeoutMs = prefs.getUInt("dispTimeoutMs", DISPLAY_TIMEOUT_MS_DEFAULT);
 
   configureForRx();

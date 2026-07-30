@@ -82,3 +82,41 @@ async def update_dapnet_callsign(
     saved_callsign = result.get("callsign", "")
     source.note_new_callsign(saved_callsign)
     return {"saved": True, "callsign": saved_callsign}
+
+
+class DapnetWebPasswordUpdate(BaseModel):
+    label: str = ""
+    password: str
+
+
+@router.put("/web-password")
+async def update_dapnet_web_password(
+    req: DapnetWebPasswordUpdate,
+    _claims: SessionClaims = Depends(require_admin),
+) -> dict:
+    """Set one POCSAG companion's web dashboard login password over its
+    live serial connection.
+
+    Deliberately different from update_dapnet_callsign in one respect:
+    the password itself is never cached, logged, or echoed back on this
+    side (nor does the companion's own reply include it -- see
+    handleSetWebPasswordCommand in the .ino) -- Meshpoint is a pure
+    relay here, not a place this value should ever be visible again
+    after the request completes. Nothing persists in local.yaml either;
+    it lives entirely in the companion's own NVS, same as the callsign.
+    """
+    source = _resolve_dapnet_source(req.label)
+    if source is None or not source.connected:
+        raise HTTPException(503, "POCSAG companion not connected")
+
+    result = await source.send_command(
+        {"cmd": "set_web_password", "password": req.password},
+        expect_type="set_web_password_result",
+        timeout=5.0,
+    )
+    if result is None:
+        raise HTTPException(503, "No reply from companion (timed out)")
+    if not result.get("ok"):
+        raise HTTPException(400, result.get("error") or "Rejected by companion")
+
+    return {"saved": True}
