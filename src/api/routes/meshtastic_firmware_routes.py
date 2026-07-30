@@ -16,7 +16,7 @@ table+app image meant for offset 0x0 -- i.e. a from-scratch flash of a
 board that wasn't already running Meshtastic) plus its ``littlefs-*.bin``
 (the filesystem partition, offset read from the SAME per-board
 ``.mt.json`` metadata file bundled in the zip, not hardcoded), cache both
-under ``/opt/meshtastic-firmware``, then flash with the standalone
+under ``<repo_root>/data/meshtastic-firmware``, then flash with the standalone
 ``esptool`` (installed by ``scripts/install.sh``, since arduino-cli's own
 bundled copy isn't on ``PATH``) -- ``--erase-all`` first, since the board
 may currently hold an entirely different firmware's partition layout.
@@ -58,7 +58,15 @@ router = APIRouter(prefix="/api/config/serial/firmware", tags=["config", "serial
 _config: Optional[AppConfig] = None
 _serial_sources: list = []
 
-_CACHE_DIR = Path("/opt/meshtastic-firmware")
+# Lives under this install's own data/ dir (like the SQLite DB) rather
+# than a standalone /opt path -- data/ already exists (install.sh's
+# "Create data directory" section), is already excluded from install.sh's
+# rsync so an upgrade never touches it, and is already owned by
+# `meshpoint` recursively, so no separate mkdir/chown step is needed the
+# way /opt/arduino-cli (a genuinely separate, reusable toolchain) needed
+# its own. Resolved dynamically, same technique pocsag_firmware_routes.py
+# uses for _SKETCH_DIR, rather than hardcoding /opt/meshpoint.
+_CACHE_DIR = Path(__file__).resolve().parents[3] / "data" / "meshtastic-firmware"
 _RELEASES_LATEST_URL = "https://api.github.com/repos/meshtastic/firmware/releases/latest"
 _ESPTOOL_BIN = "esptool"
 
