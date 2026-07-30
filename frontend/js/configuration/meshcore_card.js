@@ -1,13 +1,19 @@
 /**
  * Configuration → MeshCore card.
  *
- * Renders two cards: "USB capture sources" (one row per configured
+ * Renders three cards: "USB capture sources" (one row per configured
  * companion, each with its own live radio/firmware readouts AND its own
  * editable name/advert controls -- mirrors SerialConfigCard's per-device
  * layout, since every companion has an independent connection and
- * identity) and "MeshCore Companion" (connection status plus the shared
+ * identity), "MeshCore Companion" (connection status plus the shared
  * channel-key table, since MeshCore channels are mesh-wide config synced
- * only through the primary/TX-bound companion, not per-device).
+ * only through the primary/TX-bound companion, not per-device), and
+ * "MeshCore firmware" (drives src/api/routes/meshcore_firmware_routes.py
+ * -- downloads official MeshCore companion releases and flashes a spare
+ * board with esptool, no compiling, mirroring SerialConfigCard's own
+ * "Meshtastic firmware" card exactly: curated board pulldown, device
+ * picker only shown with 2+ configured companions, confirm-modal-gated
+ * destructive flash, NDJSON-streamed output).
  */
 
 class MeshcoreConfigCard {
@@ -65,6 +71,38 @@ class MeshcoreConfigCard {
                     <div data-mc-body></div>
                     <p class="cfg-status" data-mc-status aria-live="polite"></p>
                 </article>
+
+                <article class="cfg-card">
+                    <header class="cfg-card__head">
+                        <h3 class="cfg-card__title">MeshCore firmware</h3>
+                        <p class="cfg-card__hint">
+                            Flash a spare board with official MeshCore companion firmware
+                            straight from this dashboard -- downloads the latest release and
+                            writes it with esptool, no compiling needed. Erases the ENTIRE
+                            flash first, so this also works on a board currently running
+                            something else entirely (e.g. Meshtastic or extra/pocsag_companion).
+                        </p>
+                    </header>
+                    <label class="cfg-field cfg-field--narrow cfg-firmware-board-field">
+                        <span class="cfg-field__label">Board</span>
+                        <select class="cfg-field__input" data-mc-firmware-board></select>
+                    </label>
+                    <label class="cfg-field cfg-field--narrow" data-mc-firmware-device-wrap hidden>
+                        <span class="cfg-field__label">Device to flash</span>
+                        <select class="cfg-field__input" data-mc-firmware-device></select>
+                    </label>
+                    <div class="cfg-card__actions">
+                        <button class="terminal-button terminal-button--primary"
+                                type="button" data-mc-firmware-flash>
+                            Flash
+                        </button>
+                        <button class="terminal-button" type="button" data-mc-firmware-toggle-output>
+                            Show output
+                        </button>
+                    </div>
+                    <pre class="cfg-firmware-output" data-mc-firmware-output hidden></pre>
+                    <p class="cfg-status" data-mc-firmware-status aria-live="polite"></p>
+                </article>
             </div>
         `;
         this._body = this._root.querySelector('[data-mc-body]');
@@ -77,6 +115,13 @@ class MeshcoreConfigCard {
             .addEventListener('click', () => this._saveCompanions());
         this._root.querySelector('[data-mc-rescan-usb]')
             .addEventListener('click', (e) => this._rescanUsb(e.currentTarget));
+
+        this._root.querySelector('[data-mc-firmware-flash]')
+            .addEventListener('click', () => this._flashMeshcoreFirmware());
+        this._root.querySelector('[data-mc-firmware-toggle-output]')
+            .addEventListener('click', (e) => this._toggleMcFirmwareOutput(e.currentTarget));
+
+        this._loadMcFirmwareTargets();
     }
 
     /** Manual re-scan for the port-picker datalist -- lets a user unplug
@@ -93,6 +138,134 @@ class MeshcoreConfigCard {
             button.textContent = original;
             button.disabled = false;
         }
+    }
+
+    /** Board pulldown options for the MeshCore firmware card, from the
+     * curated list GET .../targets returns (see
+     * meshcore_firmware_routes.py's _CURATED_BOARDS) -- not auto-
+     * discovered from anything in this repo, since MeshCore firmware
+     * isn't built from anything here either. */
+    async _loadMcFirmwareTargets() {
+        const select = this._root.querySelector('[data-mc-firmware-board]');
+        if (!select) return;
+        const result = await this._api.get('/api/config/meshcore/firmware/targets');
+        const boards = (result && Array.isArray(result.boards)) ? result.boards : [];
+        select.innerHTML = boards.map((b) => (
+            `<option value="${this._esc(b.board)}">${this._esc(b.label)}</option>`
+        )).join('');
+    }
+
+    /** Populates the "Device to flash" pulldown from currently configured
+     * MeshCore USB companions -- only shown when there's more than one,
+     * same pattern as the POCSAG/Serial firmware cards: nothing to
+     * choose between otherwise. Keyed on `label`, resolved server-side
+     * to a port -- never a raw path trusted from the browser. */
+    _renderMcFirmwareDevicePicker(companions) {
+        const wrap = this._root.querySelector('[data-mc-firmware-device-wrap]');
+        const select = this._root.querySelector('[data-mc-firmware-device]');
+        const flashBtn = this._root.querySelector('[data-mc-firmware-flash]');
+        if (!wrap || !select || !flashBtn) return;
+
+        const configured = companions.filter((c) => c.serial_port);
+        this._mcFirmwareCompanions = configured;
+
+        if (configured.length === 0) {
+            wrap.hidden = true;
+            flashBtn.disabled = true;
+            flashBtn.title = 'No configured MeshCore companion with a serial port to flash.';
+            return;
+        }
+
+        flashBtn.disabled = false;
+        flashBtn.title = '';
+        wrap.hidden = configured.length <= 1;
+        select.innerHTML = configured.map((c) => {
+            const name = c.label || c.serial_port;
+            return `<option value="${this._esc(c.label || '')}">${this._esc(name)}</option>`;
+        }).join('');
+    }
+
+    _toggleMcFirmwareOutput(button) {
+        const pre = this._root.querySelector('[data-mc-firmware-output]');
+        if (!pre) return;
+        pre.hidden = !pre.hidden;
+        button.textContent = pre.hidden ? 'Show output' : 'Hide output';
+    }
+
+    _appendMcFirmwareOutput(text) {
+        const pre = this._root.querySelector('[data-mc-firmware-output]');
+        if (!pre || !text) return;
+        pre.textContent = pre.textContent ? `${pre.textContent}\n${text}` : text;
+        pre.scrollTop = pre.scrollHeight;
+    }
+
+    async _flashMeshcoreFirmware() {
+        const boardSelect = this._root.querySelector('[data-mc-firmware-board]');
+        const deviceSelect = this._root.querySelector('[data-mc-firmware-device]');
+        const board = boardSelect?.value;
+        if (!board) return;
+        const boardLabel = boardSelect.options[boardSelect.selectedIndex]?.text || board;
+
+        const companions = this._mcFirmwareCompanions || [];
+        const label = companions.length > 1
+            ? (deviceSelect?.value ?? '')
+            : (companions[0]?.label || '');
+        const companion = companions.find((c) => (c.label || '') === label) || companions[0];
+        if (!companion) return;
+
+        const ok = await window.confirmModal({
+            label: 'Flash MeshCore firmware',
+            description: `Erase the ENTIRE flash on "${companion.label || companion.serial_port}" `
+                + `(${companion.serial_port}) and write official MeshCore companion firmware `
+                + `for ${boardLabel}? This replaces whatever is currently on the board -- `
+                + 'not reversible from here.',
+        });
+        if (!ok) return;
+
+        const status = this._root.querySelector('[data-mc-firmware-status]');
+        const flashBtn = this._root.querySelector('[data-mc-firmware-flash]');
+        const outputPre = this._root.querySelector('[data-mc-firmware-output]');
+
+        flashBtn.disabled = true;
+        status.dataset.kind = 'pending';
+        status.textContent = `Flashing ${companion.label || companion.serial_port}…`;
+        if (outputPre) outputPre.textContent = '';
+        this._appendMcFirmwareOutput(`# Flashing ${boardLabel} onto ${companion.serial_port}…`);
+
+        let finalResult = null;
+        try {
+            finalResult = await window.UpdateStreamClient.postNdjson(
+                '/api/config/meshcore/firmware/flash/stream',
+                { board, label },
+                (event) => {
+                    if (event.type === 'started' && Array.isArray(event.cmd)) {
+                        this._appendMcFirmwareOutput(`$ ${event.cmd.join(' ')}`);
+                    } else if (event.type === 'line') {
+                        this._appendMcFirmwareOutput(event.text);
+                    }
+                },
+            );
+        } catch (err) {
+            status.dataset.kind = 'error';
+            status.textContent = `Request failed: ${err.message || err}`;
+            this._appendMcFirmwareOutput(`! ${err.message || err}`);
+            flashBtn.disabled = false;
+            return;
+        }
+
+        const success = !!(finalResult && finalResult.success);
+        status.dataset.kind = success ? 'success' : 'error';
+        status.textContent = success
+            ? 'Flashed.'
+            : `Failed (exit code ${finalResult ? finalResult.returncode : '?'}). See output below.`;
+        if (!success && outputPre) outputPre.hidden = false;
+        const toggleBtn = this._root.querySelector('[data-mc-firmware-toggle-output]');
+        if (toggleBtn && outputPre) {
+            toggleBtn.textContent = outputPre.hidden ? 'Show output' : 'Hide output';
+        }
+
+        flashBtn.disabled = false;
+        if (success) await this._api.refresh();
     }
 
     render(config) {
@@ -116,6 +289,7 @@ class MeshcoreConfigCard {
         const list = companions.length > 0 ? companions : [{ label: '', serial_port: '', baud_rate: 115200, auto_detect: true }];
         list.forEach((c) => this._addCompanionRow(c));
         this._syncAddBtn();
+        this._renderMcFirmwareDevicePicker(companions);
 
         if (!mc.connected) {
             this._renderOffline(config);

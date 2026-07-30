@@ -70,6 +70,7 @@ from src.api.routes import (
     dapnet_config_routes,
     pocsag_firmware_routes,
     meshtastic_firmware_routes,
+    meshcore_firmware_routes,
     spectrum_routes,
     metrics_routes,
     rf_routes,
@@ -468,6 +469,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.include_router(dapnet_config_routes.router, dependencies=protected)
     app.include_router(pocsag_firmware_routes.router, dependencies=protected)
     app.include_router(meshtastic_firmware_routes.router, dependencies=protected)
+    app.include_router(meshcore_firmware_routes.router, dependencies=protected)
     app.include_router(config_routes.router, dependencies=protected)
     app.include_router(stats_routes.router)
     app.include_router(lorawan_routes.router, dependencies=protected)
@@ -1766,6 +1768,7 @@ def _init_routes(
     dapnet_config_routes.init_routes(dapnet_sources=_find_dapnet_sources(coord))
     pocsag_firmware_routes.init_routes(config=config, dapnet_sources=_find_dapnet_sources(coord))
     meshtastic_firmware_routes.init_routes(config=config, serial_sources=_find_serial_sources(coord))
+    meshcore_firmware_routes.init_routes(config=config, meshcore_sources=_find_meshcore_sources(coord))
     _dev_name = config.device.device_name or "meshpoint"
     lorawan_routes.init_routes(coord.packet_repo, device_name=_dev_name)
     dapnet_routes.init_routes(coord.packet_repo, device_name=_dev_name)
