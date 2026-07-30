@@ -340,6 +340,108 @@ class SerialCaptureSource(CaptureSource):
         )
         return {"success": True, "enabled": enabled, "mode": mode, "fixed_pin": fixed_pin}
 
+    def set_modem_preset(self, preset: str) -> dict:
+        """Set this stick's LoRa modem preset over its already-open
+        serial connection -- same ``Node.writeConfig("lora")`` mechanism
+        as ``set_region()`` (both live on ``localConfig.lora``, so this
+        writes the same config section, just a different field).
+
+        ``preset`` is a ``Config.LoRaConfig.ModemPreset`` enum NAME
+        (e.g. ``"LONG_FAST"``), not its int value. Always sets
+        ``use_preset = True`` -- this method only supports the named
+        presets, not a fully custom spread-factor/bandwidth/coding-rate
+        config (Meshtastic's own "Custom" option), which would need its
+        own dedicated fields and isn't exposed from the dashboard.
+        """
+        iface = self._interface
+        if iface is None or not self._connected:
+            return {"success": False, "error": "Not connected"}
+
+        try:
+            from meshtastic.protobuf import config_pb2
+            preset_value = config_pb2.Config.LoRaConfig.ModemPreset.Value(preset)
+        except ValueError:
+            return {"success": False, "error": f"Unknown modem preset: {preset}"}
+
+        try:
+            node = iface.localNode
+            node.localConfig.lora.use_preset = True
+            node.localConfig.lora.modem_preset = preset_value
+            node.writeConfig("lora")
+        except SystemExit:
+            logger.error(
+                "%s: writeConfig(lora) unexpectedly hit sys.exit (should be "
+                "unreachable -- 'lora' is always a valid config_name)", self.name,
+            )
+            return {"success": False, "error": "Internal error setting modem preset"}
+        except Exception as exc:
+            logger.exception("%s: set_modem_preset failed", self.name)
+            return {"success": False, "error": str(exc)}
+
+        self._radio_info["modem_preset"] = preset
+        self._radio_info["use_preset"] = True
+        logger.info("%s: modem preset set to %s", self.name, preset)
+        return {"success": True, "modem_preset": preset}
+
+    def set_broadcast_intervals(
+        self,
+        node_info_secs: Optional[int] = None,
+        telemetry_secs: Optional[int] = None,
+    ) -> dict:
+        """Set how often this stick announces its own NodeInfo
+        (``device.node_info_broadcast_secs``) and/or reports its own
+        device telemetry (``telemetry.device_update_interval``, a
+        MODULE config, not a top-level one -- hence the separate
+        ``writeConfig("telemetry")`` call) to the mesh.
+
+        NOT the same subsystem as Meshpoint's own concentrator
+        NodeInfo/telemetry broadcast interval settings (a separate
+        Meshpoint-side scheduler for its own directly-driven radio) --
+        this is the attached Meshtastic stick's own firmware-internal
+        broadcast timing, independent of anything Meshpoint's concentrator
+        does. Either argument can be omitted to leave that one setting
+        unchanged; at least one should be given or this is a no-op.
+        """
+        iface = self._interface
+        if iface is None or not self._connected:
+            return {"success": False, "error": "Not connected"}
+
+        for label, value in (("NodeInfo", node_info_secs), ("telemetry", telemetry_secs)):
+            if value is not None and not (0 <= value <= 86400):
+                return {
+                    "success": False,
+                    "error": f"{label} interval must be between 0 and 86400 seconds",
+                }
+
+        try:
+            node = iface.localNode
+            if node_info_secs is not None:
+                node.localConfig.device.node_info_broadcast_secs = node_info_secs
+                node.writeConfig("device")
+            if telemetry_secs is not None:
+                node.moduleConfig.telemetry.device_update_interval = telemetry_secs
+                node.writeConfig("telemetry")
+        except SystemExit:
+            logger.error(
+                "%s: writeConfig unexpectedly hit sys.exit (should be "
+                "unreachable -- 'device'/'telemetry' are always valid "
+                "config_names)", self.name,
+            )
+            return {"success": False, "error": "Internal error setting broadcast intervals"}
+        except Exception as exc:
+            logger.exception("%s: set_broadcast_intervals failed", self.name)
+            return {"success": False, "error": str(exc)}
+
+        logger.info(
+            "%s: broadcast intervals set (node_info_secs=%s telemetry_secs=%s)",
+            self.name, node_info_secs, telemetry_secs,
+        )
+        return {
+            "success": True,
+            "node_info_broadcast_secs": node_info_secs,
+            "telemetry_device_update_interval": telemetry_secs,
+        }
+
     async def start(self) -> None:
         try:
             import meshtastic.serial_interface
@@ -415,6 +517,7 @@ class SerialCaptureSource(CaptureSource):
             "firmware_version": None, "hw_model": None,
             "tx_power": None,
             "bluetooth_enabled": None, "bluetooth_mode": None,
+            "node_info_broadcast_secs": None, "telemetry_device_update_interval": None,
         }
         try:
             from meshtastic.protobuf import config_pb2
@@ -455,6 +558,23 @@ class SerialCaptureSource(CaptureSource):
             )
         except Exception:
             logger.debug("Could not read Bluetooth config from serial interface", exc_info=True)
+        try:
+            info["node_info_broadcast_secs"] = int(
+                interface.localNode.localConfig.device.node_info_broadcast_secs,
+            )
+        except Exception:
+            logger.debug(
+                "Could not read node_info_broadcast_secs from serial interface", exc_info=True,
+            )
+        try:
+            info["telemetry_device_update_interval"] = int(
+                interface.localNode.moduleConfig.telemetry.device_update_interval,
+            )
+        except Exception:
+            logger.debug(
+                "Could not read telemetry.device_update_interval from serial interface",
+                exc_info=True,
+            )
         try:
             info["short_name"] = interface.getShortName()
             info["long_name"] = interface.getLongName()

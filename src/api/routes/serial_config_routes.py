@@ -344,6 +344,71 @@ async def update_serial_bluetooth(
     return {"saved": True, "enabled": result.get("enabled"), "mode": result.get("mode")}
 
 
+class SerialModemPresetUpdate(BaseModel):
+    label: str = ""
+    modem_preset: str
+
+
+@router.put("/modem-preset")
+async def update_serial_modem_preset(
+    req: SerialModemPresetUpdate,
+    _claims: SessionClaims = Depends(require_admin),
+) -> dict:
+    """Set one Meshtastic USB stick's LoRa modem preset over its live
+    serial connection. Not persisted to local.yaml, same reasoning as
+    region/Bluetooth (durably lives in the device's own NVS)."""
+    source = _resolve_serial_source(req.label)
+    if source is None or not source.connected:
+        raise HTTPException(503, "Serial device not connected")
+
+    result = source.set_modem_preset(req.modem_preset)
+    if not result["success"]:
+        logger.warning(
+            "Dashboard set_modem_preset failed for %s: %s", source.name, result["error"],
+        )
+        raise HTTPException(400, result["error"] or "Device rejected modem preset change")
+
+    return {"saved": True, "modem_preset": result.get("modem_preset")}
+
+
+class SerialBroadcastIntervalsUpdate(BaseModel):
+    label: str = ""
+    node_info_broadcast_secs: Optional[int] = None
+    telemetry_device_update_interval: Optional[int] = None
+
+
+@router.put("/broadcast-intervals")
+async def update_serial_broadcast_intervals(
+    req: SerialBroadcastIntervalsUpdate,
+    _claims: SessionClaims = Depends(require_admin),
+) -> dict:
+    """Set one Meshtastic USB stick's own NodeInfo/telemetry broadcast
+    intervals over its live serial connection -- NOT the same subsystem
+    as Meshpoint's own concentrator broadcast-interval settings (see
+    SerialCaptureSource.set_broadcast_intervals's own docstring); this is
+    the attached stick's own firmware-internal timing. Either field may
+    be omitted to leave that one setting unchanged."""
+    source = _resolve_serial_source(req.label)
+    if source is None or not source.connected:
+        raise HTTPException(503, "Serial device not connected")
+
+    result = source.set_broadcast_intervals(
+        req.node_info_broadcast_secs, req.telemetry_device_update_interval,
+    )
+    if not result["success"]:
+        logger.warning(
+            "Dashboard set_broadcast_intervals failed for %s: %s",
+            source.name, result["error"],
+        )
+        raise HTTPException(400, result["error"] or "Device rejected interval change")
+
+    return {
+        "saved": True,
+        "node_info_broadcast_secs": result.get("node_info_broadcast_secs"),
+        "telemetry_device_update_interval": result.get("telemetry_device_update_interval"),
+    }
+
+
 class SerialAdvertRequest(BaseModel):
     label: str = ""
 

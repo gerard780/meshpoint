@@ -463,6 +463,20 @@ class SerialConfigCard {
             });
         }
 
+        const savePresetBtn = div.querySelector('[data-device-preset-save]');
+        if (savePresetBtn) {
+            savePresetBtn.addEventListener('click', () => {
+                this._saveDeviceModemPreset(div, data.label || '');
+            });
+        }
+
+        const saveIntervalsBtn = div.querySelector('[data-device-intervals-save]');
+        if (saveIntervalsBtn) {
+            saveIntervalsBtn.addEventListener('click', () => {
+                this._saveDeviceBroadcastIntervals(div, data.label || '');
+            });
+        }
+
         const saveBtBtn = div.querySelector('[data-device-bt-save]');
         if (saveBtBtn) {
             saveBtBtn.addEventListener('click', () => {
@@ -680,6 +694,155 @@ class SerialConfigCard {
         button.disabled = false;
     }
 
+    /** Named ModemPreset values this control exposes -- matches the
+     * same preset list Configuration -> Radio's own concentrator page
+     * shows (LongFast/LongTurbo/.../ShortTurbo), not the full modern
+     * Meshtastic enum (which also has Lite/Narrow/Tiny/MediumTurbo
+     * variants not offered there either). "Custom" is deliberately not
+     * included -- that's a fully custom spread-factor/bandwidth/coding-
+     * rate config, not a named preset, and isn't exposed from here. */
+    static _MODEM_PRESETS = [
+        ['LONG_FAST', 'LongFast'], ['LONG_TURBO', 'LongTurbo'],
+        ['LONG_MODERATE', 'LongModerate'], ['LONG_SLOW', 'LongSlow'],
+        ['VERY_LONG_SLOW', 'VeryLongSlow (RX only)'],
+        ['MEDIUM_FAST', 'MediumFast'], ['MEDIUM_SLOW', 'MediumSlow'],
+        ['SHORT_FAST', 'ShortFast'], ['SHORT_SLOW', 'ShortSlow'],
+        ['SHORT_TURBO', 'ShortTurbo'],
+    ];
+
+    /** Inner fragment for setting this stick's modem preset (PUT
+     * /api/config/serial/modem-preset) -- same live-connection/no-
+     * persistence pattern as region and Bluetooth above. */
+    _modemPresetEditFragment(live) {
+        if (!live || !live.connected) return '';
+        const current = live.modem_preset || '';
+        const optionsHtml = SerialConfigCard._MODEM_PRESETS.map(([value, label]) => (
+            `<option value="${value}" ${value === current ? 'selected' : ''}>${label}</option>`
+        )).join('');
+        return `
+            <div class="cfg-mc-identity__divider"></div>
+            <div data-device-preset-edit>
+                <label class="cfg-field cfg-field--inline cfg-field--narrow">
+                    <span class="cfg-field__label">Modem preset</span>
+                    <select class="cfg-field__input" data-device-preset-input>
+                        ${optionsHtml}
+                    </select>
+                </label>
+                <div class="cfg-card__actions">
+                    <button class="terminal-button terminal-button--primary"
+                            type="button" data-device-preset-save>
+                        Set Preset
+                    </button>
+                </div>
+                <p class="cfg-status" data-device-preset-status aria-live="polite"></p>
+            </div>
+        `;
+    }
+
+    async _saveDeviceModemPreset(deviceDiv, label) {
+        const input = deviceDiv.querySelector('[data-device-preset-input]');
+        const status = deviceDiv.querySelector('[data-device-preset-status]');
+        const button = deviceDiv.querySelector('[data-device-preset-save]');
+        if (!input || !status) return;
+
+        button.disabled = true;
+        status.dataset.kind = 'pending';
+        status.textContent = 'Setting modem preset…';
+
+        const result = await this._api.put('/api/config/serial/modem-preset', {
+            label, modem_preset: input.value,
+        });
+
+        if (result) {
+            status.dataset.kind = 'success';
+            status.textContent = `Preset set to ${result.modem_preset}.`;
+            this._api.toast('Modem preset updated');
+            await this._api.refresh();
+        } else {
+            status.dataset.kind = 'error';
+            status.textContent = 'Save failed.';
+        }
+        button.disabled = false;
+    }
+
+    /** Inner fragment for this stick's OWN NodeInfo/telemetry broadcast
+     * intervals (PUT /api/config/serial/broadcast-intervals) -- NOT the
+     * same subsystem as Meshpoint's own concentrator broadcast-interval
+     * cards (Configuration -> Radio), which schedule Meshpoint's own
+     * directly-driven radio; this is the attached stick's own firmware-
+     * internal timing, independent of that. Minutes in the UI (matching
+     * the concentrator cards' own convention), converted to/from the
+     * seconds the underlying config fields actually use. 0 = off/paused,
+     * matching Meshtastic's own convention for these fields. */
+    _broadcastIntervalsEditFragment(live) {
+        if (!live || !live.connected) return '';
+        const nodeInfoMin = live.node_info_broadcast_secs != null
+            ? Math.round(live.node_info_broadcast_secs / 60) : '';
+        const telemetryMin = live.telemetry_device_update_interval != null
+            ? Math.round(live.telemetry_device_update_interval / 60) : '';
+        return `
+            <div class="cfg-mc-identity__divider"></div>
+            <div data-device-intervals-edit>
+                <label class="cfg-field cfg-field--inline cfg-field--narrow">
+                    <span class="cfg-field__label">NodeInfo interval (min, 0=off)</span>
+                    <input class="cfg-field__input" type="number" min="0" max="1440"
+                           placeholder="15" value="${nodeInfoMin}"
+                           data-device-nodeinfo-interval>
+                </label>
+                <label class="cfg-field cfg-field--inline cfg-field--narrow">
+                    <span class="cfg-field__label">Telemetry interval (min, 0=off)</span>
+                    <input class="cfg-field__input" type="number" min="0" max="1440"
+                           placeholder="15" value="${telemetryMin}"
+                           data-device-telemetry-interval>
+                </label>
+                <div class="cfg-card__actions">
+                    <button class="terminal-button terminal-button--primary"
+                            type="button" data-device-intervals-save>
+                        Set Intervals
+                    </button>
+                </div>
+                <p class="cfg-status" data-device-intervals-status aria-live="polite"></p>
+            </div>
+        `;
+    }
+
+    async _saveDeviceBroadcastIntervals(deviceDiv, label) {
+        const nodeInfoEl = deviceDiv.querySelector('[data-device-nodeinfo-interval]');
+        const telemetryEl = deviceDiv.querySelector('[data-device-telemetry-interval]');
+        const status = deviceDiv.querySelector('[data-device-intervals-status]');
+        const button = deviceDiv.querySelector('[data-device-intervals-save]');
+        if (!status) return;
+
+        const nodeInfoMin = (nodeInfoEl?.value || '').trim();
+        const telemetryMin = (telemetryEl?.value || '').trim();
+        if (!nodeInfoMin && !telemetryMin) {
+            status.dataset.kind = 'error';
+            status.textContent = 'Enter at least one interval.';
+            return;
+        }
+
+        button.disabled = true;
+        status.dataset.kind = 'pending';
+        status.textContent = 'Setting intervals…';
+
+        const result = await this._api.put('/api/config/serial/broadcast-intervals', {
+            label,
+            node_info_broadcast_secs: nodeInfoMin ? Number(nodeInfoMin) * 60 : null,
+            telemetry_device_update_interval: telemetryMin ? Number(telemetryMin) * 60 : null,
+        });
+
+        if (result) {
+            status.dataset.kind = 'success';
+            status.textContent = 'Intervals updated.';
+            this._api.toast('Broadcast intervals updated');
+            await this._api.refresh();
+        } else {
+            status.dataset.kind = 'error';
+            status.textContent = 'Save failed.';
+        }
+        button.disabled = false;
+    }
+
     _identityHtml(data, live) {
         const longValue = this._esc(data.long_name || (live && live.long_name) || '');
         const shortValue = this._esc(data.short_name || (live && live.short_name) || '');
@@ -713,6 +876,8 @@ class SerialConfigCard {
                 </div>
                 <p class="cfg-status" data-device-name-status aria-live="polite"></p>
                 ${this._regionEditFragment(live)}
+                ${this._modemPresetEditFragment(live)}
+                ${this._broadcastIntervalsEditFragment(live)}
                 ${this._bluetoothEditFragment(live)}
             </div>
         `;
