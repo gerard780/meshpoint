@@ -99,6 +99,7 @@ info "Installing build tools and dependencies..."
 apt-get install -y -qq \
     build-essential \
     git \
+    curl \
     python3 \
     python3-venv \
     python3-pip \
@@ -407,7 +408,86 @@ else
     pipx ensurepath
 fi
 
-# ── 13. Build SX1302 HAL ──────────────────────────────────────────
+# ── 13. Install arduino-cli + ESP32 toolchain (companion firmware flashing) ──
+#
+# General-purpose ESP32 build+flash toolchain -- not specific to any one
+# companion. arduino-cli plus the esp32:esp32 board core (which bundles
+# esptool underneath) can compile+upload any Arduino-sketch firmware for
+# any ESP32 target, and esptool alone can write any pre-built .bin
+# straight to a connected board regardless of what produced it. First
+# concrete use planned on top of this is a Networks > DAPNET "flash
+# firmware" button for extra/pocsag_companion/pocsag_companion.ino (an
+# Arduino sketch, hence the sketch-specific libraries installed below),
+# but the same toolchain is equally usable later for flashing official
+# prebuilt Meshtastic/MeshCore firmware .bin releases via esptool, or any
+# other ESP32 companion sketch this project adds down the line.
+#
+# Installed as a fully self-contained toolchain under /opt/arduino-cli --
+# its own config file, board/library data, and downloads cache -- rather
+# than the default ~/.arduino15 under a user's home: the systemd service
+# that will actually invoke this at runtime runs as `meshpoint`, a
+# --no-create-home system account with no $HOME of its own (see the
+# user-creation section below), so a home-relative default would
+# silently break the very context this is built for.
+#
+# Idempotent: skips each step (binary, config, core, each library) if
+# already installed/present, same pattern as the other build-from-source
+# sections above.
+
+ARDUINO_CLI_HOME="/opt/arduino-cli"
+ARDUINO_CLI_BIN="/usr/local/bin/arduino-cli"
+ARDUINO_CLI_CONFIG="${ARDUINO_CLI_HOME}/arduino-cli.yaml"
+ESP32_CORE_VERSION="3.3.10"
+
+if [ -x "$ARDUINO_CLI_BIN" ]; then
+    info "arduino-cli already installed, skipping"
+else
+    info "Installing arduino-cli..."
+    mkdir -p "${ARDUINO_CLI_HOME}/bin"
+    curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh \
+        | BINDIR="${ARDUINO_CLI_HOME}/bin" sh
+    ln -sf "${ARDUINO_CLI_HOME}/bin/arduino-cli" "$ARDUINO_CLI_BIN"
+fi
+
+if [ ! -f "$ARDUINO_CLI_CONFIG" ]; then
+    info "Writing arduino-cli config (${ARDUINO_CLI_CONFIG})..."
+    mkdir -p "${ARDUINO_CLI_HOME}/data" "${ARDUINO_CLI_HOME}/user" "${ARDUINO_CLI_HOME}/downloads"
+    arduino-cli config init --dest-file "$ARDUINO_CLI_CONFIG" --overwrite
+    arduino-cli --config-file "$ARDUINO_CLI_CONFIG" config set directories.data "${ARDUINO_CLI_HOME}/data"
+    arduino-cli --config-file "$ARDUINO_CLI_CONFIG" config set directories.user "${ARDUINO_CLI_HOME}/user"
+    arduino-cli --config-file "$ARDUINO_CLI_CONFIG" config set directories.downloads "${ARDUINO_CLI_HOME}/downloads"
+    arduino-cli --config-file "$ARDUINO_CLI_CONFIG" config add board_manager.additional_urls \
+        https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+else
+    info "arduino-cli config already present, skipping"
+fi
+
+info "Updating arduino-cli board index..."
+arduino-cli --config-file "$ARDUINO_CLI_CONFIG" core update-index
+
+if arduino-cli --config-file "$ARDUINO_CLI_CONFIG" core list | grep -q "^esp32:esp32 "; then
+    info "esp32:esp32 core already installed, skipping"
+else
+    info "Installing ESP32 board core ${ESP32_CORE_VERSION} (this takes a few minutes)..."
+    arduino-cli --config-file "$ARDUINO_CLI_CONFIG" core install "esp32:esp32@${ESP32_CORE_VERSION}"
+fi
+
+info "Installing pocsag_companion sketch libraries..."
+for lib in \
+    "Adafruit GFX Library@1.12.6" \
+    "Adafruit SSD1306@2.5.17" \
+    "RadioLib@7.7.1" \
+    "ArduinoJson@7.4.3" \
+    "Async TCP" \
+    "ESP Async WebServer@3.12.0"
+do
+    arduino-cli --config-file "$ARDUINO_CLI_CONFIG" lib install "$lib" \
+        || warn "Could not install library: ${lib}"
+done
+
+chown -R meshpoint:meshpoint "$ARDUINO_CLI_HOME"
+
+# ── 14. Build SX1302 HAL ──────────────────────────────────────────
 
 if [ -f "/usr/local/lib/libloragw.so" ]; then
     info "libloragw.so already installed, skipping HAL build"
@@ -658,7 +738,7 @@ _HALCFG
     info "libloragw.so installed to /usr/local/lib/"
 fi
 
-# ── 14. Apply TX sync word patch ──────────────────────────────────
+# ── 15. Apply TX sync word patch ──────────────────────────────────
 
 HAL_SRC="${HAL_BUILD_DIR}/libloragw/src/loragw_sx1302.c"
 if [ -f "$HAL_SRC" ]; then
@@ -676,7 +756,7 @@ if [ -f "$HAL_SRC" ]; then
     MESHPOINT_INSTALL_IN_PROGRESS=1 bash "${SCRIPT_DIR}/scripts/patch_hal.sh"
 fi
 
-# ── 15. Install Meshpoint application ─────────────────────────────
+# ── 16. Install Meshpoint application ─────────────────────────────
 
 info "Installing Meshpoint to ${MESHPOINT_DIR}..."
 mkdir -p "$MESHPOINT_DIR"
@@ -698,7 +778,7 @@ rsync -a --exclude='venv' \
 #          --exclude='*.pyc' \
 #          "${SCRIPT_DIR}/" "$MESHPOINT_DIR/"
 
-# ── 16. Remove stale compiled core modules from prior installs ───
+# ── 17. Remove stale compiled core modules from prior installs ───
 # Releases before 0.7.0 shipped .cpython-*.so files alongside the
 # .py source. Python prefers the .so at import time, so any leftover
 # binary would silently shadow the current source. rsync above does
@@ -710,7 +790,7 @@ if find "${MESHPOINT_DIR}/src" -name '*.cpython-*.so' -print -quit | grep -q .; 
     find "${MESHPOINT_DIR}/src" -name '*.cpython-*.so' -delete
 fi
 
-# ── 17. Python virtual environment ────────────────────────────────
+# ── 18. Python virtual environment ────────────────────────────────
 
 info "Setting up Python virtual environment..."
 python3 -m venv "${MESHPOINT_DIR}/venv"
@@ -721,11 +801,11 @@ pip install -r "${MESHPOINT_DIR}/requirements.txt" -q
 pip install pyserial -q
 deactivate
 
-# ── 18. Create data directory ─────────────────────────────────────
+# ── 19. Create data directory ─────────────────────────────────────
 
 mkdir -p "${MESHPOINT_DIR}/data"
 
-# ── 19. Create meshpoint system user ──────────────────────────────
+# ── 20. Create meshpoint system user ──────────────────────────────
 
 if ! id -u meshpoint &>/dev/null; then
     info "Creating system user 'meshpoint'..."
@@ -775,14 +855,14 @@ info "Installing sudoers rule for service management..."
 cp "${MESHPOINT_DIR}/config/sudoers-meshpoint" /etc/sudoers.d/meshpoint
 chmod 440 /etc/sudoers.d/meshpoint
 
-# ── 20. Configure journald log rotation ───────────────────────────
+# ── 21. Configure journald log rotation ───────────────────────────
 
 info "Configuring journald log limits (100M, 7-day retention)..."
 mkdir -p /etc/systemd/journald.conf.d
 cp "${MESHPOINT_DIR}/config/journald-meshpoint.conf" /etc/systemd/journald.conf.d/meshpoint.conf
 systemctl restart systemd-journald 2>/dev/null || warn "Could not restart journald"
 
-# ── 21. Install systemd service ───────────────────────────────────
+# ── 22. Install systemd service ───────────────────────────────────
 
 info "Installing systemd service..."
 cp "${MESHPOINT_DIR}/${SERVICE_FILE}" /etc/systemd/system/meshpoint.service
@@ -790,7 +870,7 @@ systemctl daemon-reload
 systemctl enable meshpoint
 info "Service enabled (will start after 'meshpoint setup')"
 
-# ── 22. Install network watchdog ──────────────────────────────────
+# ── 23. Install network watchdog ──────────────────────────────────
 
 info "Installing WiFi network watchdog..."
 cp "${MESHPOINT_DIR}/${WATCHDOG_SERVICE_FILE}" /etc/systemd/system/network-watchdog.service
@@ -799,7 +879,7 @@ systemctl enable network-watchdog
 systemctl start network-watchdog 2>/dev/null || warn "Could not start network-watchdog (will start on next boot)"
 info "Network watchdog enabled"
 
-# ── 23. Install mDNS (Avahi) for meshpoint.local discovery ────────
+# ── 24. Install mDNS (Avahi) for meshpoint.local discovery ────────
 #
 # Lets the Pi be reached as meshpoint.local (or <hostname>.local) on
 # the LAN without knowing its IP -- useful right after a fresh flash
@@ -820,13 +900,13 @@ fi
 
 systemctl enable --now avahi-daemon
 
-# ── 24. Install CLI tool ───────────────────────────────────────────
+# ── 25. Install CLI tool ───────────────────────────────────────────
 
 info "Installing meshpoint CLI..."
 chmod +x "${MESHPOINT_DIR}/${CLI_SCRIPT}"
 ln -sf "${MESHPOINT_DIR}/${CLI_SCRIPT}" /usr/local/bin/meshpoint
 
-# ── 25. Add fastfetch login banner ────────────────────────────────
+# ── 26. Add fastfetch login banner ────────────────────────────────
 #
 # Shows a system-info banner on every interactive login shell for the
 # `pi` user. Idempotent: skips if already present.
