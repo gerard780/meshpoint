@@ -22,10 +22,13 @@ class TestDeleteDapnetCapcodes(unittest.IsolatedAsyncioTestCase):
         await self.db.disconnect()
 
     async def _insert_dapnet(self, capcode: str):
+        # source_id="broadcast"/destination_id=capcode matches the real
+        # direction of a page (broadcast over RF -> addressed to a
+        # capcode), same shape dapnet_event_adapter.adapt_event() produces.
         await self.repo.insert(Packet(
             packet_id=f"pkt-{capcode}",
-            source_id=capcode,
-            destination_id="broadcast",
+            source_id="broadcast",
+            destination_id=capcode,
             protocol=Protocol.DAPNET,
             packet_type=PacketType.DAPNET_ALPHA,
             timestamp=datetime.now(timezone.utc),
@@ -40,14 +43,14 @@ class TestDeleteDapnetCapcodes(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(removed, 2)
         remaining = await self.repo.get_recent(limit=10)
-        remaining_ids = {p.source_id for p in remaining}
+        remaining_ids = {p.destination_id for p in remaining}
         self.assertEqual(remaining_ids, {"9999"})
 
-    async def test_does_not_touch_other_protocols_with_same_source_id(self):
+    async def test_does_not_touch_other_protocols_with_same_destination_id(self):
         await self.repo.insert(Packet(
             packet_id="mt-pkt",
-            source_id="4512",
-            destination_id="broadcast",
+            source_id="broadcast",
+            destination_id="4512",
             protocol=Protocol.MESHTASTIC,
             packet_type=PacketType.TEXT,
             timestamp=datetime.now(timezone.utc),

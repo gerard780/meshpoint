@@ -40,7 +40,9 @@ class SimplePacketFeed {
                 ? new Date(packet.timestamp).toLocaleTimeString([], { hour12: false })
                 : new Date().toLocaleTimeString([], { hour12: false });
 
-        const srcShort = this._fmtId(packet.source_id);
+        const protocol = packet.protocol || 'meshtastic';
+
+        const srcShort = this._fmtId(packet.source_id, protocol);
         const relayByte = packet.relay_node || 0;
         const srcCell = relayByte
             ? `${srcShort} <span class="relay-hop">↝ ${this._resolveRelay(relayByte)}</span>`
@@ -53,10 +55,9 @@ class SimplePacketFeed {
         const rssi = rssiVal != null ? rssiVal : '--';
         const snr = rawSnr != null ? `${Number(rawSnr).toFixed(1)}` : '--';
         const type = packet.packet_type || '--';
-        const protocol = packet.protocol || 'meshtastic';
         const details = this._summarize(packet);
 
-        const destShort = this._fmtId(packet.destination_id);
+        const destShort = this._fmtId(packet.destination_id, protocol);
         const hops = packet.hop_start > 0
             ? `${packet.hop_start - packet.hop_limit}/${packet.hop_start}`
             : '--';
@@ -172,8 +173,16 @@ class SimplePacketFeed {
         return name || id;
     }
 
-    _fmtId(id) {
+    _fmtId(id, protocol) {
         if (!id) return '--';
+        // DAPNET has no hex node-ID space -- source/destination are the
+        // literal string "broadcast" or a decimal capcode, so show them
+        // verbatim rather than running Meshtastic's "!" + last-4-hex-char
+        // shortening over them (that mangled e.g. capcode 2041152 into
+        // "!1152" and "broadcast" into "!cast").
+        if (protocol === 'dapnet') {
+            return `<span class="td-node-short">${this._esc(String(id))}</span>`;
+        }
         if (id === 'ffffffff' || id === 'ffff' || id === 'broadcast') {
             return '<span class="td-bcast">!cast</span>';
         }

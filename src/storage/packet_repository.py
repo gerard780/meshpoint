@@ -235,15 +235,17 @@ class PacketRepository:
         stored keeps showing its pre-existing history forever (Recent
         Pages reads straight from the packets table). Called with the
         union of both lists right after a save so the promise holds
-        immediately, not just going forward. ``source_id`` is TEXT, so
-        capcodes are bound as strings to match how they're actually
-        stored.
+        immediately, not just going forward. ``destination_id`` is TEXT,
+        so capcodes are bound as strings to match how they're actually
+        stored -- DAPNET packets carry the capcode as ``destination_id``
+        (a page is broadcast TO a capcode; ``source_id`` is always the
+        literal string ``"broadcast"``, there being no real sender ID).
         """
         if not capcodes:
             return 0
         placeholders = ",".join("?" for _ in capcodes)
         result = await self._db.execute(
-            f"DELETE FROM packets WHERE protocol = 'dapnet' AND source_id IN ({placeholders})",
+            f"DELETE FROM packets WHERE protocol = 'dapnet' AND destination_id IN ({placeholders})",
             tuple(str(c) for c in capcodes),
         )
         await self._db.commit()

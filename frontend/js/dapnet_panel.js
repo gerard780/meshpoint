@@ -64,7 +64,7 @@ class DapnetPanel {
         this._liveOnlyIds.add(packet.packet_id);
         this._packets.unshift({
             packet_id: packet.packet_id,
-            capcode: packet.source_id,
+            capcode: packet.destination_id,
             packet_type: packet.packet_type,
             capture_source: packet.capture_source,
             timestamp: packet.timestamp,

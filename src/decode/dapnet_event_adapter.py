@@ -65,10 +65,16 @@ def adapt_event(
         "function": data.get("function"),
         "text": data.get("text", ""),
     }
+    # POCSAG/DAPNET has no real "sender ID" -- a page is broadcast over
+    # RF by the network and addressed TO a specific capcode (the pager
+    # being paged), not FROM one. source_id="broadcast"/
+    # destination_id=capcode matches that real-world direction (a page
+    # goes broadcast -> capcode), the reverse of what the earlier
+    # source_id=capcode/destination_id="broadcast" shape implied.
     return Packet(
         packet_id=uuid.uuid4().hex[:16],
-        source_id=str(capcode),
-        destination_id="broadcast",
+        source_id="broadcast",
+        destination_id=str(capcode),
         protocol=Protocol.DAPNET,
         packet_type=packet_type,
         decoded_payload=decoded,

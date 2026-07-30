@@ -4,7 +4,7 @@
 DAPNET pages come from the pocsag_companion Heltec board (capture_source
 'dapnet_heltec', protocol 'dapnet') -- one-way broadcast paging traffic,
 not mesh nodes, so it never touches the nodes/telemetry tables (capcodes
-like source_id '2041152' are just text in packets.source_id). Safe to
+like '2041152' are just text in packets.destination_id). Safe to
 wipe wholesale: deleting these rows doesn't orphan anything elsewhere.
 
 Usage (on the Pi):

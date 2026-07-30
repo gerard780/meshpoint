@@ -47,7 +47,7 @@ _PACKET_EXPORT_COLUMNS = [
 
 def _packet_flatten(row: dict) -> dict:
     payload = _decode_payload(row)
-    row["capcode"] = row.get("source_id")
+    row["capcode"] = row.get("destination_id")
     row["function"] = payload.get("function")
     row["text"] = payload.get("text", "")
     return row
@@ -63,7 +63,7 @@ async def dapnet_packets_csv():
     rows = stream_query(
         _packet_repo._db,
         """
-        SELECT timestamp, packet_id, source_id, packet_type,
+        SELECT timestamp, packet_id, destination_id, packet_type,
                capture_source, decoded_payload
         FROM packets
         WHERE protocol = 'dapnet'
@@ -94,17 +94,17 @@ async def dapnet_capcodes_csv():
     rows = stream_query(
         _packet_repo._db,
         """
-        SELECT p.source_id AS capcode, p.packet_type,
+        SELECT p.destination_id AS capcode, p.packet_type,
                p.decoded_payload,
                agg.frame_count, agg.first_seen,
                p.timestamp AS last_seen
         FROM packets p
         JOIN (
-            SELECT source_id, COUNT(*) AS frame_count,
+            SELECT destination_id, COUNT(*) AS frame_count,
                    MIN(timestamp) AS first_seen, MAX(id) AS last_id
             FROM packets
-            WHERE protocol = 'dapnet' AND source_id != ''
-            GROUP BY source_id
+            WHERE protocol = 'dapnet' AND destination_id != ''
+            GROUP BY destination_id
         ) agg ON p.id = agg.last_id
         ORDER BY p.timestamp DESC
         """,
@@ -127,7 +127,7 @@ async def dapnet_capcodes():
     rows = await _packet_repo._db.fetch_all(
         """
         SELECT
-            p.source_id AS capcode,
+            p.destination_id AS capcode,
             p.packet_type,
             p.decoded_payload,
             p.timestamp AS last_seen,
@@ -136,13 +136,13 @@ async def dapnet_capcodes():
         FROM packets p
         JOIN (
             SELECT
-                source_id,
+                destination_id,
                 COUNT(*)       AS frame_count,
                 MIN(timestamp) AS first_seen,
                 MAX(id)        AS last_id
             FROM packets
-            WHERE protocol = 'dapnet' AND source_id != ''
-            GROUP BY source_id
+            WHERE protocol = 'dapnet' AND destination_id != ''
+            GROUP BY destination_id
         ) agg ON p.id = agg.last_id
         ORDER BY p.timestamp DESC
         """
@@ -188,8 +188,8 @@ async def dapnet_packets(limit: int = Query(100, ge=1, le=1000)):
         packets.append({
             "packet_id": row.get("packet_id"),
             "protocol": "dapnet",
-            "capcode": row["source_id"],
-            "destination_id": row.get("destination_id"),
+            "capcode": row["destination_id"],
+            "source_id": row.get("source_id"),
             "packet_type": row["packet_type"],
             "capture_source": row.get("capture_source"),
             "timestamp": row["timestamp"],
@@ -207,7 +207,7 @@ async def dapnet_stats():
         raise HTTPException(503, "Routes not initialised")
 
     totals = await _packet_repo._db.fetch_one(
-        "SELECT COUNT(*) AS total, COUNT(DISTINCT source_id) AS capcodes "
+        "SELECT COUNT(*) AS total, COUNT(DISTINCT destination_id) AS capcodes "
         "FROM packets WHERE protocol = 'dapnet'"
     )
     by_type = await _packet_repo._db.fetch_all(
