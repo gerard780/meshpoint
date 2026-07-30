@@ -82,6 +82,16 @@
     display: none;
 }
 
+/* The "Companion firmware" card's Board field sits directly above the
+   Compile/Flash/Show-output buttons with nothing else in between
+   (unlike most cards' actions row, which follows several fields and
+   gets incidental breathing room from their combined height) -- scoped
+   here rather than adding margin-top to .cfg-card__actions globally,
+   which would touch ~30 other action rows across the app. */
+.cfg-firmware-board-field {
+    margin-bottom: 14px;
+}
+
 .cfg-field--toggle {
     flex-direction: row;
     align-items: center;

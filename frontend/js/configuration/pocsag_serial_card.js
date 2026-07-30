@@ -95,7 +95,7 @@ class PocsagSerialConfigCard {
                             toolchain (installed automatically by scripts/install.sh).
                         </p>
                     </header>
-                    <label class="cfg-field cfg-field--narrow">
+                    <label class="cfg-field cfg-field--narrow cfg-firmware-board-field">
                         <span class="cfg-field__label">Board</span>
                         <select class="cfg-field__input" data-firmware-board></select>
                     </label>
