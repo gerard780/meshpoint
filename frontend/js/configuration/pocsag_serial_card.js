@@ -186,6 +186,14 @@ class PocsagSerialConfigCard {
         this._root.querySelector('[data-firmware-toggle-output]')
             .addEventListener('click', (e) => this._toggleFirmwareOutput(e.currentTarget));
 
+        this._root.querySelector('[data-firmware-board]')
+            .addEventListener('change', () => { this._firmwareBoardUserPicked = true; });
+        this._root.querySelector('[data-firmware-device]')
+            .addEventListener('change', () => {
+                this._firmwareBoardUserPicked = false; // new device -- worth re-suggesting
+                this._autoSelectFirmwareBoard();
+            });
+
         this._loadFirmwareTargets();
     }
 
@@ -201,6 +209,47 @@ class PocsagSerialConfigCard {
         select.innerHTML = boards.map((b) => (
             `<option value="${this._esc(b.macro)}">${this._esc(b.label)}</option>`
         )).join('');
+        this._autoSelectFirmwareBoard();
+    }
+
+    /** Maps the companion's own reported `board` string (from its live
+     * {"cmd":"status"} reply, same field _fmtBoard() already renders as
+     * a readout tile) to the matching BOARD_* macro -- the reverse of
+     * pocsag_firmware_routes.py's _KNOWN_BOARDS, small enough to just
+     * duplicate here rather than round-trip through another endpoint. */
+    static _LIVE_BOARD_TO_MACRO = {
+        heltec: 'BOARD_HELTEC_WIFI_LORA32_V3',
+        ttgo: 'BOARD_TTGO_LORA32',
+    };
+
+    /** Auto-selects the Board pulldown to match whichever companion is
+     * currently relevant (the one picked in "Companion to flash", or
+     * the sole configured device when there's only one) -- but only
+     * ever nudges it automatically, never overriding a choice the user
+     * made themselves (see the board <select>'s own 'change' listener,
+     * reset whenever the device picker changes since that's a new
+     * context worth re-suggesting for). No-ops silently if the board
+     * pulldown's own options haven't loaded yet, or the companion isn't
+     * connected/hasn't reported a board -- nothing to suggest either way. */
+    _autoSelectFirmwareBoard() {
+        if (this._firmwareBoardUserPicked) return;
+        const boardSelect = this._root.querySelector('[data-firmware-board]');
+        const deviceSelect = this._root.querySelector('[data-firmware-device]');
+        if (!boardSelect || !boardSelect.options.length) return;
+
+        const devices = this._firmwareDevices || [];
+        if (!devices.length) return;
+        const label = devices.length > 1 ? (deviceSelect?.value ?? '') : (devices[0].label || '');
+        const device = devices.find((d) => (d.label || '') === label) || devices[0];
+
+        const live = this._liveStatusFor(device.label || '');
+        const macro = live && live.board
+            ? PocsagSerialConfigCard._LIVE_BOARD_TO_MACRO[live.board]
+            : null;
+        if (!macro) return;
+
+        const hasOption = Array.from(boardSelect.options).some((o) => o.value === macro);
+        if (hasOption) boardSelect.value = macro;
     }
 
     async _rescanUsb(button) {
@@ -237,6 +286,7 @@ class PocsagSerialConfigCard {
         list.forEach((d) => this._addDeviceRow(d));
         this._syncAddBtn();
         this._renderFirmwareDevicePicker(devices);
+        this._autoSelectFirmwareBoard();
 
         const dapnet = config.dapnet || {};
         const blacklistEl = this._root.querySelector('[data-dapnet-blacklist]');
