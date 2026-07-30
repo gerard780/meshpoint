@@ -32,6 +32,13 @@ SyslogIdentifier=meshpoint
 Environment=CONCENTRATOR_CONFIG=/opt/meshpoint/config/local.yaml
 Environment=PYTHONUNBUFFERED=1
 Environment=FORCE_COLOR=1
+# arduino-cli's build cache has no --config-file key of its own -- it
+# always resolves via $XDG_CACHE_HOME (else $HOME/.cache), and this
+# service's `meshpoint` user has no real $HOME (--no-create-home).
+# Points it at the same self-contained toolchain dir install.sh sets up
+# (see its "Install arduino-cli" section) so a firmware-flash feature
+# invoked from this process can actually compile.
+Environment=XDG_CACHE_HOME=/opt/arduino-cli/cache
 
 # Hardening
 NoNewPrivileges=false

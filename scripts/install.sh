@@ -451,7 +451,15 @@ fi
 
 if [ ! -f "$ARDUINO_CLI_CONFIG" ]; then
     info "Writing arduino-cli config (${ARDUINO_CLI_CONFIG})..."
-    mkdir -p "${ARDUINO_CLI_HOME}/data" "${ARDUINO_CLI_HOME}/user" "${ARDUINO_CLI_HOME}/downloads"
+    # ARDUINO_CLI_HOME/cache also gets pre-created here (not just data/
+    # user/downloads, which the config file itself controls) because
+    # arduino-cli's build cache is a separate concept with no config-file
+    # key -- it always resolves via Go's os.UserCacheDir() ($XDG_CACHE_HOME,
+    # else $HOME/.cache). `meshpoint` (below) is a --no-create-home system
+    # account, so without XDG_CACHE_HOME pointed here explicitly (see
+    # meshpoint.service's Environment= line), a compile as that user fails
+    # trying to mkdir a cache dir under a $HOME that doesn't exist.
+    mkdir -p "${ARDUINO_CLI_HOME}/data" "${ARDUINO_CLI_HOME}/user" "${ARDUINO_CLI_HOME}/downloads" "${ARDUINO_CLI_HOME}/cache"
     arduino-cli config init --dest-file "$ARDUINO_CLI_CONFIG" --overwrite
     arduino-cli --config-file "$ARDUINO_CLI_CONFIG" config set directories.data "${ARDUINO_CLI_HOME}/data"
     arduino-cli --config-file "$ARDUINO_CLI_CONFIG" config set directories.user "${ARDUINO_CLI_HOME}/user"
