@@ -248,7 +248,9 @@ async def _get_farthest_via_mesh() -> dict | None:
     if not rows:
         return None
 
-    from src.analytics.stats_reporter import _haversine_mi
+    from src.analytics.stats_reporter import (
+        MAX_PLAUSIBLE_DISTANCE_MI, _haversine_mi, _is_real_position,
+    )
     from src.config import load_config
 
     try:
@@ -263,8 +265,10 @@ async def _get_farthest_via_mesh() -> dict | None:
 
     best = None
     for r in rows:
+        if not _is_real_position(r["latitude"], r["longitude"]):
+            continue
         dist = _haversine_mi(dev_lat, dev_lon, r["latitude"], r["longitude"])
-        if dist < 0.1:
+        if dist < 0.1 or dist > MAX_PLAUSIBLE_DISTANCE_MI:
             continue
         if best is None or dist > best["miles"]:
             best = {
@@ -290,7 +294,9 @@ async def _get_farthest_meshcore_contact() -> dict | None:
     if not rows:
         return None
 
-    from src.analytics.stats_reporter import _haversine_mi
+    from src.analytics.stats_reporter import (
+        MAX_PLAUSIBLE_DISTANCE_MI, _haversine_mi, _is_real_position,
+    )
     from src.config import load_config
 
     try:
@@ -303,12 +309,12 @@ async def _get_farthest_meshcore_contact() -> dict | None:
     if dev_lat is None or dev_lon is None:
         return None
 
-    MAX_MI = 3600 / 1.60934  # 3600 km sanity cap
-
     best = None
     for r in rows:
+        if not _is_real_position(r["latitude"], r["longitude"]):
+            continue
         dist = _haversine_mi(dev_lat, dev_lon, r["latitude"], r["longitude"])
-        if dist < 0.1 or dist > MAX_MI:
+        if dist < 0.1 or dist > MAX_PLAUSIBLE_DISTANCE_MI:
             continue
         if best is None or dist > best["miles"]:
             best = {

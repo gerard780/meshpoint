@@ -156,6 +156,7 @@ First tagged release of the javastraat/meshpoint fork. Adds LoRaWAN sniffing, mu
 - **Fixed: "Farthest Direct Signal" could show an imported repeater** instead of a genuinely direct reception. Historical data imported from a repeater's own neighbour list was being counted as if this box had heard it directly itself.
 - **Range card subtitles now say more precisely what they measure.** One subtitle in particular was easy to misread as protocol-specific when it actually combines every network this box listens to.
 - **Fixed: "Farthest Direct Signal" could miss genuinely direct Meshtastic contacts**, and in one case showed an implausible 743 km "direct" reading. It's now based purely on live session data, which is more conservative but honest — it can read "--" right after a restart until a real direct reception comes in.
+- **Fixed: a node with no GPS fix could win "Farthest via Meshtastic".** A node that hasn't gotten a GPS lock yet reports position (0, 0) instead of no position at all, which looks exactly like a real reading at "Null Island" off the coast of Africa — thousands of km from any real deployment, so it was winning the farthest-node record by default. All three "farthest" stats (Direct Signal, via Meshtastic, MeshCore Contact) now reject that (0, 0) sentinel and share the same distance sanity cap, instead of each one having its own inconsistent checks.
 
 #### Configuration and server
 

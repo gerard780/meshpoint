@@ -99,8 +99,11 @@ class StatsReporter:
         if hops_consumed != 0:
             return
 
+        if not _is_real_position(node_lat, node_lon):
+            return
+
         dist = _haversine_mi(device_lat, device_lon, node_lat, node_lon)
-        if dist < 0.1:
+        if dist < 0.1 or dist > MAX_PLAUSIBLE_DISTANCE_MI:
             return
 
         if dist > self._farthest_direct_miles:
@@ -210,3 +213,24 @@ def _haversine_mi(
         * math.sin(dlon / 2) ** 2
     )
     return r * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
+# 3600 km sanity cap converted to miles -- shared by every "farthest
+# node" calculation as a defense-in-depth guard against implausible
+# positions (GPS glitches, bad manual entries, etc) beyond the more
+# specific Null Island check below.
+MAX_PLAUSIBLE_DISTANCE_MI = 3600 / 1.60934
+
+
+def _is_real_position(lat: float, lon: float) -> bool:
+    """False for exactly (0, 0).
+
+    A Meshtastic/MeshCore node without a GPS fix yet reports this exact
+    sentinel rather than omitting position entirely, and it's stored
+    as a plain float -- indistinguishable from a genuine reading at
+    Null Island (0N 0E, Gulf of Guinea) unless explicitly rejected
+    here. Every "farthest node" calculation needs this, since a
+    fixless node reporting (0, 0) computes as an enormous (and
+    entirely bogus) distance from any real device position.
+    """
+    return not (lat == 0 and lon == 0)
