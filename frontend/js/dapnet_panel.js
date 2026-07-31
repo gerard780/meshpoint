@@ -230,6 +230,30 @@ class DapnetPanel {
                 window.PacketDetailModal.show(pkt, { selectedRow: tr });
             });
         }
+
+        const capcodeTbody = document.getElementById('dp-capcode-tbody');
+        if (capcodeTbody) {
+            capcodeTbody.addEventListener('click', (e) => {
+                const tr = e.target.closest('tr[data-capcode]');
+                if (!tr || !window.CapcodeHistoryModal) return;
+                this._openCapcodeHistory(tr.dataset.capcode);
+            });
+        }
+    }
+
+    async _openCapcodeHistory(capcode) {
+        window.CapcodeHistoryModal.show(capcode, null);
+        try {
+            const r = await fetch(`/api/dapnet/packets?capcode=${encodeURIComponent(capcode)}&limit=200`);
+            if (!r.ok) return;
+            const pages = await r.json();
+            // Only redraw if the modal is still open on this same capcode --
+            // the fetch could resolve after the operator already closed it
+            // or clicked a different row.
+            if (window.CapcodeHistoryModal.isShowing(capcode)) {
+                window.CapcodeHistoryModal.show(capcode, pages);
+            }
+        } catch (_) {}
     }
 
     _setTab(tab) {
@@ -323,7 +347,7 @@ class DapnetPanel {
         if (empty) empty.style.display = 'none';
 
         tbody.innerHTML = capcodes.map((c) => `
-            <tr class="lw-device-row">
+            <tr class="lw-device-row" data-capcode="${this._esc(String(c.capcode ?? ''))}">
                 <td class="lw-time">${this._fmtTime(c.last_seen)}</td>
                 <td class="lw-time">${this._fmtTime(c.first_seen)}</td>
                 <td class="lw-id">${this._esc(String(c.capcode ?? '--'))}</td>

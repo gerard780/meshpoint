@@ -164,23 +164,45 @@ async def dapnet_capcodes():
 
 
 @router.get("/packets")
-async def dapnet_packets(limit: int = Query(100, ge=1, le=1000)):
-    """Recent DAPNET pages, newest first."""
+async def dapnet_packets(
+    limit: int = Query(100, ge=1, le=1000),
+    capcode: str | None = Query(None, description="Only pages addressed to this capcode"),
+):
+    """Recent DAPNET pages, newest first.
+
+    ``capcode``, when given, scopes this to one capcode's own message
+    history -- the Capcodes tab's row-click detail popup uses this
+    rather than a separate endpoint, same shape either way.
+    """
     if _packet_repo is None:
         raise HTTPException(503, "Routes not initialised")
 
-    rows = await _packet_repo._db.fetch_all(
-        """
-        SELECT
-            packet_id, source_id, destination_id, packet_type,
-            capture_source, timestamp, decoded_payload, decrypted
-        FROM packets
-        WHERE protocol = 'dapnet'
-        ORDER BY timestamp DESC
-        LIMIT ?
-        """,
-        (limit,),
-    )
+    if capcode:
+        rows = await _packet_repo._db.fetch_all(
+            """
+            SELECT
+                packet_id, source_id, destination_id, packet_type,
+                capture_source, timestamp, decoded_payload, decrypted
+            FROM packets
+            WHERE protocol = 'dapnet' AND destination_id = ?
+            ORDER BY timestamp DESC
+            LIMIT ?
+            """,
+            (capcode, limit),
+        )
+    else:
+        rows = await _packet_repo._db.fetch_all(
+            """
+            SELECT
+                packet_id, source_id, destination_id, packet_type,
+                capture_source, timestamp, decoded_payload, decrypted
+            FROM packets
+            WHERE protocol = 'dapnet'
+            ORDER BY timestamp DESC
+            LIMIT ?
+            """,
+            (limit,),
+        )
 
     packets = []
     for row in rows:
