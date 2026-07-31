@@ -36,24 +36,24 @@ class FirmwareConfigCard {
                             extra/pocsag_companion).
                         </p>
                     </header>
-                    <label class="cfg-field cfg-field--narrow">
+                    <label class="cfg-field cfg-firmware-field">
                         <span class="cfg-field__label">Version</span>
                         <select class="cfg-field__input" data-mc-firmware-tag></select>
                     </label>
-                    <label class="cfg-field cfg-field--narrow">
+                    <label class="cfg-field cfg-firmware-field">
                         <span class="cfg-field__label">Flavor</span>
                         <select class="cfg-field__input" data-mc-firmware-flavor>
                             <option value="usb">USB (connects to this dashboard)</option>
                             <option value="ble">BLE (Bluetooth, for the MeshCore phone app)</option>
                         </select>
                     </label>
-                    <label class="cfg-field cfg-field--narrow cfg-firmware-board-field">
+                    <label class="cfg-field cfg-firmware-field">
                         <span class="cfg-field__label">Board</span>
                         <input class="cfg-field__input" type="text" list="mc-firmware-boards-list"
                                data-mc-firmware-board placeholder="Search boards…" autocomplete="off">
                         <datalist id="mc-firmware-boards-list"></datalist>
                     </label>
-                    <label class="cfg-field cfg-field--narrow">
+                    <label class="cfg-field cfg-firmware-field cfg-firmware-board-field">
                         <span class="cfg-field__label">Device to flash</span>
                         <select class="cfg-field__input" data-mc-firmware-device></select>
                     </label>

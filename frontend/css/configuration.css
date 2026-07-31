@@ -83,14 +83,25 @@
 }
 
 /* Shared by the POCSAG "Companion firmware" and Serial "Meshtastic
-   firmware" cards -- each card's Board field sits directly above its
-   action buttons with nothing else in between (unlike most cards'
-   actions row, which follows several fields and gets incidental
-   breathing room from their combined height) -- scoped here rather
-   than adding margin-top to .cfg-card__actions globally, which would
-   touch ~30 other action rows across the app. */
+   firmware" cards, and Configuration -> Firmware's own MeshCore card --
+   each card's LAST field before its action buttons has nothing else in
+   between (unlike most cards' actions row, which follows several fields
+   and gets incidental breathing room from their combined height) --
+   scoped here rather than adding margin-top to .cfg-card__actions
+   globally, which would touch ~30 other action rows across the app. */
 .cfg-firmware-board-field {
     margin-bottom: 14px;
+}
+
+/* Configuration -> Firmware's own fields (Version/Flavor/Board/Device) --
+   .cfg-field--narrow's 140px was fine for the old MeshCore-card home,
+   but board names ("LilyGo_TLora_V2_1_1_6"), release tags
+   ("companion-v1.16.0"), and port descriptions ("ttyUSB3 -- CP2104 USB
+   to UART...") all clipped badly at that width. Scoped to this page's
+   own class rather than widening the shared .cfg-field--narrow, which
+   ~30 other, genuinely narrow fields elsewhere still rely on. */
+.cfg-firmware-field {
+    max-width: 340px;
 }
 
 .cfg-field--toggle {
