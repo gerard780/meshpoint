@@ -64,6 +64,16 @@ class DapnetPanel {
         this._liveOnlyIds.add(packet.packet_id);
         this._packets.unshift({
             packet_id: packet.packet_id,
+            // protocol/source_id kept (not just flattened out to capcode/
+            // function/text) so a row clicked while still live-only --
+            // arrived over the WS feed, not yet caught up by the next
+            // _loadPackets() poll -- still normalizes correctly in
+            // PacketDetailModal (it keys off packet.protocol === 'dapnet'
+            // to know to reshape this flattened row into the nested
+            // decoded_payload shape every other protocol's rows already
+            // have); without it the popup silently showed no page text.
+            protocol: packet.protocol,
+            source_id: packet.source_id,
             capcode: packet.destination_id,
             packet_type: packet.packet_type,
             capture_source: packet.capture_source,

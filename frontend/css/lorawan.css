@@ -177,13 +177,34 @@
  * is no longer a real loss -- reverted to the same fixed table-layout
  * + single-line ellipsis every other .lw-table already uses. */
 .lw-table--dapnet-packets col.col-time { width: 90px; }
-.lw-table--dapnet-packets col.col-type { width: 76px; }
+/* 76px (LoRaWAN's own col-type width, sized for "Join"/"Data"/"Rejoin")
+ * was too narrow for DAPNET's own longer type words -- "Numeric" and
+ * especially "Activation" would overflow the badge pill and get clipped
+ * by the shared .lw-table td's text-overflow: ellipsis, showing what
+ * looked like a stray dot next to the badge instead of a real "…". */
+.lw-table--dapnet-packets col.col-type { width: 100px; }
 .lw-table--dapnet-packets col.col-dev  { width: 90px; }
 
 .lw-table--dapnet-capcodes col.col-time   { width: 90px; }
 .lw-table--dapnet-capcodes col.col-id     { width: 90px; }
-.lw-table--dapnet-capcodes col.col-type   { width: 76px; }
+.lw-table--dapnet-capcodes col.col-type   { width: 100px; }
 .lw-table--dapnet-capcodes col.col-frames { width: 64px; }
+
+/* col-text has no explicit width -- under table-layout: fixed it's meant
+ * to take whatever's left of the table's own 100%-of-container width
+ * after the columns above. On the capcodes table those alone (2x time +
+ * id + type + frames = 434px) already exceed a mobile viewport's width,
+ * leaving zero/negative "leftover" for col-text -- the column rendered
+ * with a header but no visible content at all, not even truncated, on a
+ * real phone. min-width forces the browser to actually reserve room for
+ * it (and, combined with .lw-table-wrap's existing overflow-x: auto,
+ * scroll the rest of the table rather than collapsing this column to
+ * nothing -- the same horizontal scroll the other fixed columns already
+ * rely on to be reachable on a narrow screen). */
+.lw-table--dapnet-packets col.col-text,
+.lw-table--dapnet-capcodes col.col-text {
+    min-width: 160px;
+}
 
 /* ── Cell types ─────────────────────────────────────── */
 
