@@ -290,15 +290,19 @@ class ConfigurationPanel {
         try {
             const res = await fetch(url, init);
             if (!res.ok) {
-                if (!isGet) {
-                    const err = await res.json().catch(() => ({}));
-                    this._toast(`Error: ${err.detail || res.status}`);
-                }
+                // Toast on GET failures too (used to be save-only) -- a
+                // failed read used to leave whatever empty/default state
+                // the caller started with, no visible sign anything went
+                // wrong (e.g. the Firmware page's Version/Board dropdowns
+                // silently staying empty when GitHub rate-limits the
+                // Pi's IP, with the real error only visible in DevTools).
+                const err = await res.json().catch(() => ({}));
+                this._toast(`${isGet ? 'Error' : 'Save failed'}: ${err.detail || res.status}`);
                 return null;
             }
             return await res.json();
         } catch (e) {
-            if (!isGet) this._toast(`Save failed: ${e.message}`);
+            this._toast(`${isGet ? 'Error' : 'Save failed'}: ${e.message}`);
             return null;
         }
     }
