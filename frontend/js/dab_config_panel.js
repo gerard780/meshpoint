@@ -119,7 +119,7 @@ class DabConfigPanel {
                             : `<button class="terminal-button" type="button" data-dabcfg-edit>Rename</button>`}
                     </div>
                 </div>
-                ${stationCount ? `<div class="dabcfg-row__stations">${(c.stations || []).map(s => this._esc(s)).join(', ')}</div>` : ''}
+                ${stationCount ? `<div class="dabcfg-row__stations">${(c.stations || []).map(s => this._esc(s.name)).join(', ')}</div>` : ''}
             </div>
         `;
     }

@@ -154,7 +154,12 @@ class DabPanel {
             if (presetPlayBtn) {
                 this._pendingPlay = {
                     channel: presetPlayBtn.dataset.dabPresetChannel,
-                    sid: null,
+                    // A sid captured by the scan script (see
+                    // scripts/dab_channel_scan.py) lets this resolve by
+                    // exact identity below instead of the name-normalize
+                    // fallback -- null for a station scanned before that
+                    // change, or one welle-cli never handed a sid for.
+                    sid: presetPlayBtn.dataset.dabPresetSid || null,
                     label: presetPlayBtn.dataset.dabPresetPlay,
                 };
                 this._pendingPlayAt = Date.now();
@@ -220,10 +225,12 @@ class DabPanel {
                     .map((c) => ({
                         channel: c.channel,
                         name: c.custom_name || c.ensemble || c.channel,
-                        // Station names only (the scan JSON has no sid --
-                        // welle-cli only hands one out once actually tuned)
-                        // so a click here tunes in and matches by name once
-                        // decoded, same wait-and-match idea as a favorite.
+                        // {name, sid} per station -- sid is the DAB SId
+                        // captured by scripts/dab_channel_scan.py (may be
+                        // null for a station scanned before that existed).
+                        // A click here tunes in and resolves by sid when
+                        // known, else by name once decoded -- same
+                        // wait-and-match idea as a favorite.
                         stations: c.stations || [],
                     }));
                 if (!this._channelPresets.length) {
@@ -329,7 +336,7 @@ class DabPanel {
             const preset = this._channelPresets.find((c) => c.channel === forChannel);
             const presetStations = (preset && preset.stations) || [];
             const list = presetStations.length
-                ? `<div class="dab-stations" data-dab-stations>${presetStations.map((name) => this._presetStationRowHtml(name, forChannel)).join('')}</div>`
+                ? `<div class="dab-stations" data-dab-stations>${presetStations.map((station) => this._presetStationRowHtml(station, forChannel)).join('')}</div>`
                 : '';
             return `
                 <div class="dab-scan-prompt">
@@ -359,7 +366,7 @@ class DabPanel {
             const preset = status.channel ? this._channelPresets.find((c) => c.channel === status.channel) : null;
             const presetStations = (preset && preset.stations) || [];
             const pending = presetStations.length
-                ? `<div class="dab-stations" data-dab-stations>${presetStations.map((name) => this._pendingStationRowHtml(name)).join('')}</div>`
+                ? `<div class="dab-stations" data-dab-stations>${presetStations.map((station) => this._pendingStationRowHtml(station)).join('')}</div>`
                 : '';
             return rescan + '<div class="pager-log__empty">Scanning… stations appear as they decode.</div>' + pending;
         }
@@ -853,24 +860,29 @@ class DabPanel {
     }
 
     // A station known from the last scan, on a channel not currently
-    // tuned -- no sid available yet (welle-cli only hands one out once
-    // actually decoding), so the star here stores/matches by name instead
-    // (see _favMatches); Play has no Stop state to reflect since nothing
-    // on this channel can be playing yet.
-    _presetStationRowHtml(name, channel) {
+    // tuned. `station` is {name, sid} -- sid is the DAB SId captured by
+    // scripts/dab_channel_scan.py (broadcaster-assigned, stable across
+    // scans/days), so favoriting/playing from here can match by exact
+    // identity below instead of only the name-normalize fallback (still
+    // used for a station scanned before sid capture existed, or one
+    // welle-cli didn't report a sid for). Play has no Stop state to
+    // reflect since nothing on this channel can be playing yet.
+    _presetStationRowHtml(station, channel) {
         const esc = this._esc.bind(this);
-        const isFav = this._isFav(channel, null, name);
+        const { name, sid } = station;
+        const isFav = this._isFav(channel, sid, name);
         return `
             <div class="dab-station-row">
                 <span class="lsn-fav${isFav ? ' on' : ''}" data-dab-favtoggle title="Favorite"
-                      data-dab-channel="${esc(channel)}" data-dab-sid="" data-dab-label="${esc(name)}">
+                      data-dab-channel="${esc(channel)}" data-dab-sid="${esc(sid || '')}" data-dab-label="${esc(name)}">
                     ${isFav ? '★' : '☆'}
                 </span>
                 <span class="lsn-station__scroll dab-station-row__text">
                     <span class="lsn-station__text" data-dab-scrolltext>${esc(name)}</span>
                 </span>
                 <button type="button" class="terminal-button"
-                        data-dab-preset-play="${esc(name)}" data-dab-preset-channel="${esc(channel)}">Play</button>
+                        data-dab-preset-play="${esc(name)}" data-dab-preset-channel="${esc(channel)}"
+                        data-dab-preset-sid="${esc(sid || '')}">Play</button>
             </div>
         `;
     }
@@ -878,13 +890,14 @@ class DabPanel {
     // A known-from-last-scan station shown while the channel is tuned but
     // welle-cli hasn't decoded it (back) yet -- purely a placeholder, so
     // no star/Play interactivity, just a dimmed row that gets replaced by
-    // the real, clickable one once it actually decodes.
-    _pendingStationRowHtml(name) {
+    // the real, clickable one once it actually decodes. `station` is
+    // {name, sid} -- sid unused here, display-only row.
+    _pendingStationRowHtml(station) {
         const esc = this._esc.bind(this);
         return `
             <div class="dab-station-row dab-station-row--pending">
                 <span class="lsn-station__scroll dab-station-row__text">
-                    <span class="lsn-station__text" data-dab-scrolltext>${esc(name)}</span>
+                    <span class="lsn-station__text" data-dab-scrolltext>${esc(station.name)}</span>
                 </span>
                 <button type="button" class="terminal-button" disabled>Play</button>
             </div>
