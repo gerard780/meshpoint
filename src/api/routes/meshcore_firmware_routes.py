@@ -110,6 +110,25 @@ async def firmware_targets(_claims: SessionClaims = Depends(require_admin)) -> d
     }
 
 
+@router.get("/releases")
+async def firmware_releases(_claims: SessionClaims = Depends(require_admin)) -> dict:
+    """Recent companion- releases for the version pulldown, newest first.
+    The flash route still defaults to latest when no tag is given -- this
+    is only for an operator who wants to deliberately pin an older (or
+    re-pin a matching) version instead."""
+    loop = asyncio.get_running_loop()
+    try:
+        releases = await loop.run_in_executor(None, _companion_releases_sync, 10)
+    except Exception as exc:
+        raise HTTPException(502, f"Could not fetch MeshCore releases: {exc}")
+    return {
+        "releases": [
+            {"tag": r.get("tag_name", ""), "published_at": r.get("published_at")}
+            for r in releases
+        ],
+    }
+
+
 def _fetch_json_sync(url: str) -> object:
     req = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json"})
     with urllib.request.urlopen(req, timeout=15) as resp:
@@ -126,47 +145,81 @@ def _download_to_sync(url: str, dest: Path) -> None:
             out.write(chunk)
 
 
-def _latest_companion_release_sync() -> dict:
-    """Fetches the releases list and returns the newest ``companion-``
-    tagged one -- NOT ``/releases/latest``, which can return whichever of
-    MeshCore's three per-version releases (companion/repeater/room-server)
-    happened to publish last (see module docstring)."""
+_FLAVORS = ("usb", "ble")
+
+
+def _companion_releases_sync(limit: int = 10) -> list[dict]:
+    """Fetches the releases list and returns up to ``limit`` ``companion-``
+    tagged ones, newest first -- NOT ``/releases/latest``, which can return
+    whichever of MeshCore's three per-version releases (companion/repeater/
+    room-server) happened to publish last (see module docstring)."""
     releases = _fetch_json_sync(_RELEASES_LIST_URL)
     if not isinstance(releases, list):
         raise RuntimeError("Unexpected GitHub API response for MeshCore releases")
-    for release in releases:
-        if str(release.get("tag_name", "")).startswith("companion-"):
-            return release
-    raise RuntimeError("No companion-tagged MeshCore release found")
+    companion_releases = [
+        r for r in releases if str(r.get("tag_name", "")).startswith("companion-")
+    ]
+    if not companion_releases:
+        raise RuntimeError("No companion-tagged MeshCore release found")
+    return companion_releases[:limit]
 
 
-def _cache_dir_for(board: str, tag: str) -> Path:
-    return _CACHE_DIR / board / tag
+def _companion_release_by_tag_sync(tag: str) -> dict:
+    """Fetches one specific companion- release by tag name (GitHub's
+    single-release-by-tag endpoint, cheaper than re-listing)."""
+    release = _fetch_json_sync(
+        f"https://api.github.com/repos/meshcore-dev/MeshCore/releases/tags/{tag}"
+    )
+    if not isinstance(release, dict) or not str(release.get("tag_name", "")).startswith(
+        "companion-"
+    ):
+        raise RuntimeError(f"'{tag}' is not a valid companion- release")
+    return release
 
 
-def _ensure_board_firmware_cached_sync(board: str) -> dict:
-    """Downloads (if not already cached) the given board's latest
-    official MeshCore companion release, returning::
+def _cache_dir_for(board: str, tag: str, flavor: str) -> Path:
+    return _CACHE_DIR / board / tag / flavor
 
-        {"tag": str, "chip": str, "merged_bin": Path}
+
+def _ensure_board_firmware_cached_sync(
+    board: str, tag: str = "", flavor: str = "usb",
+) -> dict:
+    """Downloads (if not already cached) the given board's official
+    MeshCore companion release, returning::
+
+        {"tag": str, "chip": str, "flavor": str, "merged_bin": Path}
+
+    ``tag`` empty means "latest companion- release". ``flavor`` is
+    ``"usb"`` (talks to this dashboard's own capture sources over serial
+    -- the default, and the only flavor that can ever connect to this
+    app) or ``"ble"`` (Bluetooth-only firmware, e.g. for flashing a
+    spare board for someone to pair with the official MeshCore phone
+    app instead -- never reconnects to this dashboard's own USB capture
+    source afterward, by design, since the firmware no longer speaks
+    the companion USB serial protocol at all).
 
     Runs entirely off the event loop -- callers must wrap this in
     ``run_in_executor``.
     """
+    if flavor not in _FLAVORS:
+        raise RuntimeError(f"Unknown flavor '{flavor}', expected one of {_FLAVORS}")
     spec = _CURATED_BOARDS[board]
-    release = _latest_companion_release_sync()
-    tag = release.get("tag_name", "")
+    release = _companion_release_by_tag_sync(tag) if tag else _companion_releases_sync(1)[0]
+    resolved_tag = release.get("tag_name", "")
 
-    cache_dir = _cache_dir_for(board, tag)
+    cache_dir = _cache_dir_for(board, resolved_tag, flavor)
     cache_dir.mkdir(parents=True, exist_ok=True)
     # Cache under the asset's own real filename -- includes the build
     # hash, so a cache hit only happens for byte-identical content, never
     # a stale file silently reused under a different release's name.
-    existing = list(cache_dir.glob(f"{spec['asset_prefix']}_companion_radio_usb-*-merged.bin"))
+    existing = list(cache_dir.glob(f"{spec['asset_prefix']}_companion_radio_{flavor}-*-merged.bin"))
     if existing:
-        return {"tag": tag, "chip": spec["chip"], "merged_bin": existing[0]}
+        return {
+            "tag": resolved_tag, "chip": spec["chip"], "flavor": flavor,
+            "merged_bin": existing[0],
+        }
 
-    prefix = f"{spec['asset_prefix']}_companion_radio_usb-"
+    prefix = f"{spec['asset_prefix']}_companion_radio_{flavor}-"
     asset = next(
         (
             a for a in release.get("assets", [])
@@ -176,7 +229,7 @@ def _ensure_board_firmware_cached_sync(board: str) -> dict:
     )
     if asset is None:
         raise RuntimeError(
-            f"Could not find a '{prefix}*-merged.bin' asset in {tag}",
+            f"Could not find a '{prefix}*-merged.bin' asset in {resolved_tag}",
         )
 
     dest = cache_dir / asset["name"]
@@ -191,7 +244,9 @@ def _ensure_board_firmware_cached_sync(board: str) -> dict:
         tmp_path.unlink(missing_ok=True)
         raise
 
-    return {"tag": tag, "chip": spec["chip"], "merged_bin": dest}
+    return {
+        "tag": resolved_tag, "chip": spec["chip"], "flavor": flavor, "merged_bin": dest,
+    }
 
 
 async def _stream_subprocess(cmd: list[str]) -> AsyncIterator[bytes]:
@@ -249,7 +304,9 @@ async def _stream_subprocess(cmd: list[str]) -> AsyncIterator[bytes]:
 
 class FlashRequest(BaseModel):
     board: str
-    label: str = ""
+    port: str
+    tag: str = ""
+    flavor: str = "usb"
 
 
 @router.post("/flash/stream")
@@ -258,43 +315,74 @@ async def flash_meshcore_stream(
     claims: SessionClaims = Depends(require_admin),
     audit: AuditLogWriter = Depends(get_audit_writer),
 ) -> StreamingResponse:
-    """Downloads (if needed) the chosen board's latest official MeshCore
-    companion release and writes it to one configured MeshCore USB
-    companion's port with esptool -- full from-scratch flash
+    """Downloads (if needed) the chosen board's official MeshCore
+    companion release -- latest, or a specific ``tag`` if pinned -- and
+    writes it to ``port`` with esptool -- full from-scratch flash
     (--erase-all), so this works whether the board is blank or currently
     running something else entirely (Meshtastic, extra/pocsag_companion,
-    etc.), same reasoning as the Meshtastic flash route. Port is resolved
-    server-side from capture.meshcore_usb by label, never trusted from
-    the browser.
+    etc.), same reasoning as the Meshtastic flash route.
+
+    ``port`` can be ANY currently-connected USB-serial device, not just
+    one already added as a configured MeshCore companion -- flashing a
+    spare board (or a friend's board, just passing through) shouldn't
+    require adding-then-removing a permanent companion entry first. It's
+    still validated against the live enumeration below (same one
+    GET /api/config/serial-ports uses), never trusted as a raw path
+    from the browser. If it happens to match a configured companion's
+    port, that companion's capture source is stopped before flashing
+    and restarted after, same as before; if it doesn't match anything
+    configured, there's nothing to stop/restart, which is exactly right
+    for a board that isn't part of this box's own config at all.
+
+    ``flavor`` "ble" flashes Bluetooth-only firmware (e.g. for a spare
+    board headed to someone who wants to pair it with the official
+    MeshCore phone app) -- it deliberately does NOT attempt to
+    reconnect the USB capture source afterward, since BLE firmware no
+    longer speaks the companion USB serial protocol at all.
     """
     if req.board not in _CURATED_BOARDS:
         raise HTTPException(400, "Unknown board")
+    if req.flavor not in _FLAVORS:
+        raise HTTPException(400, f"Unknown flavor, expected one of {_FLAVORS}")
 
-    port = None
+    from src.hal.usb_classifier import list_serial_ports_with_stable_paths
+    real_ports = {
+        value
+        for dev in list_serial_ports_with_stable_paths()
+        if dev.vid is not None
+        for value in (dev.device, dev.stable_path, dev.by_id, dev.by_path)
+        if value
+    }
+    if req.port not in real_ports:
+        raise HTTPException(400, "Selected port is not a currently connected USB-serial device")
+    port = req.port
+
+    label = ""
+    source = None
     if _config is not None:
         for c in _config.capture.meshcore_usb:
-            if (c.label or "") == (req.label or ""):
-                port = c.serial_port
+            if c.serial_port == port:
+                label = c.label or ""
+                source = _resolve_meshcore_source(label)
                 break
-    if not port:
-        raise HTTPException(400, "No configured serial port for this device")
-
-    source = _resolve_meshcore_source(req.label)
 
     async def body() -> AsyncIterator[bytes]:
         with audit.timed_action(
             user=claims.subject, action="meshcore_firmware.flash",
-            params={"board": req.board, "label": req.label, "port": port},
+            params={
+                "board": req.board, "label": label, "port": port,
+                "tag": req.tag or "latest", "flavor": req.flavor,
+            },
         ) as ctx:
             yield _ndjson({
                 "type": "line", "stream": "stdout",
-                "text": f"Fetching latest MeshCore companion firmware for "
-                        f"{_CURATED_BOARDS[req.board]['label']}…",
+                "text": f"Fetching MeshCore {req.tag or 'latest'} ({req.flavor}) companion "
+                        f"firmware for {_CURATED_BOARDS[req.board]['label']}…",
             })
             loop = asyncio.get_running_loop()
             try:
                 fw = await loop.run_in_executor(
-                    None, _ensure_board_firmware_cached_sync, req.board,
+                    None, _ensure_board_firmware_cached_sync, req.board, req.tag, req.flavor,
                 )
             except Exception as exc:
                 logger.exception("MeshCore firmware fetch failed for %s", req.board)
@@ -308,7 +396,7 @@ async def flash_meshcore_stream(
 
             yield _ndjson({
                 "type": "line", "stream": "stdout",
-                "text": f"Using MeshCore {fw['tag']} ({fw['chip']}).",
+                "text": f"Using MeshCore {fw['tag']} ({fw['flavor']}, {fw['chip']}).",
             })
 
             released = source is not None and source.connected
@@ -331,21 +419,32 @@ async def flash_meshcore_stream(
                     success = bool((event.get("result") or {}).get("success"))
 
             if released:
-                yield _ndjson({
-                    "type": "line", "stream": "stdout",
-                    "text": "Waiting for the board to finish rebooting…",
-                })
-                await asyncio.sleep(3.0)
-                await source.start()
-                yield _ndjson({
-                    "type": "line", "stream": "stdout",
-                    "text": (
-                        f"{source.name} reconnected on {port}."
-                        if source.connected
-                        else f"{source.name} did NOT reconnect -- "
-                             "a service restart may be needed."
-                    ),
-                })
+                if req.flavor == "ble":
+                    # BLE firmware doesn't speak the companion USB serial
+                    # protocol at all -- trying to reconnect would just
+                    # time out and read as a failure, so don't pretend
+                    # this dashboard could ever talk to it again.
+                    yield _ndjson({
+                        "type": "line", "stream": "stdout",
+                        "text": f"Flashed BLE firmware -- {source.name} won't reconnect over "
+                                f"USB (that's expected); pair it with the MeshCore app instead.",
+                    })
+                else:
+                    yield _ndjson({
+                        "type": "line", "stream": "stdout",
+                        "text": "Waiting for the board to finish rebooting…",
+                    })
+                    await asyncio.sleep(3.0)
+                    await source.start()
+                    yield _ndjson({
+                        "type": "line", "stream": "stdout",
+                        "text": (
+                            f"{source.name} reconnected on {port}."
+                            if source.connected
+                            else f"{source.name} did NOT reconnect -- "
+                                 "a service restart may be needed."
+                        ),
+                    })
 
             ctx.set_result("success" if success else "error")
 

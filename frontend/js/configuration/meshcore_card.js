@@ -106,20 +106,32 @@ class MeshcoreConfigCard {
                     <header class="cfg-card__head">
                         <h3 class="cfg-card__title">MeshCore firmware</h3>
                         <p class="cfg-card__hint">
-                            Flash a spare board with official MeshCore companion firmware
-                            straight from this dashboard -- downloads the latest release and
-                            writes it with esptool, no compiling needed. Erases the ENTIRE
-                            flash first, so this also works on a board currently running
-                            something else entirely (e.g. Meshtastic or extra/pocsag_companion).
+                            Flash any connected USB-serial device with official MeshCore
+                            companion firmware straight from this dashboard -- no compiling
+                            needed, and no need to add it as a configured companion first.
+                            Erases the ENTIRE flash first, so this also works on a board
+                            currently running something else entirely (e.g. Meshtastic or
+                            extra/pocsag_companion).
                         </p>
                     </header>
                     <label class="cfg-field cfg-field--narrow cfg-firmware-board-field">
                         <span class="cfg-field__label">Board</span>
                         <select class="cfg-field__input" data-mc-firmware-board></select>
                     </label>
-                    <label class="cfg-field cfg-field--narrow" data-mc-firmware-device-wrap hidden>
+                    <label class="cfg-field cfg-field--narrow">
                         <span class="cfg-field__label">Device to flash</span>
                         <select class="cfg-field__input" data-mc-firmware-device></select>
+                    </label>
+                    <label class="cfg-field cfg-field--narrow">
+                        <span class="cfg-field__label">Version</span>
+                        <select class="cfg-field__input" data-mc-firmware-tag></select>
+                    </label>
+                    <label class="cfg-field cfg-field--narrow">
+                        <span class="cfg-field__label">Flavor</span>
+                        <select class="cfg-field__input" data-mc-firmware-flavor>
+                            <option value="usb">USB (connects to this dashboard)</option>
+                            <option value="ble">BLE (Bluetooth, for the MeshCore phone app)</option>
+                        </select>
                     </label>
                     <div class="cfg-card__actions">
                         <button class="terminal-button terminal-button--primary"
@@ -152,6 +164,7 @@ class MeshcoreConfigCard {
             .addEventListener('click', (e) => this._toggleMcFirmwareOutput(e.currentTarget));
 
         this._loadMcFirmwareTargets();
+        this._loadMcFirmwareReleases();
     }
 
     /** Manual re-scan for the port-picker datalist -- lets a user unplug
@@ -185,34 +198,59 @@ class MeshcoreConfigCard {
         )).join('');
     }
 
-    /** Populates the "Device to flash" pulldown from currently configured
-     * MeshCore USB companions -- only shown when there's more than one,
-     * same pattern as the POCSAG/Serial firmware cards: nothing to
-     * choose between otherwise. Keyed on `label`, resolved server-side
-     * to a port -- never a raw path trusted from the browser. */
-    _renderMcFirmwareDevicePicker(companions) {
-        const wrap = this._root.querySelector('[data-mc-firmware-device-wrap]');
+    /** Populates the "Device to flash" pulldown from every currently
+     * enumerated USB-serial device (the same GET /api/config/serial-ports
+     * list that already feeds the companion port datalist below) --
+     * deliberately NOT limited to already-configured companions, so a
+     * spare board (or a friend's, just passing through) can be flashed
+     * without adding-then-removing a permanent companion entry first.
+     * Options carry the same "used by ..." hint as the companion port
+     * field. The selected value is a stable_path, re-validated against
+     * the live enumeration server-side -- never trusted as a raw path
+     * from the browser. */
+    _renderMcFirmwareDevicePicker() {
         const select = this._root.querySelector('[data-mc-firmware-device]');
         const flashBtn = this._root.querySelector('[data-mc-firmware-flash]');
-        if (!wrap || !select || !flashBtn) return;
+        if (!select || !flashBtn) return;
 
-        const configured = companions.filter((c) => c.serial_port);
-        this._mcFirmwareCompanions = configured;
+        const ports = this._enumeratedPorts || [];
+        const usage = this._portUsage || {};
 
-        if (configured.length === 0) {
-            wrap.hidden = true;
+        if (ports.length === 0) {
+            select.innerHTML = '<option value="">No USB-serial devices detected</option>';
             flashBtn.disabled = true;
-            flashBtn.title = 'No configured MeshCore companion with a serial port to flash.';
+            flashBtn.title = 'No USB-serial device connected to flash.';
             return;
         }
 
         flashBtn.disabled = false;
         flashBtn.title = '';
-        wrap.hidden = configured.length <= 1;
-        select.innerHTML = configured.map((c) => {
-            const name = c.label || c.serial_port;
-            return `<option value="${this._esc(c.label || '')}">${this._esc(name)}</option>`;
-        }).join('');
+        // Preserve the current selection across re-renders (this runs on
+        // every dashboard poll) so picking a device doesn't get silently
+        // reset out from under an in-progress choice.
+        const previous = select.value;
+        select.innerHTML = ports.map((p) => (
+            `<option value="${this._esc(p.stable_path)}">${this._esc(this._portOptionLabel(p, usage))}</option>`
+        )).join('');
+        if (previous && ports.some((p) => p.stable_path === previous)) select.value = previous;
+    }
+
+    /** Version pulldown for the MeshCore firmware card, from the last 10
+     * companion- tagged releases (GET .../releases), newest first.
+     * "Latest" (empty tag, the default) covers routine flashing; this
+     * is for the deliberate case -- pinning an older or specific
+     * version, e.g. to match what another companion is already
+     * running. */
+    async _loadMcFirmwareReleases() {
+        const select = this._root.querySelector('[data-mc-firmware-tag]');
+        if (!select) return;
+        const result = await this._api.get('/api/config/meshcore/firmware/releases');
+        const releases = (result && Array.isArray(result.releases)) ? result.releases : [];
+        const options = ['<option value="">Latest</option>'];
+        releases.forEach((r) => {
+            options.push(`<option value="${this._esc(r.tag)}">${this._esc(r.tag)}</option>`);
+        });
+        select.innerHTML = options.join('');
     }
 
     _toggleMcFirmwareOutput(button) {
@@ -232,22 +270,22 @@ class MeshcoreConfigCard {
     async _flashMeshcoreFirmware() {
         const boardSelect = this._root.querySelector('[data-mc-firmware-board]');
         const deviceSelect = this._root.querySelector('[data-mc-firmware-device]');
+        const tagSelect = this._root.querySelector('[data-mc-firmware-tag]');
+        const flavorSelect = this._root.querySelector('[data-mc-firmware-flavor]');
         const board = boardSelect?.value;
-        if (!board) return;
+        const port = deviceSelect?.value;
+        if (!board || !port) return;
         const boardLabel = boardSelect.options[boardSelect.selectedIndex]?.text || board;
-
-        const companions = this._mcFirmwareCompanions || [];
-        const label = companions.length > 1
-            ? (deviceSelect?.value ?? '')
-            : (companions[0]?.label || '');
-        const companion = companions.find((c) => (c.label || '') === label) || companions[0];
-        if (!companion) return;
+        const deviceLabel = deviceSelect.options[deviceSelect.selectedIndex]?.text || port;
+        const tag = tagSelect?.value || '';
+        const flavor = flavorSelect?.value || 'usb';
+        const flavorLabel = flavor === 'ble' ? 'BLE' : 'USB';
 
         const ok = await window.confirmModal({
             label: 'Flash MeshCore firmware',
-            description: `Erase the ENTIRE flash on "${companion.label || companion.serial_port}" `
-                + `(${companion.serial_port}) and write official MeshCore companion firmware `
-                + `for ${boardLabel}? This replaces whatever is currently on the board -- `
+            description: `Erase the ENTIRE flash on "${deviceLabel}" and write official `
+                + `MeshCore companion firmware (${flavorLabel}, ${tag || 'latest'}) for `
+                + `${boardLabel}? This replaces whatever is currently on the board -- `
                 + 'not reversible from here.',
         });
         if (!ok) return;
@@ -258,15 +296,15 @@ class MeshcoreConfigCard {
 
         flashBtn.disabled = true;
         status.dataset.kind = 'pending';
-        status.textContent = `Flashing ${companion.label || companion.serial_port}…`;
+        status.textContent = `Flashing ${deviceLabel}…`;
         if (outputPre) outputPre.textContent = '';
-        this._appendMcFirmwareOutput(`# Flashing ${boardLabel} onto ${companion.serial_port}…`);
+        this._appendMcFirmwareOutput(`# Flashing ${boardLabel} (${flavorLabel}, ${tag || 'latest'}) onto ${port}…`);
 
         let finalResult = null;
         try {
             finalResult = await window.UpdateStreamClient.postNdjson(
                 '/api/config/meshcore/firmware/flash/stream',
-                { board, label },
+                { board, port, tag, flavor },
                 (event) => {
                     if (event.type === 'started' && Array.isArray(event.cmd)) {
                         this._appendMcFirmwareOutput(`$ ${event.cmd.join(' ')}`);
@@ -319,7 +357,7 @@ class MeshcoreConfigCard {
         const list = companions.length > 0 ? companions : [{ label: '', serial_port: '', baud_rate: 115200, auto_detect: true }];
         list.forEach((c) => this._addCompanionRow(c));
         this._syncAddBtn();
-        this._renderMcFirmwareDevicePicker(companions);
+        this._renderMcFirmwareDevicePicker();
 
         if (!mc.connected) {
             this._renderOffline(config);
@@ -384,6 +422,10 @@ class MeshcoreConfigCard {
         this._companionsEl.querySelectorAll('[data-companion-port]').forEach((input) => {
             this._updateResolvedPort(input);
         });
+        // Same reasoning: the firmware card's device picker also depends
+        // on this same enumeration, and render() calls it before this
+        // fetch has resolved on first load.
+        this._renderMcFirmwareDevicePicker();
     }
 
     /** A pinned by-path/by-id value is long and not something a user can
