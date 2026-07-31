@@ -101,7 +101,7 @@ class RadioThermalsCard {
                 {
                     minX, maxX, span,
                     suggestedMin: 40, suggestedMax: 60,
-                    fmt: (v) => `${v.toFixed(1)} °C`,
+                    fmt: (v) => window.MeshpointDisplayUnits?.formatTemperature(v),
                     hideXTicks: true,
                 },
             ),
@@ -121,7 +121,7 @@ class RadioThermalsCard {
         const meta = this._root.querySelector('[data-th-meta]');
         const last = rows[rows.length - 1];
         meta.textContent =
-            `${last.temp_c.toFixed(1)} °C · fan ${(last.duty * 100).toFixed(0)}%`;
+            `${window.MeshpointDisplayUnits?.formatTemperature(last.temp_c) ?? last.temp_c.toFixed(1) + '°C'} · fan ${(last.duty * 100).toFixed(0)}%`;
     }
 
     _panelChart(canvas, data, color, opts) {
