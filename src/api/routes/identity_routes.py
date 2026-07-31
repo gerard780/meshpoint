@@ -53,6 +53,7 @@ _ADMIN_SECTIONS: tuple[str, ...] = (
     "configuration.meshcore",
     "configuration.serial",
     "configuration.pocsag-serial",
+    "configuration.firmware",
     "configuration.transmit",
     "configuration.mqtt",
     "configuration.gps",
