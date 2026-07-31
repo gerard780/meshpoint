@@ -113,9 +113,9 @@ class DabConfigPanel {
                     </div>
                     <div class="panel__body">
                         <div class="dabcfg-hint">
-                            Channels found by <code>scripts/dab_channel_scan.py</code>.
-                            Names here are editable overrides -- the raw scanned label is kept underneath
-                            and used as the default whenever no override is set.
+                            Channels found by the scan above. Names here are editable overrides --
+                            the raw scanned label is kept underneath and used as the default whenever
+                            no override is set.
                         </div>
                         <div data-dabcfg-body>Loading...</div>
                     </div>
