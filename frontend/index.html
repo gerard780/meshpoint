@@ -957,6 +957,35 @@
         <div id="node-drawer" class="nd-drawer"></div>
     </div>
 
+    <script>
+        // Dashboard is the only [data-section] shipped visible by default
+        // (fast first paint) -- every other route stays display:none until
+        // sidebar/sidebar_controller.js's _renderActive() runs, which only
+        // happens after every <script> below has loaded and app.js
+        // constructs the router. On a reload landing anywhere else (e.g.
+        // #/settings/updates), that gap showed as a flash of Dashboard's
+        // stat cards before "jumping" to the real page. This runs
+        // immediately, before any of those scripts load, and does the same
+        // match the router would -- so the correct section is what
+        // actually paints first. Comparing dataset.section directly (not a
+        // querySelector built from the hash) sidesteps ever needing to
+        // escape/validate the hash as a selector.
+        (function () {
+            try {
+                var route = (location.hash || '').replace(/^#\/?/, '').trim() || 'dashboard';
+                var sections = document.querySelectorAll('[data-section]');
+                var matched = false;
+                sections.forEach(function (el) {
+                    if (el.dataset.section === route) matched = true;
+                });
+                if (!matched) return;
+                sections.forEach(function (el) {
+                    el.style.display = el.dataset.section === route ? '' : 'none';
+                });
+            } catch (e) {}
+        })();
+    </script>
+
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
     <script src="js/websocket_client.js"></script>
