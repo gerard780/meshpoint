@@ -209,6 +209,17 @@ class DapnetPanel {
                 this._renderCapcodes();
             });
         }
+
+        const pktTbody = document.getElementById('dp-packet-tbody');
+        if (pktTbody) {
+            pktTbody.addEventListener('click', (e) => {
+                const tr = e.target.closest('tr[data-pkt]');
+                if (!tr || !window.PacketDetailModal) return;
+                const pkt = (this._packets || [])[Number(tr.dataset.pkt)];
+                if (!pkt) return;
+                window.PacketDetailModal.show(pkt, { selectedRow: tr });
+            });
+        }
     }
 
     _setTab(tab) {
@@ -346,8 +357,8 @@ class DapnetPanel {
         }
         if (empty) empty.style.display = 'none';
 
-        tbody.innerHTML = packets.map((p) => `
-            <tr class="lw-pkt-row">
+        tbody.innerHTML = packets.map((p, i) => `
+            <tr class="lw-pkt-row" data-pkt="${i}">
                 <td class="lw-time">${this._fmtTime(p.timestamp)}</td>
                 <td>${this._fmtType(p.packet_type)}</td>
                 <td class="lw-id">${this._esc(String(p.capcode ?? '--'))}</td>

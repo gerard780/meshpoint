@@ -167,16 +167,15 @@
 .lw-table--packets col.col-fcnt   { width: 60px;  }
 
 /* ── DAPNET tables ───────────────────────────────────
- * Page text (FT8/PSK-reporter-style pages can run 80+ chars) needs a
- * real column, not LoRaWAN's narrow col-fport/col-dev widths -- fixed
- * table-layout + the generic .lw-table td nowrap/ellipsis above were
- * silently truncating long messages. auto layout lets the text column
- * take whatever's left after the compact columns size to content. */
-.lw-table--dapnet-packets,
-.lw-table--dapnet-capcodes {
-    table-layout: auto;
-}
-
+ * Page text (FT8/PSK-reporter-style pages can run 80+ chars) used to
+ * get a wrapping auto-layout column here so long pages weren't
+ * silently truncated -- but on a narrow mobile viewport, the text
+ * column has so little room left after the other fixed columns that
+ * word-break wrapped it one word (sometimes one character) per line,
+ * unreadable. Now that a row click opens the same full-detail popup
+ * Meshtastic/MeshCore rows already have, truncating the inline preview
+ * is no longer a real loss -- reverted to the same fixed table-layout
+ * + single-line ellipsis every other .lw-table already uses. */
 .lw-table--dapnet-packets col.col-time { width: 90px; }
 .lw-table--dapnet-packets col.col-type { width: 76px; }
 .lw-table--dapnet-packets col.col-dev  { width: 90px; }
@@ -185,14 +184,6 @@
 .lw-table--dapnet-capcodes col.col-id     { width: 90px; }
 .lw-table--dapnet-capcodes col.col-type   { width: 76px; }
 .lw-table--dapnet-capcodes col.col-frames { width: 64px; }
-
-.lw-table--dapnet-packets td.lw-text,
-.lw-table--dapnet-capcodes td.lw-text {
-    white-space: normal;
-    overflow: visible;
-    text-overflow: clip;
-    word-break: break-word;
-}
 
 /* ── Cell types ─────────────────────────────────────── */
 
