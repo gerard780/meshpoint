@@ -13,7 +13,9 @@ from src.api.update.release_notes import (
     ChangelogParser,
     ChangelogSection,
     format_section_for_preview,
+    format_section_full,
     sanitize_detail_for_preview,
+    sanitize_detail_full,
     select_preview_section,
 )
 
@@ -95,6 +97,45 @@ class TestChangelogParser(unittest.TestCase):
         self.assertEqual(len(sections), 1)
         self.assertEqual(sections[0].version, "0.6.0")
 
+    def test_category_headings_attach_to_following_bullets(self) -> None:
+        text = (
+            "### v0.7.7 (July 2026)\n\n"
+            "- **Uncategorized lead.** Bullet above any category.\n\n"
+            "#### LoRaWAN sniffing\n\n"
+            "- **Capture.** First categorized bullet.\n"
+            "- **Decoder.** Second bullet, same category.\n\n"
+            "#### Dashboard and UI\n\n"
+            "- **Sidebar.** Bullet in the next category.\n"
+        )
+        sections = ChangelogParser.parse_text(text)
+        bullets = sections[0].bullets
+        self.assertEqual(
+            [b.category for b in bullets],
+            [None, "LoRaWAN sniffing", "LoRaWAN sniffing", "Dashboard and UI"],
+        )
+
+    def test_category_resets_at_next_version_section(self) -> None:
+        text = (
+            "### v0.7.7 (July 2026)\n\n"
+            "#### Roles and access\n\n"
+            "- **Lockdown.** Categorized bullet.\n\n"
+            "### v0.7.6 (June 2026)\n\n"
+            "- **Older bullet.** Must not inherit the previous section's category.\n"
+        )
+        sections = ChangelogParser.parse_text(text)
+        self.assertEqual(sections[0].bullets[0].category, "Roles and access")
+        self.assertIsNone(sections[1].bullets[0].category)
+
+    def test_preview_bullet_carries_category(self) -> None:
+        text = (
+            "### v0.7.7 (July 2026)\n\n"
+            "#### CLI\n\n"
+            "- **Report.** Works again.\n"
+        )
+        section = ChangelogParser.parse_text(text)[0]
+        preview = format_section_for_preview(section)
+        self.assertEqual(preview["bullets"][0]["category"], "CLI")
+
 
 class TestSelectPreviewSection(unittest.TestCase):
     """Channel-tier -> changelog-section dispatch."""
@@ -104,7 +145,7 @@ class TestSelectPreviewSection(unittest.TestCase):
 
     def test_rc_tier_does_not_surface_older_release_when_076_missing(self) -> None:
         section = select_preview_section(
-            self.sections, tier="rc", channel_id="rc-078",
+            self.sections, tier="rc", channel_id="rc-079",
         )
         self.assertIsNone(section)
 
@@ -265,6 +306,31 @@ class TestPreviewFormatting(unittest.TestCase):
         payload = format_section_for_preview(section)
         self.assertEqual(payload["bullets"][0]["detail"], "Brief note.")
         self.assertTrue(payload["bullets"][1]["detail"].endswith("…"))
+
+
+class TestFullFormatting(unittest.TestCase):
+    def test_sanitize_detail_full_keeps_long_text(self) -> None:
+        long = "A" * 300
+        self.assertEqual(sanitize_detail_full(long), long)
+
+    def test_format_section_full_does_not_truncate(self) -> None:
+        from src.api.update.release_notes import ChangelogBullet
+
+        detail = "See [docs](https://example.com) and `code` path. " + ("B" * 200)
+        section = ChangelogSection(
+            header="v0.7.3.1",
+            version="0.7.3.1",
+            date=None,
+            is_unreleased=False,
+            bullets=[ChangelogBullet(headline="Long", detail=detail)],
+        )
+        payload = format_section_full(section)
+        out = payload["bullets"][0]["detail"]
+        self.assertNotIn("…", out)
+        self.assertIn("docs", out)
+        self.assertNotIn("https://", out)
+        self.assertNotIn("`", out)
+        self.assertGreater(len(out), 200)
 
 
 if __name__ == "__main__":

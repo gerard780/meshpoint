@@ -21,6 +21,7 @@ const UPDATE_CHANNEL_ALIASES = {
     'rc-075': 'rc-076',
     'rc-076': 'rc-077',
     'rc-077': 'rc-078',
+    'rc-078': 'rc-079',
 };
 
 class UpdatePanelController {
@@ -34,6 +35,10 @@ class UpdatePanelController {
         this.rollbackBtn = rootEl.querySelector('[data-update-rollback]');
         this.rollbackHintEl = rootEl.querySelector('[data-update-rollback-hint]');
         this.syncHintEl = rootEl.querySelector('[data-update-sync-hint]');
+        this.commitsView = new window.UpdateCommitTimelineView(
+            rootEl.querySelector('[data-update-commits]'),
+            rootEl.querySelector('[data-update-commits-list]')
+        );
         this.statusEl = rootEl.querySelector('[data-update-status]');
         this.descriptionEl = rootEl.querySelector('[data-update-description]');
         this.localVersionEl = rootEl.querySelector('[data-update-local-version]');
@@ -93,11 +98,13 @@ class UpdatePanelController {
             if (!response.ok) return;
             this._installStatus = await response.json();
             this._renderVersionCards(this._installStatus);
+            this._renderCommits(this._installStatus);
             if (!this._installStatus.checked_at) {
                 this._renderSyncHint(null);
             }
         } catch (_e) { /* install status is best-effort */ }
         this._syncRollbackButton();
+        this._syncApplyCue();
     }
 
     async _checkForUpdates() {
@@ -129,6 +136,7 @@ class UpdatePanelController {
             }
             this._installStatus = await response.json();
             this._renderVersionCards(this._installStatus);
+            this._renderCommits(this._installStatus);
             this._renderSyncHint(this._installStatus);
             const behind = this._installStatus.commits_behind;
             if (this._installStatus.sync_error) {
@@ -136,7 +144,7 @@ class UpdatePanelController {
             } else if (behind != null && behind > 0) {
                 this._setStatus(
                     'success',
-                    `${behind} commit${behind === 1 ? '' : 's'} behind — use Apply when ready.`,
+                    `${behind} commit${behind === 1 ? '' : 's'} ready to land. Use Apply update when ready.`,
                 );
             } else {
                 this._setStatus('success', 'Up to date with the selected channel.');
@@ -147,7 +155,20 @@ class UpdatePanelController {
         } finally {
             if (this.checkBtn) this.checkBtn.disabled = false;
             this._syncRollbackButton();
+            this._syncApplyCue();
         }
+    }
+
+    _renderCommits(status) {
+        if (!this.commitsView) return;
+        this.commitsView.render(status || {});
+    }
+
+    _syncApplyCue() {
+        if (!this.applyBtn) return;
+        const behind = this._installStatus && this._installStatus.commits_behind;
+        const ready = Number(behind) > 0;
+        this.applyBtn.classList.toggle('update-apply--ready', ready);
     }
 
     _renderVersionCards(status) {
@@ -203,8 +224,8 @@ class UpdatePanelController {
             this.syncHintEl.dataset.kind = 'ok';
             this.syncHintEl.textContent = this._withLastChecked(
                 branch
-                    ? `Up to date with origin/${branch}.`
-                    : 'Up to date with GitHub.',
+                    ? `Locked on with origin/${branch}.`
+                    : 'Locked on with GitHub.',
                 status,
             );
             return;
@@ -212,12 +233,12 @@ class UpdatePanelController {
         const parts = [];
         if (behind > 0) {
             parts.push(
-                `${behind} commit${behind === 1 ? '' : 's'} behind origin/${branch}`,
+                `${behind} commit${behind === 1 ? '' : 's'} waiting on origin/${branch}`,
             );
         }
         if (ahead > 0) {
             parts.push(
-                `${ahead} commit${ahead === 1 ? '' : 's'} ahead of origin/${branch}`,
+                `${ahead} local commit${ahead === 1 ? '' : 's'} not on origin`,
             );
         }
         this.syncHintEl.dataset.kind = behind > 0 ? 'behind' : '';
@@ -317,6 +338,9 @@ class UpdatePanelController {
         if (!this._installStatus?.checked_at
             || this._installStatus?.compare_branch !== this._compareBranchForChannel(channel)) {
             this._renderSyncHint(null);
+            if (this.applyBtn) {
+                this.applyBtn.classList.remove('update-apply--ready');
+            }
         }
         this._loadReleaseNotes(channel);
     }

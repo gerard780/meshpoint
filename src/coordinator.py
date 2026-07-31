@@ -14,6 +14,8 @@ from src.decode.packet_router import PacketRouter
 from src.hal.location import LocationSource, build_location_source
 from src.log_format import CYAN, DIM, GREEN, RESET
 from src.models.packet import Packet, Protocol, RawCapture
+from src.radio.presets import MODEM_PRESETS, REGION_DEFAULTS, preset_from_params
+from src.relay.map_report import MapReportData
 from src.relay.meshtastic_transmitter import MeshtasticTransmitter
 from src.relay.mqtt_publisher import MqttPublisher
 from src.relay.relay_manager import RelayManager
@@ -70,6 +72,7 @@ class PipelineCoordinator:
         self._pipeline_task: Optional[asyncio.Task] = None
         self._cleanup_task: Optional[asyncio.Task] = None
         self._location_refresh_task: Optional[asyncio.Task] = None
+        self._map_report_task: Optional[asyncio.Task] = None
         self._last_live_lat: Optional[float] = None
         self._last_live_lon: Optional[float] = None
         self._last_live_alt: Optional[float] = None
@@ -155,6 +158,10 @@ class PipelineCoordinator:
         self._location_refresh_task = asyncio.create_task(
             self._location_refresh_loop(), name="location-refresh"
         )
+        if self._config.mqtt.map_reporting_enabled and self._mqtt:
+            self._map_report_task = asyncio.create_task(
+                self._map_report_loop(), name="mqtt-map-report"
+            )
         registered = [src.name for src in self._capture._sources]
         sources = ", ".join(
             _SOURCE_LABELS.get(s, s) for s in registered
@@ -167,7 +174,12 @@ class PipelineCoordinator:
     async def stop(self) -> None:
         self._running = False
         await self._capture.stop()
-        for task in (self._pipeline_task, self._cleanup_task, self._location_refresh_task):
+        for task in (
+            self._pipeline_task,
+            self._cleanup_task,
+            self._location_refresh_task,
+            self._map_report_task,
+        ):
             if task:
                 task.cancel()
                 try:
@@ -185,18 +197,28 @@ class PipelineCoordinator:
         )
 
     async def _cleanup_loop(self) -> None:
-        """Periodically prune old packets to keep the DB from growing unbounded."""
+        """Periodically prune old packets and telemetry to bound DB growth."""
         interval = self._config.storage.cleanup_interval_seconds
-        max_retained = self._config.storage.max_packets_retained
+        max_packets = self._config.storage.max_packets_retained
+        max_telemetry = self._config.storage.max_telemetry_retained
         try:
             while self._running:
                 await asyncio.sleep(interval)
-                removed = await self._packet_repo.cleanup_old(max_retained)
+                removed = await self._packet_repo.cleanup_old(max_packets)
                 if removed:
                     logger.info(
                         f" {CYAN}--{RESET} {DIM}CLEANUP{RESET}  "
                         f"pruned {removed} old packets  "
-                        f"{DIM}(max {max_retained}){RESET}"
+                        f"{DIM}(max {max_packets}){RESET}"
+                    )
+                removed_telemetry = await self._telemetry_repo.cleanup_old(
+                    max_telemetry
+                )
+                if removed_telemetry:
+                    logger.info(
+                        f" {CYAN}--{RESET} {DIM}CLEANUP{RESET}  "
+                        f"pruned {removed_telemetry} old telemetry rows  "
+                        f"{DIM}(max {max_telemetry}){RESET}"
                     )
         except asyncio.CancelledError:
             pass
@@ -251,6 +273,91 @@ class PipelineCoordinator:
             except Exception:
                 logger.exception("Location update callback failed")
 
+    async def _map_report_loop(self) -> None:
+        """Publish immediately when connected, then at most once per configured interval (min 3600s)."""
+        configured = int(self._config.mqtt.map_report_interval_seconds or 3600)
+        interval = max(3600, configured)
+        retry = min(300, interval)
+        if configured < 3600:
+            logger.warning(
+                "mqtt.map_report_interval_seconds=%d is below the "
+                "Meshtastic minimum; using 3600",
+                configured,
+            )
+
+        try:
+            while self._running:
+                if self._mqtt and self._mqtt.connected:
+                    published = await self._publish_map_report()
+                    await asyncio.sleep(interval if published else retry)
+                else:
+                    await asyncio.sleep(5)
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            logger.exception("MQTT map report loop crashed")
+
+    async def _publish_map_report(self) -> bool:
+        mqtt = self._mqtt
+        node_id = self._config.transmit.node_id
+        latitude = self._config.device.latitude
+        longitude = self._config.device.longitude
+        if not mqtt or node_id is None:
+            logger.warning(
+                "MQTT map report skipped: transmit.node_id is not configured"
+            )
+            return False
+        if (
+            latitude is None
+            or longitude is None
+            or (latitude == 0 and longitude == 0)
+        ):
+            logger.warning(
+                "MQTT map report skipped: device latitude/longitude unavailable"
+            )
+            return False
+
+        radio = self._config.radio
+        preset_name = preset_from_params(
+            radio.spreading_factor,
+            radio.bandwidth_khz,
+            radio.coding_rate,
+        ) or "LONG_FAST"
+        preset = MODEM_PRESETS.get(preset_name)
+        expected_name = preset.display_name if preset else "LongFast"
+        expected_frequency = REGION_DEFAULTS.get(
+            radio.region, {}
+        ).get("frequency_mhz")
+        primary_channel = (
+            self._config.meshtastic.primary_channel_name or expected_name
+        )
+        has_default_channel = (
+            self._config.meshtastic.default_key_b64 == "AQ=="
+            and primary_channel.lower() == expected_name.lower()
+            and expected_frequency is not None
+            and radio.frequency_mhz is not None
+            and abs(float(radio.frequency_mhz) - expected_frequency) < 0.0001
+        )
+        online_nodes = await self.node_repo.get_active_count(
+            hours=2, protocol="meshtastic"
+        )
+        report = MapReportData(
+            node_id=node_id,
+            long_name=self._config.transmit.long_name,
+            short_name=self._config.transmit.short_name,
+            latitude=latitude,
+            longitude=longitude,
+            altitude=self._config.device.altitude,
+            firmware_version=self._config.device.firmware_version,
+            region=radio.region,
+            modem_preset=preset_name,
+            primary_channel_name=primary_channel,
+            has_default_channel=has_default_channel,
+            num_online_local_nodes=online_nodes,
+            position_precision=self._config.mqtt.map_report_position_precision,
+        )
+        return mqtt.publish_map_report(report)
+
     async def _run_pipeline(self) -> None:
         try:
             async for raw_capture in self._capture.packets():
@@ -263,11 +370,16 @@ class PipelineCoordinator:
             logger.exception("Pipeline error")
 
     async def _process_capture(self, raw: RawCapture) -> None:
-        if raw.capture_source == "meshcore_usb":
+        # Match bare "meshcore_usb" and labelled forms (meshcore_usb_868, …)
+        # so Wave B multi-companion tags still hit the event adapter.
+        if self._is_meshcore_usb_capture(raw.capture_source):
             packet = self._adapt_meshcore_usb(raw)
         else:
             packet = self._router.decode(
-                raw.payload, signal=raw.signal, protocol_hint=raw.protocol_hint
+                raw.payload,
+                signal=raw.signal,
+                protocol_hint=raw.protocol_hint,
+                pre_decoded=raw.pre_decoded,
             )
         if packet is None:
             return
@@ -278,6 +390,10 @@ class PipelineCoordinator:
         await self._relay.process_packet(packet)
         self._publish_mqtt(packet)
         self._record_stats(packet)
+
+    @staticmethod
+    def _is_meshcore_usb_capture(source: str) -> bool:
+        return source == "meshcore_usb" or source.startswith("meshcore_usb_")
 
     @staticmethod
     def _adapt_meshcore_usb(raw: RawCapture) -> Optional[Packet]:

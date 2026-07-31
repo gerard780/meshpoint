@@ -98,10 +98,42 @@ class MeshcoreUsbConfig:
 
 
 @dataclass
+class SerialDeviceConfig:
+    """One Meshtastic USB serial radio.
+
+    Optional list under ``capture.serial``. Single-stick setups can keep
+    using the legacy ``capture.serial_port`` / ``serial_baud`` scalars.
+    """
+
+    serial_port: Optional[str] = None
+    serial_baud: int = 115200
+    label: str = ""
+
+
+_SERIAL_DEVICE_FIELDS: frozenset[str] = frozenset(
+    {"serial_port", "serial_baud", "label"}
+)
+
+
+def _coerce_serial_devices(value) -> list[SerialDeviceConfig]:
+    """Parse opt-in multi-device ``capture.serial`` list (list of dicts only)."""
+
+    def _from_dict(d: dict) -> SerialDeviceConfig:
+        return SerialDeviceConfig(
+            **{k: v for k, v in d.items() if k in _SERIAL_DEVICE_FIELDS}
+        )
+
+    if isinstance(value, list):
+        return [_from_dict(d) for d in value if isinstance(d, dict)]
+    return []
+
+
+@dataclass
 class CaptureConfig:
     sources: list[str] = field(default_factory=lambda: ["mock"])
     serial_port: Optional[str] = None
     serial_baud: int = 115200
+    serial: list[SerialDeviceConfig] = field(default_factory=list)
     concentrator_spi_device: str = "/dev/spidev0.0"
     meshcore_usb: MeshcoreUsbConfig = field(default_factory=MeshcoreUsbConfig)
 
@@ -110,6 +142,7 @@ class CaptureConfig:
 class StorageConfig:
     database_path: str = "data/concentrator.db"
     max_packets_retained: int = 100_000
+    max_telemetry_retained: int = 100_000
     cleanup_interval_seconds: int = 3600
 
 
@@ -199,6 +232,11 @@ class MqttConfig:
     publish_json: bool = False
     location_precision: str = "exact"
     homeassistant_discovery: bool = False
+    # Publish this Meshpoint's own identity to the official Meshtastic map.
+    # Map reports are public, unencrypted, MQTT-only packets.
+    map_reporting_enabled: bool = False
+    map_report_interval_seconds: int = 3600
+    map_report_position_precision: int = 14
 
 
 @dataclass
@@ -395,6 +433,13 @@ def _apply_yaml(cfg: AppConfig, path: Path) -> None:
         logger.warning("Ignoring %s: top-level YAML is not a mapping.", path)
         return
 
+    # Opt-in multi-device list; pop before merge so nested dicts become
+    # SerialDeviceConfig instances (legacy serial_port scalars untouched).
+    cap_raw = raw.get("capture")
+    serial_devices: list[SerialDeviceConfig] | None = None
+    if isinstance(cap_raw, dict) and "serial" in cap_raw:
+        serial_devices = _coerce_serial_devices(cap_raw.pop("serial"))
+
     section_map = {
         "radio": cfg.radio,
         "meshtastic": cfg.meshtastic,
@@ -423,6 +468,9 @@ def _apply_yaml(cfg: AppConfig, path: Path) -> None:
             unknown_keys.extend(
                 _collect_unknown_keys(section_instance, section_value, f"{section_name}.")
             )
+
+    if serial_devices is not None:
+        cfg.capture.serial = serial_devices
 
     if unknown_keys:
         logger.warning(

@@ -28,6 +28,13 @@ capture:
   sources: []
   serial_port: null
   serial_baud: 115200
+  # Opt-in multi-stick list (label becomes capture_source "serial_<label>"):
+  # serial:
+  #   - serial_port: "/dev/ttyUSB0"
+  #     label: "433"
+  #   - serial_port: "/dev/ttyUSB1"
+  #     label: "868"
+  serial: []
   concentrator_spi_device: "/dev/spidev0.0"
   meshcore_usb:
     serial_port: null
@@ -37,6 +44,7 @@ capture:
 storage:
   database_path: "data/concentrator.db"
   max_packets_retained: 100000
+  max_telemetry_retained: 100000
   cleanup_interval_seconds: 3600
 
 dashboard:
@@ -50,7 +58,7 @@ device:
   longitude: 0.0
   altitude: 25
   hardware_description: "RAK2287 + Raspberry Pi 4"
-  firmware_version: "0.7.7"
+  firmware_version: "0.7.8"
 
 relay:
   enabled: false
@@ -125,6 +133,11 @@ mqtt:
   publish_json: false
   location_precision: "exact"
   homeassistant_discovery: false
+  # Public, unencrypted report for the official Meshtastic map.
+  # Uses the transmit node ID and never sends a packet over LoRa.
+  map_reporting_enabled: false
+  map_report_interval_seconds: 3600
+  map_report_position_precision: 14  # valid range: 12..15
 
 location:
   # Where live GPS fixes come from (skyplot + optional mesh POSITION).

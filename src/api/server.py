@@ -5,7 +5,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from src._so_compat_check import warn_if_stale_so_files
@@ -330,8 +330,9 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         ):
             target = "/login" if auth_subsystem.service.is_setup_complete() else "/setup"
             return RedirectResponse(url=target, status_code=302)
-        return FileResponse(
-            str(static_dir / "index.html"), media_type="text/html"
+        return HTMLResponse(
+            _read_busted_html(static_dir / "index.html"),
+            headers={"Cache-Control": "no-cache"},
         )
 
     if static_dir.exists():
@@ -361,17 +362,34 @@ def _build_pipeline(config: AppConfig) -> PipelineCoordinator:
 
 
 def _add_serial_source(coordinator: PipelineCoordinator, config: AppConfig):
+    """Add one SerialCaptureSource per configured Meshtastic USB device."""
     try:
         from src.capture.serial_source import SerialCaptureSource
-        coordinator.capture_coordinator.add_source(
-            SerialCaptureSource(
-                port=config.capture.serial_port,
-                baud=config.capture.serial_baud,
-            )
-        )
+        from src.config import SerialDeviceConfig
     except ImportError:
         logger.warning("Serial capture unavailable")
+        return
 
+    devices = config.capture.serial or [
+        SerialDeviceConfig(
+            serial_port=config.capture.serial_port,
+            serial_baud=config.capture.serial_baud,
+        )
+    ]
+    for dev in devices:
+        if not (dev.serial_port or "").strip():
+            logger.warning(
+                "Skipping serial device with empty port (label=%r)",
+                dev.label,
+            )
+            continue
+        coordinator.capture_coordinator.add_source(
+            SerialCaptureSource(
+                port=dev.serial_port,
+                baud=dev.serial_baud,
+                label=dev.label,
+            )
+        )
 
 def _add_concentrator_source(
     coordinator: PipelineCoordinator, config: AppConfig
@@ -680,6 +698,8 @@ def _build_tx_service(
         radio_config=config.radio,
         primary_channel_name=config.meshtastic.primary_channel_name,
         device_id=config.device.device_id,
+        node_repo=coord.node_repo,
+        serial_sources=_find_serial_sources(coord),
     )
     logger.info(
         "Transmit service ready: MT=%s MC=%s",
@@ -833,6 +853,17 @@ def _find_meshcore_source(coord: PipelineCoordinator):
         if src.name == "meshcore_usb":
             return src
     return None
+
+
+def _find_serial_sources(coord: PipelineCoordinator) -> list:
+    """Meshtastic USB serial capture sources (for reply routing)."""
+    from src.capture.serial_source import SerialCaptureSource
+
+    return [
+        src
+        for src in coord.capture_coordinator._sources
+        if isinstance(src, SerialCaptureSource)
+    ]
 
 
 async def _reapply_companion_name(meshcore_tx, config: AppConfig) -> None:
@@ -994,6 +1025,13 @@ def _setup_message_interception(
     except Exception:
         logger.debug("Failed to build channel hash map", exc_info=True)
 
+    # Stick-local channel name -> Meshpoint index (serial pre_decoded path).
+    name_to_channel_index: dict[str, int] = {}
+    if config.meshtastic.primary_channel_name:
+        name_to_channel_index[config.meshtastic.primary_channel_name] = 0
+    for _i, _name in enumerate(config.meshtastic.channel_keys.keys(), start=1):
+        name_to_channel_index[_name] = _i
+
     async def _refresh_mc_contacts() -> None:
         if not meshcore_tx or not meshcore_tx.connected:
             logger.debug("MC contact refresh skipped: not connected")
@@ -1005,12 +1043,13 @@ def _setup_message_interception(
                 name = c.get("name", "")
                 if not pk:
                     continue
+                # Canonical 12-hex only. Indexing 8/10/16-char prefixes let
+                # contacts that share a short prefix overwrite each other
+                # (javastraat/meshpoint 52e1f56).
                 canonical = pk[:12].lower() if len(pk) >= 12 else pk.lower()
-                for prefix_len in (8, 10, 12, 16, len(pk)):
-                    prefix = pk[:prefix_len].lower()
-                    mc_pubkey_canon[prefix] = canonical
-                    if name:
-                        mc_name_cache[prefix] = name
+                mc_pubkey_canon[canonical] = canonical
+                if name:
+                    mc_name_cache[canonical] = name
             logger.debug(
                 "MC contact cache refreshed: %d name, %d pubkey entries",
                 len(mc_name_cache), len(mc_pubkey_canon),
@@ -1026,24 +1065,20 @@ def _setup_message_interception(
             return False
 
     def _resolve_mc_display_name(source: str, payload: dict) -> str:
+        # Canonical 12-char only; see _refresh_mc_contacts.
         src_lower = source.lower()
-        for length in (len(src_lower), 12, 8, 16):
-            cached = mc_name_cache.get(src_lower[:length], "")
-            if cached and not _is_hex_only(cached):
-                return cached
+        cached = mc_name_cache.get(src_lower[:12], "")
+        if cached and not _is_hex_only(cached):
+            return cached
         name = payload.get("long_name", "")
         if name and not _is_hex_only(name):
             return name
         return ""
 
     def _normalize_mc_node_id(source: str) -> str:
-        """Map any pubkey prefix to the canonical 12-char lowercase form."""
+        """Map a pubkey to the canonical 12-char lowercase form."""
         src_lower = source.lower()
-        for length in (len(src_lower), 12, 8, 16):
-            canon = mc_pubkey_canon.get(src_lower[:length], "")
-            if canon:
-                return canon
-        return src_lower
+        return mc_pubkey_canon.get(src_lower[:12], "") or src_lower
 
     def on_text_packet(packet: Packet) -> None:
         if packet.packet_type != PacketType.TEXT:
@@ -1067,9 +1102,35 @@ def _setup_message_interception(
                 return
             if packet.protocol == Protocol.MESHCORE:
                 ch_idx = packet.channel_hash or 0
+                node_id = f"broadcast:{packet.protocol.value}:{ch_idx}"
+            elif packet.remote_channel_name:
+                # Stick reported its local channel by name; hash byte may be
+                # that stick's table index, not a real OTA hash.
+                _idx = name_to_channel_index.get(packet.remote_channel_name)
+                if _idx is not None:
+                    node_id = f"broadcast:{packet.protocol.value}:{_idx}"
+                else:
+                    node_id = (
+                        f"broadcast:{packet.protocol.value}:named:"
+                        f"{packet.remote_channel_name}"
+                    )
             else:
                 ch_idx = channel_hash_resolver.lookup(packet.channel_hash)
-            node_id = f"broadcast:{packet.protocol.value}:{ch_idx}"
+                if ch_idx is None and packet.matched_channel_index is not None:
+                    # Same PSK, different remote channel name: keyed bucket.
+                    node_id = (
+                        f"broadcast:{packet.protocol.value}:keyed:"
+                        f"{packet.matched_channel_index}:"
+                        f"0x{packet.channel_hash:02x}"
+                    )
+                elif ch_idx is None:
+                    # Distinct bucket per unmapped hash (not LongFast).
+                    node_id = (
+                        f"broadcast:{packet.protocol.value}:"
+                        f"unmapped:0x{packet.channel_hash:02x}"
+                    )
+                else:
+                    node_id = f"broadcast:{packet.protocol.value}:{ch_idx}"
             direction = "received"
         elif is_for_us:
             node_id = packet.source_id or "unknown"
@@ -1137,10 +1198,11 @@ def _setup_message_interception(
             ):
                 src = (packet.source_id or "").lower()
                 if src and src != node_name.lower():
+                    # Exact node_id match only (not an 8-char LIKE prefix).
                     await coord.node_repo._db.execute(
                         "UPDATE nodes SET long_name = ? "
-                        "WHERE LOWER(node_id) LIKE ? AND protocol = 'meshcore'",
-                        (node_name, src[:8] + "%"),
+                        "WHERE LOWER(node_id) = ? AND protocol = 'meshcore'",
+                        (node_name, src),
                     )
                     await coord.node_repo._db.commit()
 
@@ -1148,35 +1210,19 @@ def _setup_message_interception(
                 packet.protocol == Protocol.MESHCORE
                 and (not node_name or _is_hex_only(node_name))
             ):
+                # Exact match only. Removed unscoped mc:% fetch_one that
+                # borrowed an arbitrary companion contact's name.
                 row = await coord.node_repo._db.fetch_one(
                     "SELECT long_name FROM nodes "
-                    "WHERE LOWER(node_id) LIKE ? AND protocol = 'meshcore' "
+                    "WHERE LOWER(node_id) = ? AND protocol = 'meshcore' "
                     "AND long_name IS NOT NULL AND long_name != ''",
-                    (node_id[:8] + "%",),
+                    (node_id.lower(),),
                 )
                 if row:
                     rn = row["long_name"] or ""
                     if rn and not _is_hex_only(rn):
                         node_name = rn
 
-            if (
-                packet.protocol == Protocol.MESHCORE
-                and (not node_name or _is_hex_only(node_name))
-            ):
-                mc_row = await coord.node_repo._db.fetch_one(
-                    "SELECT node_id, long_name FROM nodes "
-                    "WHERE node_id LIKE 'mc:%' AND protocol = 'meshcore' "
-                    "AND node_id NOT IN ('mc:channel')",
-                )
-                if mc_row:
-                    rn = mc_row["long_name"] or mc_row["node_id"][3:]
-                    if rn and not _is_hex_only(rn):
-                        node_name = rn
-                        await coord.node_repo._db.execute(
-                            "UPDATE nodes SET long_name = ? WHERE node_id = ?",
-                            (rn, node_id),
-                        )
-                        await coord.node_repo._db.commit()
             row_id, is_dup = await message_repo.save_received(
                 text=text,
                 node_id=node_id,
@@ -1318,6 +1364,7 @@ def _init_routes(
         tx_service=tx_service,
         identity=identity,
         channel_hash_resolver=channel_hash_resolver,
+        serial_sources=_find_serial_sources(coord),
     )
     mqtt_config_routes.init_routes(
         config=config,
@@ -1449,13 +1496,23 @@ def _request_has_valid_session(
     return jwt_service.verify(token) is not None
 
 
-def _serve_auth_page(static_dir: Path, filename: str) -> FileResponse:
+def _serve_auth_page(static_dir: Path, filename: str) -> HTMLResponse:
     """Return one of the two pre-auth HTML pages from frontend/auth/."""
     page = static_dir / "auth" / filename
     if not page.exists():
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="auth page not found")
-    return FileResponse(str(page), media_type="text/html")
+    return HTMLResponse(
+        _read_busted_html(page),
+        headers={"Cache-Control": "no-cache"},
+    )
+
+
+def _read_busted_html(path: Path) -> str:
+    """Load HTML and append ``?v=`` cache-bust tokens to local JS/CSS."""
+    from src.api.html_assets import bust_asset_urls
+
+    return bust_asset_urls(path.read_text(encoding="utf-8"))
 
 
 def _on_packet_received(packet: Packet) -> None:

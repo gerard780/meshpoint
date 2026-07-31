@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
-
-from datetime import timedelta
 
 from src.models.node import Node
 from src.storage.database import DatabaseManager
@@ -86,11 +84,16 @@ class NodeRepository:
         row = await self._db.fetch_one("SELECT COUNT(*) as cnt FROM nodes")
         return row["cnt"] if row else 0
 
-    async def get_active_count(self, hours: int = 24) -> int:
+    async def get_active_count(
+        self, hours: int = 24, protocol: str | None = None
+    ) -> int:
         cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
-        row = await self._db.fetch_one(
-            "SELECT COUNT(*) as cnt FROM nodes WHERE last_heard >= ?", (cutoff,)
-        )
+        query = "SELECT COUNT(*) as cnt FROM nodes WHERE last_heard >= ?"
+        params: tuple = (cutoff,)
+        if protocol:
+            query += " AND protocol = ?"
+            params += (protocol,)
+        row = await self._db.fetch_one(query, params)
         return row["cnt"] if row else 0
 
     async def get_with_position(self) -> list[Node]:
@@ -98,6 +101,19 @@ class NodeRepository:
             "SELECT * FROM nodes WHERE latitude IS NOT NULL AND longitude IS NOT NULL"
         )
         return [self._row_to_node(r) for r in rows]
+
+    async def get_latest_capture_source(self, source_id: str) -> Optional[str]:
+        """Capture source that most recently heard a packet from *source_id*.
+
+        Used to route outbound replies through the same radio that can
+        reach the contact. Credit: javastraat/meshpoint ``f6b2bcd``.
+        """
+        row = await self._db.fetch_one(
+            "SELECT capture_source FROM packets WHERE source_id = ? "
+            "ORDER BY timestamp DESC LIMIT 1",
+            (source_id,),
+        )
+        return row["capture_source"] if row else None
 
     async def get_all_with_signal(self, limit: int = 500) -> list[dict]:
         """Return nodes with latest signal and telemetry from joined tables."""
@@ -108,6 +124,7 @@ class NodeRepository:
                    p.snr AS latest_snr,
                    p.hop_limit AS latest_hop_limit,
                    p.hop_start AS latest_hop_start,
+                   p.capture_source AS latest_capture_source,
                    t.battery_level AS latest_battery,
                    t.voltage AS latest_voltage,
                    t.temperature AS latest_temperature,
@@ -117,7 +134,7 @@ class NodeRepository:
             FROM nodes n
             LEFT JOIN (
                 SELECT source_id,
-                       rssi, snr, hop_limit, hop_start,
+                       rssi, snr, hop_limit, hop_start, capture_source,
                        ROW_NUMBER() OVER (PARTITION BY source_id ORDER BY timestamp DESC) AS rn
                 FROM packets
             ) p ON p.source_id = n.node_id AND p.rn = 1
@@ -142,6 +159,7 @@ class NodeRepository:
         d = node.to_dict()
         d["latest_rssi"] = row.get("latest_rssi")
         d["latest_snr"] = row.get("latest_snr")
+        d["latest_capture_source"] = row.get("latest_capture_source")
         d["latest_battery"] = row.get("latest_battery")
         d["latest_voltage"] = row.get("latest_voltage")
         d["latest_temperature"] = row.get("latest_temperature")

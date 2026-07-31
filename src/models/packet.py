@@ -42,6 +42,10 @@ class RawCapture:
     capture_source: str
     timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     protocol_hint: Optional[Protocol] = None
+    # Set when an upstream library already decrypted (meshtastic-python
+    # serial): portnum (int) + inner payload (bytes). Header-only
+    # ``payload`` has no ciphertext left to decrypt.
+    pre_decoded: Optional[dict] = None
 
 
 @dataclass
@@ -76,6 +80,13 @@ class Packet:
     # legitimate relay rather than a fresh broadcast.
     raw_radio_packet: Optional[bytes] = None
     decrypted: bool = False
+    # Index into crypto.get_all_keys() of the key that decrypted this
+    # packet. Set even when channel_hash does not match a local name+key
+    # hash (remote used a different channel name, same PSK).
+    matched_channel_index: Optional[int] = None
+    # Stick-local channel name when meshtastic-python decoded with its
+    # own table. packet.channel_hash may hold the stick's index, not OTA hash.
+    remote_channel_name: Optional[str] = None
 
     signal: Optional[SignalMetrics] = None
     capture_source: str = "unknown"

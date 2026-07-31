@@ -9,9 +9,11 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from src.api.auth.dependencies import require_admin
+from src.api.auth.jwt_session import SessionClaims
 from src.api.message_name_resolver import MessageNameResolver
 from src.config import AppConfig
 from src.storage.message_repository import (
@@ -58,10 +60,15 @@ class SendRequest(BaseModel):
     protocol: str = "meshtastic"
     channel: int = 0
     want_ack: bool = False
+    # Keyed replies: echo the remote's on-air hash byte (see matched_channel_index).
+    echo_hash: Optional[int] = None
 
 
 @router.post("/send")
-async def send_message(req: SendRequest):
+async def send_message(
+    req: SendRequest,
+    _claims: SessionClaims = Depends(require_admin),
+):
     if _tx_service is None:
         raise HTTPException(503, "Transmit service not available")
     if _message_repo is None:
@@ -78,9 +85,12 @@ async def send_message(req: SendRequest):
         protocol=req.protocol,
         channel=req.channel,
         want_ack=req.want_ack,
+        echo_hash=req.echo_hash,
     )
 
-    node_id = _resolve_node_id(req.destination, req.protocol, req.channel)
+    node_id = _resolve_node_id(
+        req.destination, req.protocol, req.channel, req.echo_hash,
+    )
     node_name = await _resolve_display_name(node_id, req.protocol)
 
     if result.success:
@@ -105,7 +115,10 @@ async def send_message(req: SendRequest):
 
 
 @router.post("/advert")
-async def send_meshcore_advert(flood: bool = False):
+async def send_meshcore_advert(
+    flood: bool = False,
+    _claims: SessionClaims = Depends(require_admin),
+):
     """Broadcast a MeshCore advertisement from the USB companion.
 
     Independent of /send so it bypasses the empty-text validation
@@ -151,7 +164,10 @@ async def mark_conversation_read(node_id: str):
 
 
 @router.delete("/conversation/{node_id:path}")
-async def delete_conversation(node_id: str):
+async def delete_conversation(
+    node_id: str,
+    _claims: SessionClaims = Depends(require_admin),
+):
     if _message_repo is None:
         raise HTTPException(503, "Message storage not available")
     deleted = await _message_repo.delete_conversation(node_id)
@@ -159,7 +175,9 @@ async def delete_conversation(node_id: str):
 
 
 @router.delete("/all")
-async def delete_all_messages():
+async def delete_all_messages(
+    _claims: SessionClaims = Depends(require_admin),
+):
     if _message_repo is None:
         raise HTTPException(503, "Message storage not available")
     deleted = await _message_repo.delete_all_messages()
@@ -282,10 +300,15 @@ def _is_hex_only(s: str) -> bool:
 
 
 def _resolve_node_id(
-    destination: str, protocol: str, channel: int
+    destination: str,
+    protocol: str,
+    channel: int,
+    echo_hash: Optional[int] = None,
 ) -> str:
     dest_lower = destination.lower()
     if dest_lower in ("broadcast", "all", "0", "ffffffff", "ffff"):
+        if echo_hash is not None:
+            return f"broadcast:{protocol}:keyed:{channel}:0x{echo_hash:02x}"
         return f"broadcast:{protocol}:{channel}"
     return destination
 

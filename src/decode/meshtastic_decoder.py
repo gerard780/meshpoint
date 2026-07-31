@@ -31,7 +31,10 @@ class MeshtasticDecoder:
         self._our_node_id = our_node_id
 
     def decode(
-        self, raw_bytes: bytes, signal: Optional[SignalMetrics] = None
+        self,
+        raw_bytes: bytes,
+        signal: Optional[SignalMetrics] = None,
+        pre_decoded: Optional[dict] = None,
     ) -> Optional[Packet]:
         if len(raw_bytes) < MESHTASTIC_HEADER_SIZE:
             logger.debug("Packet too short: %d bytes", len(raw_bytes))
@@ -48,8 +51,21 @@ class MeshtasticDecoder:
         decrypted = False
         raw_app_payload: Optional[bytes] = None
         request_id = 0
+        remote_channel_name: Optional[str] = None
 
-        if CryptoService.is_pki_packet(
+        if pre_decoded is not None:
+            # Stick already decrypted; ciphertext discarded by protobuf oneof.
+            decoded_payload, packet_type = dispatch_portnum(
+                pre_decoded.get("portnum", -1),
+                pre_decoded.get("payload", b""),
+            )
+            raw_app_payload = pre_decoded.get("payload") or None
+            request_id = pre_decoded.get("request_id", 0)
+            remote_channel_name = pre_decoded.get("channel_name")
+            if decoded_payload is not None:
+                decrypted = True
+
+        elif CryptoService.is_pki_packet(
             header["channel_hash"],
             header["dest_id"],
             self._our_node_id,
@@ -119,8 +135,9 @@ class MeshtasticDecoder:
                     self._our_node_id,
                 )
 
-        if not decrypted:
-            for key in self._crypto.get_all_keys():
+        matched_channel_index: Optional[int] = None
+        if not decrypted and pre_decoded is None:
+            for key_index, key in enumerate(self._crypto.get_all_keys()):
                 decrypted_bytes = self._crypto.decrypt_meshtastic(
                     encrypted_payload,
                     header["packet_id"],
@@ -134,6 +151,7 @@ class MeshtasticDecoder:
                 )
                 if decoded_payload is not None:
                     decrypted = True
+                    matched_channel_index = key_index
                     break
 
         if not decrypted and encrypted_payload:
@@ -164,6 +182,8 @@ class MeshtasticDecoder:
             raw_app_payload=raw_app_payload,
             raw_radio_packet=bytes(raw_bytes),
             decrypted=decrypted,
+            matched_channel_index=matched_channel_index,
+            remote_channel_name=remote_channel_name,
             signal=signal,
             timestamp=datetime.now(timezone.utc),
         )

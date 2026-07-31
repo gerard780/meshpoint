@@ -25,6 +25,7 @@ from pathlib import Path
 from src.api.update.channels import normalize_channel_id
 
 _HEADER_RE = re.compile(r"^###\s+(?P<body>.+?)\s*$")
+_CATEGORY_RE = re.compile(r"^####\s+(?P<body>.+?)\s*$")
 _VERSION_RE = re.compile(
     r"^v(?P<version>\d+(?:\.\d+){1,3})(?:\s+\((?P<date>[^)]+)\))?$"
 )
@@ -40,15 +41,21 @@ _RC_CHANNEL_VERSION: dict[str, str] = {
     "rc-076": "0.7.6",
     "rc-077": "0.7.7",
     "rc-078": "0.7.8",
+    "rc-079": "0.7.9",
 }
 
 
 @dataclass(frozen=True)
 class ChangelogBullet:
-    """One ``- **headline.** detail`` line in a changelog section."""
+    """One ``- **headline.** detail`` line in a changelog section.
+
+    ``category`` is the nearest preceding ``#### Category`` heading
+    inside the section (None for bullets above the first one).
+    """
 
     headline: str
     detail: str
+    category: str | None = None
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -81,22 +88,30 @@ class ChangelogParser:
     def parse_text(text: str) -> list[ChangelogSection]:
         sections: list[ChangelogSection] = []
         current: ChangelogSection | None = None
+        category: str | None = None
         for raw_line in text.splitlines():
             line = raw_line.rstrip("\r")
             header_match = _HEADER_RE.match(line)
             if header_match:
                 current = _section_from_header(header_match.group("body"))
+                category = None
                 if current is not None:
                     sections.append(current)
                 continue
             if current is None:
+                continue
+            category_match = _CATEGORY_RE.match(line)
+            if category_match:
+                category = category_match.group("body").strip()
                 continue
             bullet_match = _BULLET_RE.match(line)
             if bullet_match:
                 headline = bullet_match.group("headline").strip().rstrip(".")
                 detail = bullet_match.group("detail").strip()
                 current.bullets.append(
-                    ChangelogBullet(headline=headline, detail=detail)
+                    ChangelogBullet(
+                        headline=headline, detail=detail, category=category
+                    )
                 )
         return sections
 
@@ -140,11 +155,30 @@ def sanitize_detail_for_preview(detail: str, *, max_len: int = _PREVIEW_DETAIL_M
     return cut.rstrip(".,;") + "…"
 
 
+def sanitize_detail_full(detail: str) -> str:
+    """De-markdown detail text for the full-notes modal (no truncation)."""
+    if not detail:
+        return ""
+    text = _LINK_RE.sub(r"\1", detail)
+    text = text.replace("`", "")
+    return re.sub(r"\s+", " ", text).strip()
+
+
 def format_bullet_for_preview(bullet: ChangelogBullet) -> dict:
     """Serialize one bullet for the dashboard (truncated detail)."""
     return {
         "headline": bullet.headline,
         "detail": sanitize_detail_for_preview(bullet.detail),
+        "category": bullet.category,
+    }
+
+
+def format_bullet_full(bullet: ChangelogBullet) -> dict:
+    """Serialize one bullet with its full (un-truncated) detail."""
+    return {
+        "headline": bullet.headline,
+        "detail": sanitize_detail_full(bullet.detail),
+        "category": bullet.category,
     }
 
 
@@ -156,6 +190,17 @@ def format_section_for_preview(section: ChangelogSection) -> dict:
         "date": section.date,
         "is_unreleased": section.is_unreleased,
         "bullets": [format_bullet_for_preview(b) for b in section.bullets],
+    }
+
+
+def format_section_full(section: ChangelogSection) -> dict:
+    """Serialize a section with full-text bullets for the modal."""
+    return {
+        "header": section.header,
+        "version": section.version,
+        "date": section.date,
+        "is_unreleased": section.is_unreleased,
+        "bullets": [format_bullet_full(b) for b in section.bullets],
     }
 
 
