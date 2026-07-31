@@ -43,7 +43,7 @@ class PocsagFirmwareConfigCard {
             <div class="cfg-section" data-pocsag-firmware-root>
                 <article class="cfg-card">
                     <header class="cfg-card__head">
-                        <h3 class="cfg-card__title">Companion firmware</h3>
+                        <h3 class="cfg-card__title">Pocsag (DAPNET) Companion firmware</h3>
                         <p class="cfg-card__hint">
                             Build and flash extra/pocsag_companion straight from this
                             dashboard -- no Arduino IDE needed. Requires the arduino-cli
