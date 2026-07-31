@@ -9,6 +9,7 @@
  */
 const _DAB_DONGLE_OWNER_LABELS = {
     radio: 'Radio', p2000: 'P2000', pagers: 'Pagers', pocsag: 'POCSAG', rtl433: 'RTL433', dab: 'DAB+',
+    dab_scan: 'DAB+ scan',
 };
 
 // How long a favorite/preset click waits for its station to actually show

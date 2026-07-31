@@ -3,22 +3,101 @@
  * from its JSON output via GET /api/dab/scan-results) and lets an admin
  * set a friendlier display name per channel (PUT .../scan-results/{ch}/name),
  * layered on top of the raw broadcast ensemble label without touching it.
+ * Also runs the scan itself (POST /api/dab/scan/stream) with live output,
+ * instead of CLI-only over SSH.
  *
- * Read-only against the RTL-SDR dongle itself -- this tab only reads/edits
- * a file the scan script already wrote on the device, so unlike Radio/
- * DAB+/P2000/Pagers/POCSAG/RTL433 it never needs to fight for the dongle
- * (see src/audio/sdr_registry.py) and needs no start/stop of its own.
+ * The scan DOES claim the RTL-SDR dongle (see src/audio/sdr_registry.py)
+ * for its duration, same as Radio/DAB+/P2000/Pagers/POCSAG/RTL433 -- the
+ * script itself talks to welle-cli directly and knows nothing about the
+ * registry, so the backend route claims on this tab's behalf instead of
+ * relying on the operator to remember to stop other tabs first. Reading/
+ * renaming channels (everything else here) stays read-only against the
+ * dongle, same as always.
  */
+
+// Full Band III DAB channel raster (5A-13F, 38 channels; ETSI EN 300 401),
+// grouped by band for the scan checkboxes -- same raster as dab_panel.js's
+// DAB_ALL_CHANNELS, duplicated rather than imported per this repo's small-
+// helper convention across independent frontend modules (see dab_panel.js's
+// own note on its VU-meter code for the same reasoning).
+const DAB_CONFIG_CHANNEL_GROUPS = (() => {
+    const groups = [];
+    for (let n = 5; n <= 12; n++) {
+        groups.push({ band: String(n), channels: ['A', 'B', 'C', 'D'].map((l) => `${n}${l}`) });
+    }
+    groups.push({ band: '13', channels: ['A', 'B', 'C', 'D', 'E', 'F'].map((l) => `13${l}`) });
+    return groups;
+})();
+
 class DabConfigPanel {
     constructor() {
         this._root = null;
         this._data = null;
         this._editingChannel = null;
+        this._scanning = false;
     }
 
     mount(root) {
         this._root = root;
         this._root.innerHTML = `
+            <section class="lsn-section">
+                <div class="panel">
+                    <div class="panel__header">
+                        <span>Scan for DAB+ Channels</span>
+                    </div>
+                    <div class="panel__body">
+                        <div class="dabcfg-hint">
+                            Drives welle-cli across the Band III raster to find which channels decode
+                            content at this antenna. A full scan can take up to ~19 minutes; scanning
+                            specific channels is faster for a targeted rescan (e.g. after a "nothing"
+                            result that might just be a transient dongle hiccup). Merges into the
+                            existing results by default -- nothing already found is lost.
+                        </div>
+                        <div class="dabcfg-scan-actions">
+                            <button class="terminal-button terminal-button--primary" type="button" data-dabcfg-scan-full>
+                                Full scan (all 38 channels)
+                            </button>
+                            <button class="terminal-button" type="button" data-dabcfg-scan-toggle-advanced>
+                                Scan specific channels…
+                            </button>
+                        </div>
+                        <div class="dabcfg-scan-advanced" data-dabcfg-scan-advanced hidden>
+                            <div class="dabcfg-scan-channels" data-dabcfg-scan-channels>
+                                ${DAB_CONFIG_CHANNEL_GROUPS.map((g) => `
+                                    <div class="dabcfg-scan-band">
+                                        <span class="dabcfg-scan-band__label">${this._esc(g.band)}</span>
+                                        ${g.channels.map((ch) => `
+                                            <label class="dabcfg-scan-chan">
+                                                <input type="checkbox" value="${this._esc(ch)}" data-dabcfg-scan-chan-input>
+                                                ${this._esc(ch)}
+                                            </label>
+                                        `).join('')}
+                                    </div>
+                                `).join('')}
+                            </div>
+                            <div class="dabcfg-scan-options">
+                                <label class="dabcfg-scan-option">
+                                    <span>Timeout per channel (seconds)</span>
+                                    <input type="number" class="dabcfg-scan-option__input"
+                                           min="5" max="180" value="60" data-dabcfg-scan-timeout>
+                                </label>
+                                <label class="dabcfg-scan-option dabcfg-scan-option--checkbox">
+                                    <input type="checkbox" data-dabcfg-scan-discard>
+                                    Discard existing results (start fresh instead of merging)
+                                </label>
+                            </div>
+                            <button class="terminal-button terminal-button--primary" type="button" data-dabcfg-scan-selected>
+                                Scan selected channels
+                            </button>
+                        </div>
+                        <button class="terminal-button" type="button" data-dabcfg-scan-toggle-output hidden>
+                            Show output
+                        </button>
+                        <pre class="dabcfg-scan-output" data-dabcfg-scan-output hidden></pre>
+                        <p class="cfg-status" data-dabcfg-scan-status aria-live="polite"></p>
+                    </div>
+                </div>
+            </section>
             <section class="lsn-section">
                 <div class="panel">
                     <div class="panel__header dabcfg-header">
@@ -27,7 +106,7 @@ class DabConfigPanel {
                     </div>
                     <div class="panel__body">
                         <div class="dabcfg-hint">
-                            Channels found by <code>scripts/dab_channel_scan.py</code> (run on the device).
+                            Channels found by <code>scripts/dab_channel_scan.py</code>.
                             Names here are editable overrides -- the raw scanned label is kept underneath
                             and used as the default whenever no override is set.
                         </div>
@@ -37,6 +116,14 @@ class DabConfigPanel {
             </section>
         `;
         this._root.querySelector('[data-dabcfg-refresh]').addEventListener('click', () => this._refresh());
+        this._root.querySelector('[data-dabcfg-scan-full]')
+            .addEventListener('click', () => this._runScan({ channels: [] }));
+        this._root.querySelector('[data-dabcfg-scan-selected]')
+            .addEventListener('click', () => this._runSelectedScan());
+        this._root.querySelector('[data-dabcfg-scan-toggle-advanced]')
+            .addEventListener('click', (e) => this._toggleScanAdvanced(e.currentTarget));
+        this._root.querySelector('[data-dabcfg-scan-toggle-output]')
+            .addEventListener('click', (e) => this._toggleScanOutput(e.currentTarget));
     }
 
     show() {
@@ -153,6 +240,119 @@ class DabConfigPanel {
         }
         this._editingChannel = null;
         await this._refresh();
+    }
+
+    _toggleScanAdvanced(button) {
+        const advanced = this._root.querySelector('[data-dabcfg-scan-advanced]');
+        if (!advanced) return;
+        advanced.hidden = !advanced.hidden;
+        button.textContent = advanced.hidden ? 'Scan specific channels…' : 'Hide channel picker';
+    }
+
+    _toggleScanOutput(button) {
+        const pre = this._root.querySelector('[data-dabcfg-scan-output]');
+        if (!pre) return;
+        pre.hidden = !pre.hidden;
+        button.textContent = pre.hidden ? 'Show output' : 'Hide output';
+    }
+
+    _appendScanOutput(text) {
+        const pre = this._root.querySelector('[data-dabcfg-scan-output]');
+        if (!pre || !text) return;
+        pre.textContent = pre.textContent ? `${pre.textContent}\n${text}` : text;
+        pre.scrollTop = pre.scrollHeight;
+    }
+
+    _runSelectedScan() {
+        const checked = Array.from(
+            this._root.querySelectorAll('[data-dabcfg-scan-chan-input]:checked'),
+        ).map((el) => el.value);
+        if (!checked.length) {
+            const status = this._root.querySelector('[data-dabcfg-scan-status]');
+            if (status) {
+                status.dataset.kind = 'error';
+                status.textContent = 'Pick at least one channel, or use Full scan for all 38.';
+            }
+            return;
+        }
+        const timeoutEl = this._root.querySelector('[data-dabcfg-scan-timeout]');
+        const discardEl = this._root.querySelector('[data-dabcfg-scan-discard]');
+        this._runScan({
+            channels: checked,
+            timeout: timeoutEl ? Number(timeoutEl.value) || 60 : 60,
+            discardExisting: !!(discardEl && discardEl.checked),
+        });
+    }
+
+    /** Runs scripts/dab_channel_scan.py via POST /api/dab/scan/stream and
+     * streams its output live -- same NDJSON pattern as the Meshtastic/
+     * MeshCore/POCSAG firmware-flash cards (window.UpdateStreamClient).
+     * On success, reloads the channel list below so newly-scanned content
+     * shows up immediately without a manual Refresh click. */
+    async _runScan({ channels = [], timeout = 60, discardExisting = false } = {}) {
+        if (this._scanning) return;
+
+        if (discardExisting) {
+            const ok = await window.confirmModal({
+                label: 'Discard existing scan results',
+                description: 'This scan will start from a clean file instead of merging into '
+                    + 'what\'s already been found -- every channel not covered by this run loses '
+                    + 'its station list. Not reversible from here.',
+            });
+            if (!ok) return;
+        }
+
+        const fullBtn = this._root.querySelector('[data-dabcfg-scan-full]');
+        const selectedBtn = this._root.querySelector('[data-dabcfg-scan-selected]');
+        const outputToggle = this._root.querySelector('[data-dabcfg-scan-toggle-output]');
+        const status = this._root.querySelector('[data-dabcfg-scan-status]');
+        const outputPre = this._root.querySelector('[data-dabcfg-scan-output]');
+
+        this._scanning = true;
+        if (fullBtn) fullBtn.disabled = true;
+        if (selectedBtn) selectedBtn.disabled = true;
+        if (outputToggle) outputToggle.hidden = false;
+        if (outputPre) outputPre.textContent = '';
+        status.dataset.kind = 'pending';
+        status.textContent = channels.length
+            ? `Scanning ${channels.join(', ')} (timeout ${timeout}s each)…`
+            : `Scanning all 38 channels (timeout ${timeout}s each, up to ~${Math.round(38 * timeout / 60)} min)…`;
+        this._appendScanOutput(`# Starting scan -- ${channels.length ? channels.join(' ') : 'all channels'}, timeout ${timeout}s${discardExisting ? ', discarding existing results' : ''}`);
+
+        let finalResult = null;
+        try {
+            finalResult = await window.UpdateStreamClient.postNdjson(
+                '/api/dab/scan/stream',
+                { channels, timeout, discard_existing: discardExisting },
+                (event) => {
+                    if (event.type === 'started' && Array.isArray(event.cmd)) {
+                        this._appendScanOutput(`$ ${event.cmd.join(' ')}`);
+                    } else if (event.type === 'line') {
+                        this._appendScanOutput(event.text);
+                    }
+                },
+            );
+        } catch (err) {
+            const busy = err && err.status === 503;
+            status.dataset.kind = 'error';
+            status.textContent = busy
+                ? 'RTL-SDR dongle is busy with another listener -- stop it first.'
+                : `Request failed: ${err.message || err}`;
+            this._appendScanOutput(`! ${err.message || err}`);
+            this._scanning = false;
+            if (fullBtn) fullBtn.disabled = false;
+            if (selectedBtn) selectedBtn.disabled = false;
+            return;
+        }
+
+        const success = !!(finalResult && finalResult.success);
+        status.dataset.kind = success ? 'success' : 'error';
+        status.textContent = success ? 'Scan complete.' : 'Scan failed -- see output for details.';
+        this._scanning = false;
+        if (fullBtn) fullBtn.disabled = false;
+        if (selectedBtn) selectedBtn.disabled = false;
+
+        if (success) await this._refresh();
     }
 
     _esc(str) {
