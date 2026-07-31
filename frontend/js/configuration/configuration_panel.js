@@ -150,19 +150,25 @@ class ConfigurationPanel {
             if (host) {
                 host.innerHTML = `
                     <div class="cfg-section">
-                        <div data-firmware-meshcore></div>
                         <div data-firmware-meshtastic></div>
+                        <div data-firmware-meshcore></div>
+                        <div data-firmware-pocsag></div>
                     </div>
                 `;
+                if (window.MeshtasticFirmwareConfigCard) {
+                    const meshtastic = new window.MeshtasticFirmwareConfigCard(api);
+                    meshtastic.mount(host.querySelector('[data-firmware-meshtastic]'));
+                    this._cards.set('firmware-meshtastic', meshtastic);
+                }
                 if (window.FirmwareConfigCard) {
                     const meshcore = new window.FirmwareConfigCard(api);
                     meshcore.mount(host.querySelector('[data-firmware-meshcore]'));
                     this._cards.set('firmware-meshcore', meshcore);
                 }
-                if (window.MeshtasticFirmwareConfigCard) {
-                    const meshtastic = new window.MeshtasticFirmwareConfigCard(api);
-                    meshtastic.mount(host.querySelector('[data-firmware-meshtastic]'));
-                    this._cards.set('firmware-meshtastic', meshtastic);
+                if (window.PocsagFirmwareConfigCard) {
+                    const pocsag = new window.PocsagFirmwareConfigCard(api);
+                    pocsag.mount(host.querySelector('[data-firmware-pocsag]'));
+                    this._cards.set('firmware-pocsag', pocsag);
                 }
             }
         } else if (section === 'transmit' && window.TransmitConfigCard) {
