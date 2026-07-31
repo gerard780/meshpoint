@@ -8,11 +8,11 @@
  * configuring an already-assigned companion. This is the first (and
  * top) card here, moved from meshcore_card.js, drives
  * src/api/routes/meshcore_firmware_routes.py. Meshtastic's card sits
- * below it (meshtastic_firmware_card.js, moved from serial_card.js);
- * POCSAG's is expected to join later.
+ * below it (meshtastic_firmware_card.js, moved from serial_card.js),
+ * and POCSAG's (pocsag_firmware_card.js) below that.
  */
 
-class FirmwareConfigCard {
+class MeshcoreFirmwareConfigCard {
     constructor(api) {
         this._api = api;
         this._root = null;
@@ -417,4 +417,4 @@ class FirmwareConfigCard {
     }
 }
 
-window.FirmwareConfigCard = FirmwareConfigCard;
+window.MeshcoreFirmwareConfigCard = MeshcoreFirmwareConfigCard;

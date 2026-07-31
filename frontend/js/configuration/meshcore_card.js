@@ -11,8 +11,9 @@
  *
  * The "MeshCore firmware" flash card used to live here too; it moved to
  * the standalone Configuration → Firmware page (frontend/js/configuration/
- * firmware_card.js) so flashing a spare board reads as its own action
- * instead of being buried inside this specific protocol's settings page.
+ * meshcore_firmware_card.js) so flashing a spare board reads as its own
+ * action instead of being buried inside this specific protocol's settings
+ * page.
  */
 
 class MeshcoreConfigCard {

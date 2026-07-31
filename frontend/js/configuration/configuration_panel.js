@@ -160,8 +160,8 @@ class ConfigurationPanel {
                     meshtastic.mount(host.querySelector('[data-firmware-meshtastic]'));
                     this._cards.set('firmware-meshtastic', meshtastic);
                 }
-                if (window.FirmwareConfigCard) {
-                    const meshcore = new window.FirmwareConfigCard(api);
+                if (window.MeshcoreFirmwareConfigCard) {
+                    const meshcore = new window.MeshcoreFirmwareConfigCard(api);
                     meshcore.mount(host.querySelector('[data-firmware-meshcore]'));
                     this._cards.set('firmware-meshcore', meshcore);
                 }

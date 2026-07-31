@@ -2,7 +2,7 @@
  * Configuration → Firmware page: Meshtastic card.
  *
  * Second card on the shared Firmware page, sitting below MeshCore's own
- * (frontend/js/configuration/firmware_card.js) -- moved out of
+ * (frontend/js/configuration/meshcore_firmware_card.js) -- moved out of
  * Configuration → Serial for the same reason MeshCore's was: flashing a
  * spare board is a different action than configuring an already-
  * assigned device. Drives src/api/routes/meshtastic_firmware_routes.py.
@@ -102,7 +102,7 @@ class MeshtasticFirmwareConfigCard {
     /** Maps every currently-configured serial_port value (across Serial
      * devices, MeshCore companions, and POCSAG companions -- one shared
      * USB pool) to a human label, for the "already used by ..." hint in
-     * the device picker. Same logic as firmware_card.js's own copy --
+     * the device picker. Same logic as meshcore_firmware_card.js's own copy --
      * duplicated rather than shared, this file is otherwise independent
      * of that one. */
     _buildPortUsageMap(config) {
@@ -146,7 +146,7 @@ class MeshtasticFirmwareConfigCard {
     }
 
     /** Native <datalist>-truncation-avoiding label, identical to
-     * firmware_card.js's own _portOptionLabel. */
+     * meshcore_firmware_card.js's own _portOptionLabel. */
     _portOptionLabel(p, usage) {
         const devName = (p.device || '').split('/').pop();
         const chip = (p.description || '')
