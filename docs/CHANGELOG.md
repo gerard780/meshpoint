@@ -2,6 +2,10 @@
 
 ### Unreleased
 
+### v0.7.8 (July 2026)
+
+Serial multi-stick, Updates UX, native MQTT MapReport, and operator polish on `main` (merge `feat/v0.7.8`). Edge-only, pure Python, no concentrator recompile. **Upgrade:** Settings → Updates → **Stable**, or the full SSH block in `docs/COMMON-ERRORS.md` (`git fetch`, `checkout main`, `pull`, `scripts/install.sh`, `restart`). Witness-tested on RAK V2. Settings → Updates RC picker now points at **v0.7.9** on `feat/v0.7.9`.
+
 #### MQTT and community map
 
 - **Native MQTT MapReport.** Optional public MapReports publish the configured Meshpoint transmit identity to the official Meshtastic map without using LoRa airtime. One-hour minimum cadence, 12-15 bit position privacy, Configuration → MQTT controls, and `/2/map/` ServiceEnvelope compatibility. MapReport requires MQTT enabled (422 if you turn MapReport on while MQTT is off). Closes [#115](https://github.com/KMX415/meshpoint/issues/115).
