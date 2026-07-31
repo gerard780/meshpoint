@@ -32,9 +32,11 @@ class MeshtasticFirmwareConfigCard {
                         <p class="cfg-card__hint">
                             Flash any connected USB-serial device with official Meshtastic
                             firmware straight from this dashboard -- no compiling needed, and
-                            no need to add it as a configured device first. Erases the ENTIRE
-                            flash first, so this also works on a board currently running
-                            something else entirely (e.g. MeshCore or extra/pocsag_companion).
+                            no need to add it as a configured device first. "Erase everything"
+                            is on by default so this also works on a board currently running
+                            something else entirely (e.g. MeshCore or extra/pocsag_companion);
+                            turn it off to upgrade a board already running Meshtastic without
+                            losing its channels and settings.
                         </p>
                     </header>
                     <label class="cfg-field cfg-firmware-field">
@@ -51,13 +53,17 @@ class MeshtasticFirmwareConfigCard {
                                data-mt-firmware-board placeholder="Search boards…" autocomplete="off">
                         <datalist id="mt-firmware-boards-list"></datalist>
                     </label>
-                    <label class="cfg-field cfg-firmware-field cfg-firmware-board-field">
+                    <label class="cfg-field cfg-firmware-field">
                         <span class="cfg-field__label">Device to flash</span>
                         <select class="cfg-field__input" data-mt-firmware-device></select>
                         <button class="terminal-button cfg-firmware-rescan" type="button" data-mt-rescan-usb
                                 title="Re-scan connected USB devices">
                             ↻ Rescan USB
                         </button>
+                    </label>
+                    <label class="cfg-field cfg-field--toggle cfg-firmware-board-field" data-mt-erase-all-wrap>
+                        <input type="checkbox" data-mt-erase-all checked>
+                        <span class="cfg-field__label">Erase everything (required for a board not already running Meshtastic)</span>
                     </label>
                     <div class="cfg-card__actions">
                         <button class="terminal-button terminal-button--primary"
@@ -309,8 +315,10 @@ class MeshtasticFirmwareConfigCard {
         const boardInput = this._root.querySelector('[data-mt-firmware-board]');
         const deviceSelect = this._root.querySelector('[data-mt-firmware-device]');
         const tagSelect = this._root.querySelector('[data-mt-firmware-tag]');
+        const eraseAllInput = this._root.querySelector('[data-mt-erase-all]');
         const board = (boardInput?.value || '').trim();
         const port = deviceSelect?.value;
+        const eraseAll = eraseAllInput ? eraseAllInput.checked : true;
         if (!board || !port) return;
 
         const status = this._root.querySelector('[data-mt-firmware-status]');
@@ -332,9 +340,14 @@ class MeshtasticFirmwareConfigCard {
 
         const ok = await window.confirmModal({
             label: 'Flash Meshtastic firmware',
-            description: `Erase the ENTIRE flash on "${deviceLabel}" and write official `
-                + `Meshtastic firmware (${tag || 'latest'}) for ${boardLabel}? This replaces `
-                + 'whatever is currently on the board -- not reversible from here.',
+            description: eraseAll
+                ? `Erase the ENTIRE flash on "${deviceLabel}" and write official Meshtastic `
+                    + `firmware (${tag || 'latest'}) for ${boardLabel}? This replaces whatever `
+                    + 'is currently on the board -- not reversible from here.'
+                : `Write official Meshtastic firmware (${tag || 'latest'}) for ${boardLabel} `
+                    + `to "${deviceLabel}", keeping its existing channels and settings? Only `
+                    + 'do this for a board already running Meshtastic -- on anything else, the '
+                    + 'result is unpredictable.',
         });
         if (!ok) return;
 
@@ -351,7 +364,7 @@ class MeshtasticFirmwareConfigCard {
         try {
             finalResult = await window.UpdateStreamClient.postNdjson(
                 '/api/config/serial/firmware/flash/stream',
-                { board, port, tag },
+                { board, port, tag, erase_all: eraseAll },
                 (event) => {
                     if (event.type === 'started' && Array.isArray(event.cmd)) {
                         this._appendMtFirmwareOutput(`$ ${event.cmd.join(' ')}`);

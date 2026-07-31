@@ -763,3 +763,22 @@ select.cfg-field__input option:checked {
         grid-template-columns: 1fr;
     }
 }
+
+/* Phone-width Configuration: the page/card padding stack (up to 32px +
+   20px per side) plus .cfg-firmware-field's 340px cap were sized for
+   desktop, leaving a wide unused gutter on both sides of every card on
+   a phone -- confirmed against a live screenshot, where the card was
+   visibly narrower than the topbar's own companion-status pills above
+   it. Tightens both paddings and lifts the 340px cap so fields (and the
+   card itself) actually use the available phone width. */
+@media (max-width: 480px) {
+    [data-section^="configuration/"] {
+        padding: 16px 12px;
+    }
+    .cfg-card {
+        padding: 14px;
+    }
+    .cfg-firmware-field {
+        max-width: none;
+    }
+}

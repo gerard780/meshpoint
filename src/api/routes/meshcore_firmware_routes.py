@@ -339,6 +339,7 @@ class FlashRequest(BaseModel):
     port: str
     tag: str = ""
     flavor: str = "usb"
+    erase_all: bool = True
 
 
 @router.post("/flash/stream")
@@ -349,10 +350,20 @@ async def flash_meshcore_stream(
 ) -> StreamingResponse:
     """Downloads (if needed) the chosen board's official MeshCore
     companion release -- latest, or a specific ``tag`` if pinned -- and
-    writes it to ``port`` with esptool -- full from-scratch flash
-    (--erase-all), so this works whether the board is blank or currently
-    running something else entirely (Meshtastic, extra/pocsag_companion,
-    etc.), same reasoning as the Meshtastic flash route.
+    writes it to ``port`` with esptool.
+
+    ``erase_all`` (default ``True``) runs esptool's ``--erase-all``
+    first, so this works whether the board is blank or currently running
+    something else entirely (Meshtastic, extra/pocsag_companion, etc.),
+    same reasoning as the Meshtastic flash route. Passing ``False``
+    skips it -- an in-place upgrade of a board already running MeshCore.
+    Unlike Meshtastic, there's no separate write to skip here: the
+    ``*-merged.bin`` written at ``0x0`` is only bootloader+partition-
+    table+app (confirmed against the real board_build.partitions =
+    min_spiffs.csv layout), ending well under the ``spiffs`` partition at
+    0x3D0000 where DataStore's identity/contacts/channels actually live
+    -- so leaving out ``--erase-all`` alone is enough to leave that
+    untouched, no code path change beyond the one flag.
 
     ``port`` can be ANY currently-connected USB-serial device, not just
     one already added as a configured MeshCore companion -- flashing a
@@ -404,6 +415,7 @@ async def flash_meshcore_stream(
             params={
                 "board": req.board, "label": label, "port": port,
                 "tag": req.tag or "latest", "flavor": req.flavor,
+                "erase_all": req.erase_all,
             },
         ) as ctx:
             yield _ndjson({
@@ -445,7 +457,8 @@ async def flash_meshcore_stream(
             # hardware it doesn't own (see module docstring).
             cmd = [
                 _ESPTOOL_BIN, "--chip", "auto", "--port", port, "--baud", "921600",
-                "write-flash", "--erase-all", "0x0", str(fw["merged_bin"]),
+                "write-flash", *(["--erase-all"] if req.erase_all else []),
+                "0x0", str(fw["merged_bin"]),
             ]
             success = False
             async for chunk in _stream_subprocess(cmd):

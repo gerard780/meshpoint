@@ -31,9 +31,11 @@ class MeshcoreFirmwareConfigCard {
                             Flash any connected USB-serial device with official MeshCore
                             companion firmware straight from this dashboard -- no compiling
                             needed, and no need to add it as a configured companion first.
-                            Erases the ENTIRE flash first, so this also works on a board
+                            "Erase everything" is on by default so this also works on a board
                             currently running something else entirely (e.g. Meshtastic or
-                            extra/pocsag_companion).
+                            extra/pocsag_companion); turn it off to upgrade a board already
+                            running MeshCore without losing its identity, contacts, and
+                            channels.
                         </p>
                     </header>
                     <label class="cfg-field cfg-firmware-field">
@@ -57,13 +59,17 @@ class MeshcoreFirmwareConfigCard {
                                data-mc-firmware-board placeholder="Search boards…" autocomplete="off">
                         <datalist id="mc-firmware-boards-list"></datalist>
                     </label>
-                    <label class="cfg-field cfg-firmware-field cfg-firmware-board-field">
+                    <label class="cfg-field cfg-firmware-field">
                         <span class="cfg-field__label">Device to flash</span>
                         <select class="cfg-field__input" data-mc-firmware-device></select>
                         <button class="terminal-button cfg-firmware-rescan" type="button" data-mc-rescan-usb
                                 title="Re-scan connected USB devices">
                             ↻ Rescan USB
                         </button>
+                    </label>
+                    <label class="cfg-field cfg-field--toggle cfg-firmware-board-field" data-mc-erase-all-wrap>
+                        <input type="checkbox" data-mc-erase-all checked>
+                        <span class="cfg-field__label">Erase everything (required for a board not already running MeshCore)</span>
                     </label>
                     <div class="cfg-card__actions">
                         <button class="terminal-button terminal-button--primary"
@@ -333,8 +339,10 @@ class MeshcoreFirmwareConfigCard {
         const deviceSelect = this._root.querySelector('[data-mc-firmware-device]');
         const tagSelect = this._root.querySelector('[data-mc-firmware-tag]');
         const flavorSelect = this._root.querySelector('[data-mc-firmware-flavor]');
+        const eraseAllInput = this._root.querySelector('[data-mc-erase-all]');
         const board = (boardInput?.value || '').trim();
         const port = deviceSelect?.value;
+        const eraseAll = eraseAllInput ? eraseAllInput.checked : true;
         if (!board || !port) return;
 
         const status = this._root.querySelector('[data-mc-firmware-status]');
@@ -358,10 +366,14 @@ class MeshcoreFirmwareConfigCard {
 
         const ok = await window.confirmModal({
             label: 'Flash MeshCore firmware',
-            description: `Erase the ENTIRE flash on "${deviceLabel}" and write official `
-                + `MeshCore companion firmware (${flavorLabel}, ${tag || 'latest'}) for `
-                + `${boardLabel}? This replaces whatever is currently on the board -- `
-                + 'not reversible from here.',
+            description: eraseAll
+                ? `Erase the ENTIRE flash on "${deviceLabel}" and write official MeshCore `
+                    + `companion firmware (${flavorLabel}, ${tag || 'latest'}) for ${boardLabel}? `
+                    + 'This replaces whatever is currently on the board -- not reversible from here.'
+                : `Write official MeshCore companion firmware (${flavorLabel}, ${tag || 'latest'}) `
+                    + `for ${boardLabel} to "${deviceLabel}", keeping its existing identity, `
+                    + 'contacts, and channels? Only do this for a board already running MeshCore '
+                    + '-- on anything else, the result is unpredictable.',
         });
         if (!ok) return;
 
@@ -378,7 +390,7 @@ class MeshcoreFirmwareConfigCard {
         try {
             finalResult = await window.UpdateStreamClient.postNdjson(
                 '/api/config/meshcore/firmware/flash/stream',
-                { board, port, tag, flavor },
+                { board, port, tag, flavor, erase_all: eraseAll },
                 (event) => {
                     if (event.type === 'started' && Array.isArray(event.cmd)) {
                         this._appendMcFirmwareOutput(`$ ${event.cmd.join(' ')}`);

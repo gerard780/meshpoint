@@ -322,6 +322,7 @@ class FlashRequest(BaseModel):
     board: str
     port: str
     tag: str = ""
+    erase_all: bool = True
 
 
 @router.post("/flash/stream")
@@ -332,9 +333,25 @@ async def flash_meshtastic_stream(
 ) -> StreamingResponse:
     """Downloads (if needed) the chosen board's official Meshtastic
     release -- latest, or a specific ``tag`` if pinned -- and writes it
-    to ``port`` with esptool -- full from-scratch flash (--erase-all),
-    for repurposing a board that may currently hold entirely different
-    firmware (e.g. extra/pocsag_companion).
+    to ``port`` with esptool.
+
+    ``erase_all`` (default ``True``) is a full from-scratch flash
+    (esptool ``--erase-all`` + both the app image AND the littlefs/
+    ``spiffs`` filesystem image at their own offsets) -- required for
+    repurposing a board that may currently hold entirely different
+    firmware (e.g. extra/pocsag_companion), since the old firmware's own
+    partition layout and filesystem contents can't be trusted. Passing
+    ``False`` instead writes ONLY the app image (``factory_bin`` at
+    ``0x0``, still a merged bootloader+partition-table+app image but
+    sized to stop short of the filesystem partition) with no
+    ``--erase-all`` -- an in-place upgrade of a board already running
+    Meshtastic, which leaves the littlefs partition (where channels,
+    module config, and the node database actually live) untouched. This
+    matches the "keep settings" behavior of Meshtastic's own official
+    web flasher; picking it for a board on a very different firmware
+    version with an incompatible partition table can still brick the
+    filesystem, so the frontend defaults to full erase and only offers
+    this for the common "just upgrading my own node" case.
 
     ``port`` can be ANY currently-connected USB-serial device, not just
     one already added as a configured Serial device -- flashing a spare
@@ -375,7 +392,7 @@ async def flash_meshtastic_stream(
             user=claims.subject, action="meshtastic_firmware.flash",
             params={
                 "board": req.board, "label": label, "port": port,
-                "tag": req.tag or "latest",
+                "tag": req.tag or "latest", "erase_all": req.erase_all,
             },
         ) as ctx:
             yield _ndjson({
@@ -412,12 +429,12 @@ async def flash_meshtastic_stream(
                 await source.stop()
 
             write_flash_args = ["0x0", str(fw["factory_bin"])]
-            if fw["littlefs_bin"] and fw["littlefs_offset"] is not None:
+            if req.erase_all and fw["littlefs_bin"] and fw["littlefs_offset"] is not None:
                 write_flash_args += [hex(fw["littlefs_offset"]), str(fw["littlefs_bin"])]
 
             cmd = [
                 _ESPTOOL_BIN, "--chip", fw["mcu"], "--port", port, "--baud", "921600",
-                "write-flash", "--erase-all", *write_flash_args,
+                "write-flash", *(["--erase-all"] if req.erase_all else []), *write_flash_args,
             ]
             success = False
             async for chunk in _stream_subprocess(cmd):
