@@ -98,7 +98,11 @@ class DabScanStreamTest(unittest.TestCase):
             self.client.post("/api/dab/scan/stream", json={"channels": [], "timeout": 60})
         self.assertNotIn("--channels", captured["cmd"])
         self.assertIn("--timeout", captured["cmd"])
-        self.assertIn("60.0", captured["cmd"])
+        # Whole-number timeout is formatted plain ("60"), not "60.0" --
+        # cosmetic, but the trailing ".0" was pure noise in the echoed
+        # command line for the common case of a plain integer input.
+        self.assertIn("60", captured["cmd"])
+        self.assertNotIn("60.0", captured["cmd"])
         self.assertNotIn("--new", captured["cmd"])
 
     def test_specific_channels_and_discard_existing_build_the_right_flags(self):
@@ -117,7 +121,20 @@ class DabScanStreamTest(unittest.TestCase):
         channels_idx = cmd.index("--channels")
         self.assertEqual(cmd[channels_idx + 1:channels_idx + 3], ["7D", "8B"])
         self.assertIn("--new", cmd)
-        self.assertIn("90.0", cmd)
+        self.assertIn("90", cmd)
+        self.assertNotIn("90.0", cmd)
+
+    def test_fractional_timeout_keeps_its_decimal(self):
+        captured = {}
+
+        async def capture_cmd(cmd):
+            captured["cmd"] = cmd
+            async for chunk in _fake_stream_subprocess_ok(cmd):
+                yield chunk
+
+        with patch.object(dab_routes, "_stream_subprocess", capture_cmd):
+            self.client.post("/api/dab/scan/stream", json={"channels": [], "timeout": 45.5})
+        self.assertIn("45.5", captured["cmd"])
 
     def test_timeout_out_of_range_is_rejected(self):
         res = self.client.post("/api/dab/scan/stream", json={"channels": [], "timeout": 500})

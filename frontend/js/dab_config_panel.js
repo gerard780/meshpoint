@@ -324,7 +324,13 @@ class DabConfigPanel {
         status.textContent = channels.length
             ? `Scanning ${channels.join(', ')} (timeout ${timeout}s each)…`
             : `Scanning all 38 channels (timeout ${timeout}s each, up to ~${Math.round(38 * timeout / 60)} min)…`;
-        this._appendScanOutput(`# Starting scan -- ${channels.length ? channels.join(' ') : 'all channels'}, timeout ${timeout}s${discardExisting ? ', discarding existing results' : ''}`);
+        // No synthetic "starting" line here (unlike the firmware-flash
+        // cards' own intro line) -- the next thing the output box shows
+        // is the real echoed `$ ... --channels ... --timeout ...` command
+        // from the {type:'started'} event below, which says the same
+        // thing more precisely. The status line above already covers
+        // the at-a-glance summary; a hand-written restatement here was
+        // just redundant with both.
 
         let finalResult = null;
         try {

@@ -261,7 +261,14 @@ async def dab_scan_stream(
     cmd = [sys.executable, str(script)]
     if req.channels:
         cmd += ["--channels", *req.channels]
-    cmd += ["--timeout", str(req.timeout)]
+    # str(180.0) == "180.0" -- cosmetic only (the script's own --timeout is
+    # type=float, "180" and "180.0" parse identically), but the trailing
+    # ".0" on every whole-number timeout in the echoed command line was
+    # just visual noise for the common case of an admin typing a plain
+    # integer into the seconds field.
+    timeout_val = req.timeout
+    timeout_str = str(int(timeout_val)) if timeout_val == int(timeout_val) else str(timeout_val)
+    cmd += ["--timeout", timeout_str]
     if req.discard_existing:
         cmd.append("--new")
 
