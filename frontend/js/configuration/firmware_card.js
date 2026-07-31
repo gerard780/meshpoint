@@ -39,6 +39,10 @@ class FirmwareConfigCard {
                     <label class="cfg-field cfg-firmware-field">
                         <span class="cfg-field__label">Version</span>
                         <select class="cfg-field__input" data-mc-firmware-tag></select>
+                        <button class="terminal-button cfg-firmware-rescan" type="button" data-mc-rescan-releases
+                                title="Re-check MeshCore's GitHub releases for a newly-published version">
+                            ↻ Refresh
+                        </button>
                     </label>
                     <label class="cfg-field cfg-firmware-field">
                         <span class="cfg-field__label">Flavor</span>
@@ -56,6 +60,10 @@ class FirmwareConfigCard {
                     <label class="cfg-field cfg-firmware-field cfg-firmware-board-field">
                         <span class="cfg-field__label">Device to flash</span>
                         <select class="cfg-field__input" data-mc-firmware-device></select>
+                        <button class="terminal-button cfg-firmware-rescan" type="button" data-mc-rescan-usb
+                                title="Re-scan connected USB devices">
+                            ↻ Rescan USB
+                        </button>
                     </label>
                     <div class="cfg-card__actions">
                         <button class="terminal-button terminal-button--primary"
@@ -86,6 +94,10 @@ class FirmwareConfigCard {
             .addEventListener('change', () => this._loadMcFirmwareTargets());
         this._root.querySelector('[data-mc-firmware-board]')
             .addEventListener('input', () => this._updateFlashButtonState());
+        this._root.querySelector('[data-mc-rescan-releases]')
+            .addEventListener('click', (e) => this._rescanReleases(e.currentTarget));
+        this._root.querySelector('[data-mc-rescan-usb]')
+            .addEventListener('click', (e) => this._rescanUsb(e.currentTarget));
 
         this._loadMcFirmwareReleases();
         this._loadMcFirmwareTargets();
@@ -122,13 +134,29 @@ class FirmwareConfigCard {
      * meshcore_card.js's own companion port datalist uses). Re-fetched
      * whenever this page is mounted -- unlike meshcore_card.js's copy,
      * there's no periodic dashboard-poll render() driving this page to
-     * naturally pick up newly-plugged devices, so a manual re-scan isn't
-     * offered either; reopening the page re-fetches. */
+     * naturally pick up newly-plugged devices, so the "↻ Rescan USB"
+     * button below is what covers a device plugged in after landing on
+     * this page instead of needing a full reload. */
     async _refreshSerialPortsList() {
         const result = await this._api.get('/api/config/serial-ports');
         const ports = (result && Array.isArray(result.ports)) ? result.ports : [];
         this._enumeratedPorts = ports;
         this._renderMcFirmwareDevicePicker();
+    }
+
+    /** "↻ Rescan USB" click handler -- same button/behavior as
+     * meshcore_card.js's own copy (disable + "Scanning…" while in
+     * flight), just re-running this page's own fetch instead. */
+    async _rescanUsb(button) {
+        const original = button.textContent;
+        button.disabled = true;
+        button.textContent = 'Scanning…';
+        try {
+            await this._refreshSerialPortsList();
+        } finally {
+            button.textContent = original;
+            button.disabled = false;
+        }
     }
 
     /** Native <datalist>-truncation-avoiding label, identical to
@@ -251,17 +279,39 @@ class FirmwareConfigCard {
      * "Latest" (empty tag, the default) covers routine flashing; this
      * is for the deliberate case -- pinning an older or specific
      * version, e.g. to match what another companion is already
-     * running. */
+     * running. Fetched once at mount; the "↻ Refresh" button below
+     * covers a release published while already on this page. */
     async _loadMcFirmwareReleases() {
         const select = this._root.querySelector('[data-mc-firmware-tag]');
         if (!select) return;
         const result = await this._api.get('/api/config/meshcore/firmware/releases');
         const releases = (result && Array.isArray(result.releases)) ? result.releases : [];
+        const previous = select.value;
         const options = ['<option value="">Latest</option>'];
         releases.forEach((r) => {
             options.push(`<option value="${this._esc(r.tag)}">${this._esc(r.tag)}</option>`);
         });
         select.innerHTML = options.join('');
+        if (previous && releases.some((r) => r.tag === previous)) select.value = previous;
+    }
+
+    /** "↻ Refresh" click handler for Version -- re-checks GitHub for a
+     * newly-published release (a one-time fetch at mount otherwise, per
+     * _loadMcFirmwareReleases' own doc comment). Also re-runs the Board
+     * fetch: if "Latest" is selected and a new release just landed, the
+     * board list fetched at mount time is for the now-stale "latest",
+     * not the one this just found. */
+    async _rescanReleases(button) {
+        const original = button.textContent;
+        button.disabled = true;
+        button.textContent = 'Checking…';
+        try {
+            await this._loadMcFirmwareReleases();
+            await this._loadMcFirmwareTargets();
+        } finally {
+            button.textContent = original;
+            button.disabled = false;
+        }
     }
 
     _toggleMcFirmwareOutput(button) {

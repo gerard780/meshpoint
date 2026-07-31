@@ -104,6 +104,19 @@
     max-width: 340px;
 }
 
+/* "↻ Refresh"/"↻ Rescan USB" -- small manual-refresh buttons sitting
+   directly under the Version/Device fields (both are one-time fetches
+   at page mount, not kept live by a periodic poll the way meshcore_card
+   .js's own copy of this picker is). align-self overrides the parent
+   .cfg-field's flex-column stretch so this doesn't fill the full 340px
+   field width like the select above it. */
+.cfg-firmware-rescan {
+    align-self: flex-start;
+    margin-top: 4px;
+    padding: 4px 10px;
+    font-size: 12px;
+}
+
 .cfg-field--toggle {
     flex-direction: row;
     align-items: center;
