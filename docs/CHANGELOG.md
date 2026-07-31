@@ -4,9 +4,9 @@
 
 - **MQTT broker TLS.** Transport TLS (`mqtts`, CA bundle, cert validation) is not implemented on `mqtt_publisher.py` (plain TCP only). Until then use plain port 1883 or a LAN broker without TLS.
 
-### v0.7.7 (July 2026)
+### v0.7.9 (July 2026)
 
-First tagged release of the javastraat/meshpoint fork: LoRaWAN sniffing, multi-radio capture, the RTL-SDR web listener, and a dashboard self-update repair -- plus everything from upstream's own v0.7.7 (backup/restore, RF Environment tab, mesh broadcast cadence, operator tools; merged, bullets below). Run `install.sh` when upgrading: new sudoers rules for backup restore. **Upgrade note:** boxes on v0.7.6 cannot fetch this release from the dashboard (that is the bug being fixed); one manual round on the gateway is required: `cd /opt/meshpoint && sudo git fetch origin main && sudo git reset --hard origin/main && sudo systemctl restart meshpoint`. The restart installs the corrected sudoers rules; Check/Apply works from the dashboard again afterwards.
+First tagged release of the javastraat/meshpoint fork: LoRaWAN sniffing, multi-radio capture, the RTL-SDR web listener, and a dashboard self-update repair -- plus everything from upstream's own v0.7.7 (backup/restore, RF Environment tab, mesh broadcast cadence, operator tools; merged, bullets below). Numbered 0.7.9 rather than 0.7.7: upstream is about to tag their own v0.7.8 (absorbing some of this fork's contributions) and likely a v0.7.9 after that, so this fork's version tracks its own progress past upstream's last merged release instead of colliding with upstream's own in-flight numbering. Run `install.sh` when upgrading: new sudoers rules for backup restore. **Upgrade note:** boxes on v0.7.6 cannot fetch this release from the dashboard (that is the bug being fixed); one manual round on the gateway is required: `cd /opt/meshpoint && sudo git fetch origin main && sudo git reset --hard origin/main && sudo systemctl restart meshpoint`. The restart installs the corrected sudoers rules; Check/Apply works from the dashboard again afterwards.
 
 #### LoRaWAN sniffing (SX1302)
 
