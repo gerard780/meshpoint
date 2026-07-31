@@ -11,6 +11,15 @@ const _DAB_DONGLE_OWNER_LABELS = {
     radio: 'Radio', p2000: 'P2000', pagers: 'Pagers', pocsag: 'POCSAG', rtl433: 'RTL433', dab: 'DAB+',
 };
 
+// How long a favorite/preset click waits for its station to actually show
+// up in welle-cli's progressively-decoded list before giving up (see
+// _resolvePendingPlay()). Was 30s; live testing on a weaker channel (7D,
+// ~9dB SNR vs e.g. 12C's 19dB) showed that's not always enough headroom
+// for a cold dongle spin-up + OFDM sync lock + full station-list decode,
+// so a click could silently time out even though the station would have
+// shown up seconds later.
+const _DAB_PENDING_PLAY_TIMEOUT_MS = 60000;
+
 // Full Band III DAB channel raster (5A-13F, 38 channels; ETSI EN 300 401)
 // for the manual channel dropdown, alongside the curated presets above --
 // L-Band (LA-LW) isn't offered since the Netherlands doesn't use it.
@@ -812,15 +821,17 @@ class DabPanel {
 
     /** If a favorite (or scan-preset station) jump is waiting on a channel
      * switch, check whether its sid has shown up in the (progressively-
-     * decoded) station list yet; give up after 30 s (channel might
-     * genuinely not carry that station anymore) rather than waiting
-     * forever. A preset station (clicked before ever being tuned) has no
-     * sid yet -- matched by name instead, case/whitespace-insensitive. */
+     * decoded) station list yet; give up after _DAB_PENDING_PLAY_TIMEOUT_MS
+     * (channel might genuinely not carry that station anymore, or be too
+     * weak to lock in time) rather than waiting forever. A preset station
+     * scanned before sid-capture existed (or one welle-cli didn't report a
+     * sid for) has no sid -- matched by name instead, case/whitespace-
+     * insensitive. */
     _resolvePendingPlay(status) {
         const pending = this._pendingPlay;
         if (!pending) return;
         if (!status.running || status.channel !== pending.channel) {
-            if (Date.now() - this._pendingPlayAt > 30000) this._pendingPlay = null;
+            if (Date.now() - this._pendingPlayAt > _DAB_PENDING_PLAY_TIMEOUT_MS) this._pendingPlay = null;
             return;
         }
         const found = (status.services || []).find((s) => (
@@ -829,7 +840,7 @@ class DabPanel {
         if (found) {
             this._pendingPlay = null;
             this._playOrStop(found.sid);
-        } else if (Date.now() - this._pendingPlayAt > 30000) {
+        } else if (Date.now() - this._pendingPlayAt > _DAB_PENDING_PLAY_TIMEOUT_MS) {
             this._pendingPlay = null;
             this._setStatus(true, `tuned to ${status.channel} — station not found`);
         }
