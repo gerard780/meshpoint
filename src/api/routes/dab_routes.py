@@ -227,7 +227,7 @@ class ScanRequest(BaseModel):
         default_factory=list,
         description="Specific channel codes to scan (e.g. ['7D', '8B']); empty = all 38",
     )
-    timeout: float = Field(default=60.0, ge=5.0, le=180.0)
+    timeout: float = Field(default=60.0, ge=5.0, le=240.0)
     discard_existing: bool = Field(
         default=False,
         description="Pass --new: discard whatever's already on file instead of merging into it",

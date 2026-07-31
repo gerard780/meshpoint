@@ -86,7 +86,7 @@ class DabConfigPanel {
                                 <label class="dabcfg-scan-option">
                                     <span>Timeout per channel (seconds)</span>
                                     <input type="number" class="dabcfg-scan-option__input"
-                                           min="5" max="180" value="60" data-dabcfg-scan-timeout>
+                                           min="5" max="240" value="60" data-dabcfg-scan-timeout>
                                 </label>
                                 <label class="dabcfg-scan-option dabcfg-scan-option--checkbox">
                                     <input type="checkbox" data-dabcfg-scan-discard>

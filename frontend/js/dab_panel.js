@@ -782,6 +782,13 @@ class DabPanel {
         if (playing) {
             text = (playing.dls && playing.dls !== playing.label)
                 ? `${playing.label} — ${playing.dls}` : playing.label;
+        } else if (this._pendingPlay && this._pendingPlay.channel === status.channel) {
+            // A favorite click is waiting on this channel's station list to
+            // decode its target sid/label (see _resolvePendingPlay) -- say
+            // so, instead of the generic "select a station below" prompt,
+            // which reads as if nothing was chosen when a specific station
+            // is in fact already queued up.
+            text = `finding ${this._pendingPlay.label}…`;
         } else if (status.running) {
             text = 'select a station below';
         } else {
