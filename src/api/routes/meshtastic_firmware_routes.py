@@ -7,10 +7,10 @@ official prebuilt releases rather than anything compiled in this repo.
 
 No compiling here at all -- Meshtastic firmware is PlatformIO-built
 upstream, not an Arduino sketch, so ``arduino-cli`` doesn't apply. Instead:
-fetch the latest ``meshtastic/firmware`` GitHub release, resolve which
-per-chip-architecture ZIP a given board lives in via the release's own
-top-level manifest (``firmware-<version>.json``, ``{"board":...,
-"platform":...}`` per target -- see ``_resolve_board_platform``), extract
+fetch a ``meshtastic/firmware`` GitHub release (latest by default, or a
+pinned ``tag``), resolve which per-chip-architecture ZIP a given board
+lives in via the release's own top-level manifest (``firmware-
+<version>.json``, ``{"board":..., "platform":...}`` per target), extract
 just that board's ``.factory.bin`` (a combined bootloader+partition-
 table+app image meant for offset 0x0 -- i.e. a from-scratch flash of a
 board that wasn't already running Meshtastic) plus its ``littlefs-*.bin``
@@ -21,13 +21,17 @@ under ``<repo_root>/data/meshtastic-firmware``, then flash with the standalone
 bundled copy isn't on ``PATH``) -- ``--erase-all`` first, since the board
 may currently hold an entirely different firmware's partition layout.
 
-Curated board list (``_CURATED_BOARDS``) rather than Meshtastic's full
-~130-target catalog -- just the hardware this project's users actually
-have. The per-board chip/mcu and every flash offset still come from the
-release's own metadata at flash time, never hardcoded here, so a new
-Meshtastic release can't silently drift out of sync with this file --
-only the *list of boards offered* needs a manual addition for new
-hardware.
+Board list is derived LIVE from the selected release's own manifest
+(``_board_list_from_manifest_sync``), same reasoning as the equivalent
+MeshCore rewrite: ~130 real targets, no separate curated allowlist to
+maintain, and it can never silently drift out of sync with what a given
+release actually ships. Unlike MeshCore, there's no chip-detection
+concern here at all -- the manifest's own per-board ``.mt.json`` already
+names the real MCU (``mt["mcu"]``), so ``--chip`` is passed that value
+directly rather than needing esptool's ``auto`` detection. Also unlike
+MeshCore, there's no flavor split -- one board's firmware image already
+covers BLE+USB+WiFi together, not separate builds, so this route has no
+flavor concept at all.
 """
 
 from __future__ import annotations
@@ -68,17 +72,9 @@ _serial_sources: list = []
 # uses for _SKETCH_DIR, rather than hardcoding /opt/meshpoint.
 _CACHE_DIR = Path(__file__).resolve().parents[3] / "data" / "meshtastic-firmware"
 _RELEASES_LATEST_URL = "https://api.github.com/repos/meshtastic/firmware/releases/latest"
+_RELEASES_LIST_URL = "https://api.github.com/repos/meshtastic/firmware/releases?per_page=10"
+_RELEASES_BY_TAG_URL = "https://api.github.com/repos/meshtastic/firmware/releases/tags/{tag}"
 _ESPTOOL_BIN = "esptool"
-
-# board slug -> display label. Deliberately not Meshtastic's whole
-# catalog (~130 targets as of writing) -- just what this project's
-# hardware lineup (extra/pocsag_companion's own TTGO/Heltec boards)
-# actually covers.
-_CURATED_BOARDS: dict[str, str] = {
-    "heltec-v3": "Heltec V3",
-    "tlora-v2-1-1_6": "TTGO LoRa32 V2.1-1.6",
-    "tlora-v3-3-0-tcxo": "TTGO T3 V3.0 (TCXO)",
-}
 
 
 def init_routes(config: AppConfig, serial_sources=None) -> None:
@@ -101,12 +97,6 @@ def _ndjson(payload: dict) -> bytes:
     return (json.dumps(payload, separators=(",", ":")) + "\n").encode("utf-8")
 
 
-@router.get("/targets")
-async def firmware_targets(_claims: SessionClaims = Depends(require_admin)) -> dict:
-    """Curated board choices for the Meshtastic flash pulldown."""
-    return {"boards": [{"board": b, "label": lbl} for b, lbl in _CURATED_BOARDS.items()]}
-
-
 def _fetch_json_sync(url: str) -> dict:
     req = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json"})
     with urllib.request.urlopen(req, timeout=15) as resp:
@@ -123,13 +113,92 @@ def _download_to_sync(url: str, dest: Path) -> None:
             out.write(chunk)
 
 
+def _resolve_release_sync(tag: str) -> dict:
+    """Empty tag -> latest release; otherwise that exact tag."""
+    if tag:
+        return _fetch_json_sync(_RELEASES_BY_TAG_URL.format(tag=tag))
+    return _fetch_json_sync(_RELEASES_LATEST_URL)
+
+
+def _releases_sync(limit: int = 10) -> list[dict]:
+    """Recent releases, newest first -- unlike MeshCore, meshtastic/
+    firmware has only one release stream (no companion/repeater/room-
+    server split), so this is a plain releases-list fetch with no tag-
+    prefix filtering needed."""
+    releases = _fetch_json_sync(_RELEASES_LIST_URL)
+    if not isinstance(releases, list):
+        raise RuntimeError("Unexpected GitHub API response for Meshtastic releases")
+    return releases[:limit]
+
+
+def _manifest_from_release_sync(release: dict) -> dict:
+    """Downloads and parses just the release's manifest JSON asset
+    (``firmware-<version>.json``) -- small, no per-board ZIP involved,
+    used for both the board list and (again, cached by the OS/filesystem
+    layer, cheap) the actual flash path."""
+    assets = {a["name"]: a["browser_download_url"] for a in release.get("assets", [])}
+    manifest_name = next(
+        (n for n in assets if n.startswith("firmware-") and n.endswith(".json")), None,
+    )
+    if not manifest_name:
+        raise RuntimeError("Could not find the firmware manifest in this release")
+    with tempfile.NamedTemporaryFile(suffix=".json") as tmp:
+        _download_to_sync(assets[manifest_name], Path(tmp.name))
+        return json.loads(Path(tmp.name).read_text())
+
+
+def _board_list_from_manifest_sync(manifest: dict) -> list[dict]:
+    """Every board this release's manifest lists -- ~130 real targets,
+    not a hand-curated subset (see module docstring)."""
+    boards = [
+        {"board": t["board"], "label": t["board"].replace("-", " ")}
+        for t in manifest.get("targets", [])
+        if t.get("board")
+    ]
+    boards.sort(key=lambda b: b["label"].casefold())
+    return boards
+
+
+@router.get("/targets")
+async def firmware_targets(
+    tag: str = "", _claims: SessionClaims = Depends(require_admin),
+) -> dict:
+    """Board choices for the Meshtastic flash pulldown, derived live from
+    whichever release is actually selected (empty tag = latest)."""
+    loop = asyncio.get_running_loop()
+    try:
+        release = await loop.run_in_executor(None, _resolve_release_sync, tag)
+        manifest = await loop.run_in_executor(None, _manifest_from_release_sync, release)
+        boards = _board_list_from_manifest_sync(manifest)
+    except Exception as exc:
+        raise HTTPException(502, f"Could not fetch Meshtastic board list: {exc}")
+    return {"boards": boards, "tag": release.get("tag_name", "")}
+
+
+@router.get("/releases")
+async def firmware_releases(_claims: SessionClaims = Depends(require_admin)) -> dict:
+    """Recent Meshtastic releases for the version pulldown, newest first."""
+    loop = asyncio.get_running_loop()
+    try:
+        releases = await loop.run_in_executor(None, _releases_sync, 10)
+    except Exception as exc:
+        raise HTTPException(502, f"Could not fetch Meshtastic releases: {exc}")
+    return {
+        "releases": [
+            {"tag": r.get("tag_name", ""), "published_at": r.get("published_at")}
+            for r in releases
+        ],
+    }
+
+
 def _cache_dir_for(board: str, version: str) -> Path:
     return _CACHE_DIR / board / version
 
 
-def _ensure_board_firmware_cached_sync(board: str) -> dict:
-    """Downloads (if not already cached) the given board's latest
-    official Meshtastic release, returning::
+def _ensure_board_firmware_cached_sync(board: str, tag: str = "") -> dict:
+    """Downloads (if not already cached) the given board's official
+    Meshtastic release -- latest, or a specific ``tag`` if pinned --
+    returning::
 
         {"version": str, "mcu": str,
          "factory_bin": Path, "littlefs_bin": Path | None,
@@ -138,22 +207,14 @@ def _ensure_board_firmware_cached_sync(board: str) -> dict:
     Runs entirely off the event loop (blocking network I/O + zip
     extraction) -- callers must wrap this in ``run_in_executor``.
     """
-    release = _fetch_json_sync(_RELEASES_LATEST_URL)
+    release = _resolve_release_sync(tag)
+    manifest = _manifest_from_release_sync(release)
     assets = {a["name"]: a["browser_download_url"] for a in release.get("assets", [])}
-
-    manifest_name = next(
-        (n for n in assets if n.startswith("firmware-") and n.endswith(".json")), None,
-    )
-    if not manifest_name:
-        raise RuntimeError("Could not find the firmware manifest in the latest release")
-    with tempfile.NamedTemporaryFile(suffix=".json") as tmp:
-        _download_to_sync(assets[manifest_name], Path(tmp.name))
-        manifest = json.loads(Path(tmp.name).read_text())
 
     version = manifest.get("version") or release.get("tag_name", "").lstrip("v")
     target = next((t for t in manifest.get("targets", []) if t.get("board") == board), None)
     if target is None:
-        raise RuntimeError(f"Board '{board}' not found in the latest Meshtastic release")
+        raise RuntimeError(f"Board '{board}' not found in Meshtastic {release.get('tag_name', 'this release')}")
     platform = target["platform"]
 
     cache_dir = _cache_dir_for(board, version)
@@ -259,7 +320,8 @@ async def _stream_subprocess(cmd: list[str]) -> AsyncIterator[bytes]:
 
 class FlashRequest(BaseModel):
     board: str
-    label: str = ""
+    port: str
+    tag: str = ""
 
 
 @router.post("/flash/stream")
@@ -268,40 +330,63 @@ async def flash_meshtastic_stream(
     claims: SessionClaims = Depends(require_admin),
     audit: AuditLogWriter = Depends(get_audit_writer),
 ) -> StreamingResponse:
-    """Downloads (if needed) the chosen board's latest official
-    Meshtastic release and writes it to one configured Serial device's
-    port with esptool -- full from-scratch flash (--erase-all), for
-    repurposing a board that may currently hold entirely different
-    firmware (e.g. extra/pocsag_companion). Port is resolved server-side
-    from capture.serial by label, never trusted from the browser.
-    """
-    if req.board not in _CURATED_BOARDS:
-        raise HTTPException(400, "Unknown board")
+    """Downloads (if needed) the chosen board's official Meshtastic
+    release -- latest, or a specific ``tag`` if pinned -- and writes it
+    to ``port`` with esptool -- full from-scratch flash (--erase-all),
+    for repurposing a board that may currently hold entirely different
+    firmware (e.g. extra/pocsag_companion).
 
-    port = None
+    ``port`` can be ANY currently-connected USB-serial device, not just
+    one already added as a configured Serial device -- flashing a spare
+    board (or a friend's, just passing through) shouldn't require
+    adding-then-removing a permanent device entry first. It's validated
+    against the live enumeration below (same one GET /api/config/
+    serial-ports uses), never trusted as a raw path from the browser. If
+    it happens to match a configured Serial device's port, that device's
+    capture source is stopped before flashing and restarted after; if it
+    doesn't match anything configured, there's nothing to stop/restart.
+    """
+    if not req.board:
+        raise HTTPException(400, "No board selected")
+
+    from src.hal.usb_classifier import list_serial_ports_with_stable_paths
+    real_ports = {
+        value
+        for dev in list_serial_ports_with_stable_paths()
+        if dev.vid is not None
+        for value in (dev.device, dev.stable_path, dev.by_id, dev.by_path)
+        if value
+    }
+    if req.port not in real_ports:
+        raise HTTPException(400, "Selected port is not a currently connected USB-serial device")
+    port = req.port
+
+    label = ""
+    source = None
     if _config is not None:
         for d in _config.capture.serial:
-            if (d.label or "") == (req.label or ""):
-                port = d.serial_port
+            if d.serial_port == port:
+                label = d.label or ""
+                source = _resolve_serial_source(label)
                 break
-    if not port:
-        raise HTTPException(400, "No configured serial port for this device")
-
-    source = _resolve_serial_source(req.label)
 
     async def body() -> AsyncIterator[bytes]:
         with audit.timed_action(
             user=claims.subject, action="meshtastic_firmware.flash",
-            params={"board": req.board, "label": req.label, "port": port},
+            params={
+                "board": req.board, "label": label, "port": port,
+                "tag": req.tag or "latest",
+            },
         ) as ctx:
             yield _ndjson({
                 "type": "line", "stream": "stdout",
-                "text": f"Fetching latest Meshtastic firmware for {_CURATED_BOARDS[req.board]}…",
+                "text": f"Fetching Meshtastic {req.tag or 'latest'} firmware for "
+                        f"{req.board.replace('-', ' ')}…",
             })
             loop = asyncio.get_running_loop()
             try:
                 fw = await loop.run_in_executor(
-                    None, _ensure_board_firmware_cached_sync, req.board,
+                    None, _ensure_board_firmware_cached_sync, req.board, req.tag,
                 )
             except Exception as exc:
                 logger.exception("Meshtastic firmware fetch failed for %s", req.board)

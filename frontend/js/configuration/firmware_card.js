@@ -1,15 +1,15 @@
 /**
- * Configuration → Firmware page.
+ * Configuration → Firmware page: MeshCore card.
  *
  * Standalone home for "flash a spare board" actions -- previously each
- * protocol's own Configuration page (MeshCore, and eventually Serial/
- * POCSAG) carried its own firmware-flash card buried among that
- * protocol's actual settings, even though flashing a board is a
- * different kind of action (prep new/spare hardware) than configuring
- * an already-assigned companion. First card here is MeshCore's (moved
- * verbatim from meshcore_card.js, drives
- * src/api/routes/meshcore_firmware_routes.py); Serial/POCSAG firmware
- * cards are expected to join it here later, not built yet.
+ * protocol's own Configuration page carried its own firmware-flash card
+ * buried among that protocol's actual settings, even though flashing a
+ * board is a different kind of action (prep new/spare hardware) than
+ * configuring an already-assigned companion. This is the first (and
+ * top) card here, moved from meshcore_card.js, drives
+ * src/api/routes/meshcore_firmware_routes.py. Meshtastic's card sits
+ * below it (meshtastic_firmware_card.js, moved from serial_card.js);
+ * POCSAG's is expected to join later.
  */
 
 class FirmwareConfigCard {

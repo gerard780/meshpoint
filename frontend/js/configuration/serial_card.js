@@ -12,21 +12,11 @@
  * SerialDeviceConfig has no such field, an empty serial port already
  * means "let meshtastic-python auto-detect".
  *
- * The second card, "Meshtastic firmware", drives
- * src/api/routes/meshtastic_firmware_routes.py -- repurposes a spare
- * ESP32 board (e.g. one previously running extra/pocsag_companion) into
- * a Meshtastic USB stick by downloading Meshtastic's own official
- * prebuilt release and writing it with esptool, no compiling involved
- * (Meshtastic firmware is PlatformIO-built upstream, unlike the
- * Arduino-sketch pocsag_companion). Board choice is a curated pulldown
- * (populated from GET .../targets -- not Meshtastic's whole ~130-board
- * catalog, just this project's hardware lineup); which device to flash
- * is only asked when more than one Serial companion is configured, same
- * pattern as the POCSAG firmware card. A confirm-modal guard exists
- * because this is destructive in a way Compile/Flash on the POCSAG card
- * isn't -- --erase-all wipes the board's ENTIRE flash, not just the app
- * partition, since it may currently hold a completely different
- * firmware's partition layout.
+ * The "Meshtastic firmware" flash card used to live here too; it moved
+ * to the standalone Configuration → Firmware page
+ * (frontend/js/configuration/meshtastic_firmware_card.js) for the same
+ * reason MeshCore's did: flashing a spare board reads as its own action
+ * instead of being buried inside this specific protocol's settings page.
  */
 
 class SerialConfigCard {
@@ -72,38 +62,6 @@ class SerialConfigCard {
                     </div>
                     <p class="cfg-status" data-serial-status aria-live="polite"></p>
                 </article>
-
-                <article class="cfg-card">
-                    <header class="cfg-card__head">
-                        <h3 class="cfg-card__title">Meshtastic firmware</h3>
-                        <p class="cfg-card__hint">
-                            Flash a spare board with official Meshtastic firmware straight from
-                            this dashboard -- downloads the latest release and writes it with
-                            esptool, no compiling needed. Erases the ENTIRE flash first, so this
-                            also works on a board currently running something else entirely
-                            (e.g. extra/pocsag_companion).
-                        </p>
-                    </header>
-                    <label class="cfg-field cfg-field--narrow cfg-firmware-board-field">
-                        <span class="cfg-field__label">Board</span>
-                        <select class="cfg-field__input" data-mt-firmware-board></select>
-                    </label>
-                    <label class="cfg-field cfg-field--narrow" data-mt-firmware-device-wrap hidden>
-                        <span class="cfg-field__label">Device to flash</span>
-                        <select class="cfg-field__input" data-mt-firmware-device></select>
-                    </label>
-                    <div class="cfg-card__actions">
-                        <button class="terminal-button terminal-button--primary"
-                                type="button" data-mt-firmware-flash>
-                            Flash
-                        </button>
-                        <button class="terminal-button" type="button" data-mt-firmware-toggle-output>
-                            Show output
-                        </button>
-                    </div>
-                    <pre class="cfg-firmware-output" data-mt-firmware-output hidden></pre>
-                    <p class="cfg-status" data-mt-firmware-status aria-live="polite"></p>
-                </article>
             </div>
         `;
         this._devicesEl = this._root.querySelector('[data-serial-devices]');
@@ -114,29 +72,6 @@ class SerialConfigCard {
             .addEventListener('click', () => this._saveDevices());
         this._root.querySelector('[data-serial-rescan-usb]')
             .addEventListener('click', (e) => this._rescanUsb(e.currentTarget));
-
-        this._root.querySelector('[data-mt-firmware-flash]')
-            .addEventListener('click', () => this._flashMeshtasticFirmware());
-        this._root.querySelector('[data-mt-firmware-toggle-output]')
-            .addEventListener('click', (e) => this._toggleMtFirmwareOutput(e.currentTarget));
-
-        this._loadMtFirmwareTargets();
-    }
-
-    /** Board pulldown options for the Meshtastic firmware card, from the
-     * curated list GET .../targets returns (see
-     * meshtastic_firmware_routes.py's _CURATED_BOARDS) -- NOT
-     * auto-discovered from a local file the way the POCSAG card's board
-     * list is, since Meshtastic firmware isn't built from anything in
-     * this repo. */
-    async _loadMtFirmwareTargets() {
-        const select = this._root.querySelector('[data-mt-firmware-board]');
-        if (!select) return;
-        const result = await this._api.get('/api/config/serial/firmware/targets');
-        const boards = (result && Array.isArray(result.boards)) ? result.boards : [];
-        select.innerHTML = boards.map((b) => (
-            `<option value="${this._esc(b.board)}">${this._esc(b.label)}</option>`
-        )).join('');
     }
 
     /** Manual re-scan for the port-picker datalist -- lets a user unplug
@@ -178,119 +113,6 @@ class SerialConfigCard {
             : [{ label: '', serial_port: '', serial_baud: 115200 }];
         list.forEach((d) => this._addDeviceRow(d));
         this._syncAddBtn();
-        this._renderMtFirmwareDevicePicker(devices);
-    }
-
-    /** Populates the "Device to flash" pulldown on the Meshtastic
-     * firmware card from currently configured Serial devices -- only
-     * shown when there's more than one (matches the same pattern on the
-     * POCSAG firmware card: nothing to choose between otherwise). Keyed
-     * on `label`, resolved server-side to a port -- never a raw path
-     * trusted from the browser. */
-    _renderMtFirmwareDevicePicker(devices) {
-        const wrap = this._root.querySelector('[data-mt-firmware-device-wrap]');
-        const select = this._root.querySelector('[data-mt-firmware-device]');
-        const flashBtn = this._root.querySelector('[data-mt-firmware-flash]');
-        if (!wrap || !select || !flashBtn) return;
-
-        const configured = devices.filter((d) => d.serial_port);
-        this._mtFirmwareDevices = configured;
-
-        if (configured.length === 0) {
-            wrap.hidden = true;
-            flashBtn.disabled = true;
-            flashBtn.title = 'No configured Serial device with a serial port to flash.';
-            return;
-        }
-
-        flashBtn.disabled = false;
-        flashBtn.title = '';
-        wrap.hidden = configured.length <= 1;
-        select.innerHTML = configured.map((d) => {
-            const name = d.label || d.serial_port;
-            return `<option value="${this._esc(d.label || '')}">${this._esc(name)}</option>`;
-        }).join('');
-    }
-
-    _toggleMtFirmwareOutput(button) {
-        const pre = this._root.querySelector('[data-mt-firmware-output]');
-        if (!pre) return;
-        pre.hidden = !pre.hidden;
-        button.textContent = pre.hidden ? 'Show output' : 'Hide output';
-    }
-
-    _appendMtFirmwareOutput(text) {
-        const pre = this._root.querySelector('[data-mt-firmware-output]');
-        if (!pre || !text) return;
-        pre.textContent = pre.textContent ? `${pre.textContent}\n${text}` : text;
-        pre.scrollTop = pre.scrollHeight;
-    }
-
-    async _flashMeshtasticFirmware() {
-        const boardSelect = this._root.querySelector('[data-mt-firmware-board]');
-        const deviceSelect = this._root.querySelector('[data-mt-firmware-device]');
-        const board = boardSelect?.value;
-        if (!board) return;
-        const boardLabel = boardSelect.options[boardSelect.selectedIndex]?.text || board;
-
-        const devices = this._mtFirmwareDevices || [];
-        const label = devices.length > 1 ? (deviceSelect?.value ?? '') : (devices[0]?.label || '');
-        const device = devices.find((d) => (d.label || '') === label) || devices[0];
-        if (!device) return;
-
-        const ok = await window.confirmModal({
-            label: 'Flash Meshtastic firmware',
-            description: `Erase the ENTIRE flash on "${device.label || device.serial_port}" `
-                + `(${device.serial_port}) and write official Meshtastic firmware for `
-                + `${boardLabel}? This replaces whatever is currently on the board -- `
-                + 'not reversible from here.',
-        });
-        if (!ok) return;
-
-        const status = this._root.querySelector('[data-mt-firmware-status]');
-        const flashBtn = this._root.querySelector('[data-mt-firmware-flash]');
-        const outputPre = this._root.querySelector('[data-mt-firmware-output]');
-
-        flashBtn.disabled = true;
-        status.dataset.kind = 'pending';
-        status.textContent = `Flashing ${device.label || device.serial_port}…`;
-        if (outputPre) outputPre.textContent = '';
-        this._appendMtFirmwareOutput(`# Flashing ${boardLabel} onto ${device.serial_port}…`);
-
-        let finalResult = null;
-        try {
-            finalResult = await window.UpdateStreamClient.postNdjson(
-                '/api/config/serial/firmware/flash/stream',
-                { board, label },
-                (event) => {
-                    if (event.type === 'started' && Array.isArray(event.cmd)) {
-                        this._appendMtFirmwareOutput(`$ ${event.cmd.join(' ')}`);
-                    } else if (event.type === 'line') {
-                        this._appendMtFirmwareOutput(event.text);
-                    }
-                },
-            );
-        } catch (err) {
-            status.dataset.kind = 'error';
-            status.textContent = `Request failed: ${err.message || err}`;
-            this._appendMtFirmwareOutput(`! ${err.message || err}`);
-            flashBtn.disabled = false;
-            return;
-        }
-
-        const success = !!(finalResult && finalResult.success);
-        status.dataset.kind = success ? 'success' : 'error';
-        status.textContent = success
-            ? 'Flashed.'
-            : `Failed (exit code ${finalResult ? finalResult.returncode : '?'}). See output below.`;
-        if (!success && outputPre) outputPre.hidden = false;
-        const toggleBtn = this._root.querySelector('[data-mt-firmware-toggle-output]');
-        if (toggleBtn && outputPre) {
-            toggleBtn.textContent = outputPre.hidden ? 'Show output' : 'Hide output';
-        }
-
-        flashBtn.disabled = false;
-        if (success) await this._api.refresh();
     }
 
     _liveStatusFor(label) {

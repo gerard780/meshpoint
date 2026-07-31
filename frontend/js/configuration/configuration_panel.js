@@ -145,13 +145,25 @@ class ConfigurationPanel {
                 card.mount(host);
                 this._cards.set('pocsag-serial', card);
             }
-        } else if (section === 'firmware' && window.FirmwareConfigCard) {
+        } else if (section === 'firmware') {
             const host = document.getElementById('cfg-firmware-panel');
             if (host) {
-                host.innerHTML = '';
-                const card = new window.FirmwareConfigCard(api);
-                card.mount(host);
-                this._cards.set('firmware', card);
+                host.innerHTML = `
+                    <div class="cfg-section">
+                        <div data-firmware-meshcore></div>
+                        <div data-firmware-meshtastic></div>
+                    </div>
+                `;
+                if (window.FirmwareConfigCard) {
+                    const meshcore = new window.FirmwareConfigCard(api);
+                    meshcore.mount(host.querySelector('[data-firmware-meshcore]'));
+                    this._cards.set('firmware-meshcore', meshcore);
+                }
+                if (window.MeshtasticFirmwareConfigCard) {
+                    const meshtastic = new window.MeshtasticFirmwareConfigCard(api);
+                    meshtastic.mount(host.querySelector('[data-firmware-meshtastic]'));
+                    this._cards.set('firmware-meshtastic', meshtastic);
+                }
             }
         } else if (section === 'transmit' && window.TransmitConfigCard) {
             const host = document.getElementById('cfg-transmit-panel');
