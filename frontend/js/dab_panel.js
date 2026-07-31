@@ -227,7 +227,7 @@ class DabPanel {
             const res = await fetch('/api/dab/scan-results');
             if (!res.ok) {
                 this._channelPresets = [];
-                hint = 'No preset channels found — run scripts/dab_channel_scan.py on the device, then reopen this tab.';
+                hint = 'No preset channels found — run a scan from the DAB+ Config tab, then reopen this tab.';
             } else {
                 const data = await res.json();
                 this._channelPresets = (data.channels || [])
@@ -244,12 +244,12 @@ class DabPanel {
                         stations: c.stations || [],
                     }));
                 if (!this._channelPresets.length) {
-                    hint = 'No preset channels found — run scripts/dab_channel_scan.py on the device, then reopen this tab.';
+                    hint = 'No preset channels found — run a scan from the DAB+ Config tab, then reopen this tab.';
                 }
             }
         } catch (_e) {
             this._channelPresets = [];
-            hint = 'No preset channels found — run scripts/dab_channel_scan.py on the device, then reopen this tab.';
+            hint = 'No preset channels found — run a scan from the DAB+ Config tab, then reopen this tab.';
         }
         const bar = this._root && this._root.querySelector('[data-dab-chantabs]');
         if (bar) bar.innerHTML = this._chanTabsHtml();

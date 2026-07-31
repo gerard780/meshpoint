@@ -29,6 +29,12 @@ const DAB_CONFIG_CHANNEL_GROUPS = (() => {
     return groups;
 })();
 
+// This deployment's own confirmed-good NL DAB+ channels (NPO/Commercial/
+// Throwback/MTVNL/N-H-Flevo -- the same 5 the DAB+ tab's original curated
+// presets were built from), pre-checked in the picker so a routine
+// targeted rescan doesn't need re-selecting them by hand every time.
+const DAB_CONFIG_DEFAULT_CHANNELS = ['7D', '8B', '9C', '11C', '12C'];
+
 class DabConfigPanel {
     constructor() {
         this._root = null;
@@ -68,7 +74,8 @@ class DabConfigPanel {
                                         <span class="dabcfg-scan-band__label">${this._esc(g.band)}</span>
                                         ${g.channels.map((ch) => `
                                             <label class="dabcfg-scan-chan">
-                                                <input type="checkbox" value="${this._esc(ch)}" data-dabcfg-scan-chan-input>
+                                                <input type="checkbox" value="${this._esc(ch)}" data-dabcfg-scan-chan-input
+                                                       ${DAB_CONFIG_DEFAULT_CHANNELS.includes(ch) ? 'checked' : ''}>
                                                 ${this._esc(ch)}
                                             </label>
                                         `).join('')}

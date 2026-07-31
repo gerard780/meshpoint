@@ -129,8 +129,8 @@ def _read_scan_results(path: Path) -> dict:
     if not path.exists():
         raise HTTPException(
             404,
-            f"No DAB channel scan results found at {path} -- run scripts/dab_channel_scan.py "
-            "on the device first, then reload this tab.",
+            f"No DAB channel scan results found at {path} -- use the Full scan/Scan specific "
+            "channels buttons above to find some.",
         )
     try:
         return json.loads(path.read_text())
