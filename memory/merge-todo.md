@@ -60,7 +60,8 @@ We've touched `update_panel_controller.js` (12 commits since base), `release_not
 
 ## Low priority / infra
 
-- [ ] ❓ **`0e7518c`** Pin CI ruff to 0.15.22 after 0.16.0 flooded lint — cheap, worth just checking our CI ruff pin and matching if we're getting the same lint flood.
+- [x] ✅ **`0e7518c`** Pin CI ruff to 0.15.22 after 0.16.0 flooded lint. **We already have this** — same root cause independently hit and fixed: our `.github/workflows/ci.yml` pins `ruff==0.15.1` with a comment explaining ruff 0.16.0 broadened its default rule set (added `UP045` among others) and broke CI. Different patch version pinned (0.15.1 vs his 0.15.22) but functionally the same fix for the same problem — no action needed now.
+  - [ ] **Follow-up (later, not part of this merge-todo pass):** bump our CI pin from `ruff==0.15.1` to `ruff==0.15.22` — his pin is newer within the same pre-0.16 line, so it's presumably still green there. Do this after the rest of this list is green, not now — get everything else up to date first, then revisit this as its own small bump-and-verify task (re-run `ruff check src/ tests/` locally at 0.15.22 before pushing the CI change, in case it flags anything new between .1 and .22).
 - Skip: `f3dcb740` (release rollup commit, no unique content), `cc8777a` (his own CHANGELOG draft, not applicable to our CHANGELOG).
 
 ## How to verify a ❓ item
