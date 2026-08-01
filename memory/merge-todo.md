@@ -6,6 +6,7 @@ Compare: https://github.com/javastraat/meshpoint/compare/main...KMX415:meshpoint
 - Since then: KMX415 side = 54 commits (52 by KMX415, 2 by Sven-Christian Meyhoefer/Meyblaubaer), 102 files, +5533/-250
 - Since then: our side = 485 commits, 466 files, +100473/-1877
 - Full `git merge` of his 54 commits into our `main` produces **71 real conflicts** (verified with `git merge-tree`), mostly in the core serial/decode/routing pipeline and frontend — see "Serial/routing pipeline" cluster below, which is almost entirely convergent (we both built similar fixes independently).
+- Cross-checked against GitHub's own compare API (`api.github.com/repos/javastraat/meshpoint/compare/main...KMX415:meshpoint:main`): confirms `status: diverged`, `ahead_by: 54`, `behind_by: 486` (matches our count), `102 files changed` on his side. No renames in the file list — everything flagged "added" there is a genuinely new file on his side since the fork point (used this to catch and fix two errors below: the time-bucket note, and calling out `serial_radio_handshake.py` explicitly).
 
 Status legend: ✅ already covered on our side · 🆕 genuine gap, worth pulling in · ❓ unverified, needs a real diff to decide
 
@@ -28,7 +29,7 @@ Check items off as you confirm them (change `[ ]` to `[x]`) or add a note.
 
 - [x] ✅ **`5cacaa2`** — Bound telemetry table growth with `max_telemetry_retained`. **We already have `max_telemetry_retained: 100000` in `config/default.yaml`.**
 - [x] ✅ **`49d9ab0`** — Cache-bust dashboard JS/CSS URLs after restart. **We already have this** — `src/api/html_assets.py` docstring: "Cache-busting for the dashboard's static JS/CSS asset URLs."
-- [x] ✅ **`8a907a5`** / **`f4f04d9`** — Downsample telemetry/signal history into time buckets. **We already have this**, our own implementation: `b10610a` "server-side downsampling for Repeater Trends and node-drawer telemetry charts, bounded regardless of history length." `src/storage/time_bucket.py` predates both forks (existed at common ancestor); both sides built bucketing on top of it independently.
+- [x] ✅ **`8a907a5`** / **`f4f04d9`** — Downsample telemetry/signal history into time buckets. **We already have this**, our own implementation: `b10610a` "server-side downsampling for Repeater Trends and node-drawer telemetry charts, bounded regardless of history length." Correction: `src/storage/time_bucket.py` did **not** predate the fork (GitHub's compare API flags it "added" on his side, and it's confirmed absent at the merge-base) — both sides independently created a same-named module after the fork point to solve the same problem. Convergent development, not shared history.
 
 ## Serial/routing pipeline — convergent development, likely already covered (spot-checked one file)
 
@@ -38,7 +39,7 @@ We independently solved the same problems in `src/capture/serial_source.py` arou
 - [ ] ❓ **`1e04afc`** Route replies through the USB stick that heard the contact ↔ ours: `f6b2bcd` "replies route through the radio that heard the contact"
 - [ ] ❓ **`0d224f9`** Route stick-local channel index by name, not OTA hash ↔ ours: `55950c8` "stop the 433 MHz stick's own channel-table index from being mistaken for a real OTA channel hash"
 - [ ] ❓ **`4af1be6`** Drop serial self-telemetry polluting feed at -100 dBm ↔ ours: `db4de9f` "auto-detect a serial stick's own node id and drop its self-telemetry"
-- [ ] ❓ **`0e2c6cd`** Stamp packets with stick LoRa freq/SF/BW from handshake ↔ ours: `77cdaa2` "serial capture reads the connected stick's real region/frequency/sf/bandwidth"
+- [ ] ❓ **`0e2c6cd`** Stamp packets with stick LoRa freq/SF/BW from handshake ↔ ours: `77cdaa2` "serial capture reads the connected stick's real region/frequency/sf/bandwidth". His side factors this into a **new standalone file `src/capture/serial_radio_handshake.py` (confirmed missing on our side)** — worth a real diff to see if his handshake-parsing approach catches cases ours doesn't, even though the end goal (real freq/SF/BW instead of placeholders) is already met on our side.
 
 Not yet individually compared (same file cluster, probably same story, needs a real diff before assuming covered):
 
