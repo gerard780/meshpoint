@@ -76,3 +76,15 @@ git diff <base> origin/main -- <file>  # see how far we've diverged from the sha
 ```
 Base commit: `427f181d94c229ba723f738733394d177e22a681`
 KMX415 head: `67bf74dd8eb6cd6dd101f29d7c02dcd9b76aaf6c`
+
+## LAST ITEM — run only once every item above is checked off
+
+Once every 🆕 gap is ported and every ❓ is resolved (either confirmed already-covered or pulled in), close out the "54 commits behind" relationship with a no-op merge — records his `main` as an ancestor without changing any files, since by then everything worth taking has already been taken deliberately, commit by commit above:
+
+```
+git fetch https://github.com/KMX415/meshpoint.git main
+git merge -s ours FETCH_HEAD -m "merge: absorb KMX415/meshpoint main history — everything worth taking already ported per memory/merge-todo.md"
+git push origin main
+```
+
+This rewrites shared history and pushes to `origin/main` — do not run without explicit go-ahead at the time, even if this file is fully green.
