@@ -25,7 +25,7 @@ Check items off as you confirm them (change `[ ]` to `[x]`) or add a note.
 - [x] ✅ **`49d9ab0`** — Cache-bust dashboard JS/CSS URLs after restart. **We already have this** — `src/api/html_assets.py` docstring: "Cache-busting for the dashboard's static JS/CSS asset URLs."
 - [x] ✅ **`8a907a5`** / **`f4f04d9`** — Downsample telemetry/signal history into time buckets. **We already have this**, our own implementation: `b10610a` "server-side downsampling for Repeater Trends and node-drawer telemetry charts, bounded regardless of history length." Correction: `src/storage/time_bucket.py` did **not** predate the fork (GitHub's compare API flags it "added" on his side, and it's confirmed absent at the merge-base) — both sides independently created a same-named module after the fork point to solve the same problem. Convergent development, not shared history.
 
-## Serial/routing pipeline — convergent development, confirmed covered (5 of 5 spot-checked)
+## Serial/routing pipeline — convergent development, confirmed covered (12 of 12)
 
 We independently solved the same problems in `src/capture/serial_source.py` around the same time. All 5 confirmed — 3 of the 5 have explicit `"Credit: javastraat/meshpoint <hash>"` comments directly in his own code (his fork acknowledges these came from us), and the other 2 are co-authored + confirmed structurally identical in our current code:
 
@@ -35,15 +35,15 @@ We independently solved the same problems in `src/capture/serial_source.py` arou
 - [x] ✅ **`4af1be6`** Drop serial self-telemetry polluting feed at -100 dBm ↔ ours: `db4de9f` + `c190b3e`. His new `SerialSelfOriginFilter` class docstring says `"Credit: javastraat/meshpoint db4de9f + c190b3e"` verbatim. Confirmed: our `serial_source.py::_packet_to_raw_capture()` has the identical own-node-num check + text-message exemption, just inline rather than factored into a separate class.
 - [x] ✅ **`0e2c6cd`** Stamp packets with stick LoRa freq/SF/BW from handshake ↔ ours: `77cdaa2` + `dc3fc0a`. His new standalone `src/capture/serial_radio_handshake.py` module docstring says `"Credit: javastraat/meshpoint 77cdaa2 + dc3fc0a"` verbatim — confirms the file that's "missing" on our side is just a refactor-into-its-own-module of logic we already have inline in `serial_source.py` (matched field-for-field: `frequency_offset`, `override_frequency`, `modem_preset`, `channel_table`, `_read_primary_channel_name`). Not a functional gap — his side just extracted it into a separately-testable class; ours keeps it as methods on `SerialCaptureSource`. Purely a code-organization difference, nothing to port.
 
-Not yet individually compared (same file cluster, probably same story, needs a real diff before assuming covered):
+All 7 confirmed covered — 5 explicitly state "Rewrite of javastraat/meshpoint `<hashes>`" (verified all cited hashes exist in our own history), the other 2 are genuinely his own original work but confirmed structurally identical to what we already have:
 
-- [ ] ❓ **`2dfd813`** Ignore blank serial rows so multi-stick save can't double-open a port
-- [ ] ❓ **`3df2e8f`** Fix serial USB decode: reconstruct MeshPacket frames, use pre_decoded
-- [ ] ❓ **`8982245`** Enable replies when remote channel name differs but PSK matches
-- [ ] ❓ **`f71b18c`** Route unmapped channel hashes to their own conversation buckets
-- [ ] ❓ **`22e5d52`** Tag packets with capture source name, surface band on nodes
-- [ ] ❓ **`ab6a517`** Make channel message sender names clickable via `source_id`
-- [ ] ❓ **`872e42d`** Fix MeshCore name cross-contamination and sticky conversation titles
+- [x] ✅ **`2dfd813`** Ignore blank serial rows so multi-stick save can't double-open a port. Co-authored by us.
+- [x] ✅ **`3df2e8f`** Fix serial USB decode: reconstruct MeshPacket frames, use pre_decoded. His own original work (not attributed to us), but our `serial_source.py`/`meshtastic_decoder.py` already have the identical mechanism — same `_build_pre_decoded()` method name, same `pre_decoded` dict shape (`portnum`/`payload`/`request_id`), same decoder branch (`if pre_decoded is not None`). Ours even has a superset field (`channel_name`) his doesn't.
+- [x] ✅ **`8982245`** Enable replies when remote channel name differs but PSK matches. His own original work, but our `meshtastic_decoder.py`/`models/packet.py`/`transmit/tx_service.py` already thread `matched_channel_index` through exactly as described, and `tests/test_meshtastic_decoder_matched_channel_index.py` already exists on our side.
+- [x] ✅ **`f71b18c`** Route unmapped channel hashes to their own conversation buckets. "Rewrite of javastraat 73f692d, 59d13df, 758ed56, abc2f56" — all 4 hashes confirmed in our history; our `channel_hash_resolver.py` already has the "Unmapped" bucket logic.
+- [x] ✅ **`22e5d52`** Tag packets with capture source name, surface band on nodes. "Rewrite of javastraat d32d121 and 07bd74f" — both confirmed in our history; our `node_cards.js::_bandLabel()` + `node_repository.py::get_latest_capture_source()` already do this.
+- [x] ✅ **`ab6a517`** Make channel message sender names clickable via `source_id`. "Rewrite of javastraat/meshpoint 35416ee and 1a9dfb8" — both confirmed in our history; our `message_name_resolver.py`/`messaging_chat.js` already resolve and use `source_id`.
+- [x] ✅ **`872e42d`** Fix MeshCore name cross-contamination and sticky conversation titles. "Rewrite of javastraat/meshpoint 52e1f56 and cda45e5" — both confirmed in our history; our `meshcore_contacts.py` already does exact 12-char pubkey-prefix matching (no more 8/10/16-char guessing).
 
 ## Updates page UX
 
