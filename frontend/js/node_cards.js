@@ -342,7 +342,11 @@ class NodeCards {
         if (voltage != null) {
             parts.push(`<span class="nc-chip nc-chip--telem">&#9889; ${voltage.toFixed(2)}V</span>`);
         }
-        if (battery != null && battery > 0) {
+        if (battery === 101) {
+            // Meshtastic firmware convention: 101 = externally powered,
+            // no battery attached (not a real percentage).
+            parts.push(`<span class="nc-chip nc-chip--telem">&#128268; Powered</span>`);
+        } else if (battery != null && battery > 0) {
             parts.push(`<span class="nc-chip nc-chip--telem">${this._batteryIcon(battery)} ${battery}%</span>`);
         }
         if (alt != null) {
