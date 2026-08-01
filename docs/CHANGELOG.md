@@ -193,6 +193,7 @@ First tagged release of the javastraat/meshpoint fork. Adds LoRaWAN sniffing, mu
 - **Configuration → MeshCore can now change a companion's radio frequency/bandwidth/settings directly from the dashboard.** It offers the same list of official MeshCore region presets as the command-line tool, without needing to stop the whole service to apply a change.
 - **Fixed: a MeshCore companion whose command channel silently died could get stuck "connected" forever**, blocking every dashboard action against it until a manual unplug. Ongoing reception could mask the problem, since the health check skipped its own recovery step whenever there'd been recent activity.
 - **Fixed: MeshCore reconnect attempts could sometimes run twice at once**, causing extra radio resets. Two separate triggers could each start their own reconnect at the same time, both resetting the same physical connection.
+- **Opt-in publishing to the official Meshtastic map.** A new "Official map" toggle in Configuration → MQTT publishes this Meshpoint's own identity (name, approximate location, firmware, region, modem preset) as a public, unencrypted MQTT MapReport — separate from the existing packet-relay gateway, MQTT-only, no LoRa airtime used. Off by default; requires MQTT itself to be enabled. Interval (minimum 3600s, matching the Meshtastic minimum) and position precision (12–15 bits, default 14) are both configurable.
 
 #### CLI
 

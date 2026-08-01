@@ -135,6 +135,25 @@ class TestUpdateMqttRoute(unittest.TestCase):
         )
         self.assertEqual(resp.status_code, 422)
 
+    def test_map_report_requires_mqtt_enabled_returns_422(self) -> None:
+        resp = self.client.put(
+            "/api/config/mqtt",
+            json={
+                "enabled": False,
+                "broker_host": "mqtt.example.com",
+                "broker_port": 1883,
+                "topic_root": "msh",
+                "region_segment": "US",
+                "publish_channels": ["LongFast"],
+                "map_reporting_enabled": True,
+                "map_report_interval_seconds": 3600,
+                "map_report_position_precision": 14,
+            },
+        )
+        self.assertEqual(resp.status_code, 422)
+        detail = resp.json().get("detail", "")
+        self.assertIn("mqtt.enabled", detail)
+
 
 class TestMqttRuntimeRoute(unittest.TestCase):
     def tearDown(self) -> None:
