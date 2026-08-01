@@ -12,12 +12,7 @@ Status legend: ✅ already covered on our side · 🆕 genuine gap, worth pullin
 
 Check items off as you confirm them (change `[ ]` to `[x]`) or add a note.
 
-## Security (do this one first)
-
-- [ ] 🆕 **`fdc5c1e`** — Require admin for config/message writes; redact PSKs for viewers.
-  Adds `Depends(require_admin)` / `Depends(require_auth)` to `PUT /config/{transmit,identity,radio,channels,meshcore/channels}`, `POST /config/restart`, and `POST/DELETE` message routes; redacts `psk_b64` / MeshCore `key_hex` for non-admin `GET /config`.
-  **Verified: our `src/api/routes/config_routes.py` has zero admin/role checks today** — sidebar-hiding is the only protection. Our auth infra (`src/api/auth/dependencies.py::require_admin/require_auth`, `src/api/auth/jwt_session.py::SessionClaims/ROLE_ADMIN`) already exists, so this should port cleanly. Commit is co-authored by us + says "From javastraat/meshpoint" — likely a patch we sent him that never landed back in our own main.
-  Depends on new file `tests/auth_test_helpers.py` and `tests/test_viewer_write_lockdown.py` (both missing on our side).
+## Security
 
 ## MQTT Map Report (genuine new feature)
 
@@ -27,6 +22,7 @@ Check items off as you confirm them (change `[ ]` to `[x]`) or add a note.
 
 ## Already covered — confirmed, no action needed
 
+- [x] ✅ **`fdc5c1e`** — Require admin for config/message writes; redact PSKs for viewers. **We already have this**, our own commit `0c1cd41` "security lockdown for viewer" (2026-07-06). Verified: our `config_routes.py` gates `GET /config` with `require_auth` and `PUT /transmit,/identity,/radio,/channels,/meshcore/channels,POST /restart` with `require_admin`, `messages.py` gates `send/advert/delete_conversation/delete_all` with `require_admin` — identical route coverage, and the `GET /config` docstring wording matches his commit verbatim ("Channel secrets... are only included for admins; viewer sessions get the same shape with blanked keys"), so this is almost certainly the same original patch (his commit says "From javastraat/meshpoint"). Correction: earlier in this doc this was wrongly listed as a 🆕 gap — that was a shell-substitution bug during verification, not a real gap. No `nodeinfo_routes.py`/`position_broadcast_routes.py`/`telemetry_broadcast_routes.py` redaction gap check done yet — low priority given the core routes already match.
 - [x] ✅ **`5cacaa2`** — Bound telemetry table growth with `max_telemetry_retained`. **We already have `max_telemetry_retained: 100000` in `config/default.yaml`.**
 - [x] ✅ **`49d9ab0`** — Cache-bust dashboard JS/CSS URLs after restart. **We already have this** — `src/api/html_assets.py` docstring: "Cache-busting for the dashboard's static JS/CSS asset URLs."
 - [x] ✅ **`8a907a5`** / **`f4f04d9`** — Downsample telemetry/signal history into time buckets. **We already have this**, our own implementation: `b10610a` "server-side downsampling for Repeater Trends and node-drawer telemetry charts, bounded regardless of history length." Correction: `src/storage/time_bucket.py` did **not** predate the fork (GitHub's compare API flags it "added" on his side, and it's confirmed absent at the merge-base) — both sides independently created a same-named module after the fork point to solve the same problem. Convergent development, not shared history.
