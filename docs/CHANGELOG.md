@@ -185,7 +185,7 @@ First tagged release of the javastraat/meshpoint fork. Adds LoRaWAN sniffing, mu
 - **`meshpoint report` now also lists Meshtastic USB serial sticks.** Previously a connected serial radio produced no line at all in the report, even though the dashboard already knew about it.
 - **`meshpoint report` no longer merges two physically separate Meshtastic networks into one stat line** (e.g. a concentrator and a USB stick on different frequencies). Each radio now gets its own line, since two sticks on different frequencies are really separate meshes that can't talk to each other.
 - **`meshpoint meshcore-radio` now offers the full official list of MeshCore region presets** (20 regions), instead of just three. The list is transcribed directly from the official MeshCore app's own picker, so the presets match what a real MeshCore user would choose.
-- **`meshpoint report` now lists the DAPNET/POCSAG companion too**, matching the treatment MeshCore and Meshtastic serial sticks already got — packet count and unique capcodes in PROTOCOLS, connection state/callsign/board in CAPTURE SOURCES. Previously a connected pager companion produced no line at all, even though its packets already counted toward the RX Traffic totals.
+- **`meshpoint report` now lists the DAPNET/POCSAG companion too**, matching the treatment MeshCore and Meshtastic serial sticks already got — packet count and unique capcodes in PROTOCOLS, and USB port/connection state/callsign/board in CAPTURE SOURCES. Previously a connected pager companion produced no line at all, even though its packets already counted toward the RX Traffic totals.
 
 #### Dashboard and UI
 

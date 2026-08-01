@@ -395,14 +395,19 @@ def _print_sources_section(d: ReportData) -> None:
         state = "connected" if mc.get("connected") else "disconnected"
         _kv("meshcore_usb", state)
 
+    pocsag_devices = {
+        (f"dapnet_{dev.get('label')}" if dev.get("label") else "dapnet"): dev
+        for dev in (capture.get("pocsag_serial") or [])
+    }
     for dp in cfg.get("dapnet_status") or []:
         name = dp.get("name") or "dapnet"
+        port = (pocsag_devices.get(name) or {}).get("serial_port") or ""
         state = (
             f"{_GREEN}connected{_RESET}" if dp.get("connected") else f"{_DIM}--{_RESET}"
         )
         callsign = dp.get("callsign") or ""
         board = dp.get("board") or ""
-        _kv(name, " · ".join(x for x in (state, callsign, board) if x))
+        _kv(name, " · ".join(x for x in (port, state, callsign, board) if x))
 
     # Meshtastic USB serial sticks -- live status lives at the payload's
     # top level (cfg["serial"]), not under capture, since config_routes
