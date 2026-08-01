@@ -18,7 +18,6 @@ First tagged release of the javastraat/meshpoint fork. Adds LoRaWAN sniffing, mu
 - **FPort/FCnt show up in the packets log.** These two LoRaWAN columns were always blank; fixed.
 - **LoRaWAN packet-detail decrypt state now matches the live feed.** The packet detail popup and the live dashboard used to disagree about whether a packet was decrypted.
 - **LoRaWAN packet detail keeps metadata visible when payload keys are missing.** Encrypted LoRaWAN packets without the right keys now still show their header info instead of hiding everything.
-- **Clicking a node name in Messages now opens its node details**, for both direct messages and channel/broadcast messages. Direct-message sender names already worked this way; channel and broadcast messages needed a small backend fix first, since the server was resolving a sender's display name without keeping track of their actual node ID.
 - **LoRaWAN Devices and Meshtastic Nodes tabs show a "(N of M)" count** next to the search box, matching MeshCore's Contacts tab. The count updates automatically as you narrow the list down with the search box.
 - **Search added to the MeshCore Contacts tab**, matching the search already on LoRaWAN and Meshtastic. It matches against a contact's ID or name, rounding out search being available on all three protocol pages.
 - **Fixed: the packet search box sometimes stayed visible on the wrong tab.** Switching from the Devices/Nodes tab back to Recent Packets could leave the search box stuck on screen, still filtering out packets underneath it.
@@ -75,16 +74,9 @@ First tagged release of the javastraat/meshpoint fork. Adds LoRaWAN sniffing, mu
 #### Multi-radio capture (5 networks at once)
 
 - **Multiple MeshCore USB companions** can now be configured at once (up to 4), each labeled and tracked separately, editable from Configuration. Each companion's packets are tagged with its own label so you can tell which physical device captured what.
-- **Multiple Meshtastic USB sticks** can now be configured at once too (e.g. one on 433 MHz, one on 868 MHz), also editable from Configuration. Also fixes a bug where packets from different sticks could get mixed up.
-- **Fixed: a serial Meshtastic USB stick would crash the whole capture pipeline**, and was silently dropping packets it couldn't decrypt. The stick's library always hands back a raw packet object rather than plain bytes, and packets it couldn't decrypt itself were being discarded instead of being handed to Meshpoint's own decoder.
-- **Fixed: serial Meshtastic packets the stick decrypted itself always showed as "Unknown" type.** They now decode and show their real content.
-- **Band tag on node cards.** Nodes now show a "433 MHz" / "868 MHz" chip so a multi-stick setup is easy to read at a glance.
-- **Serial Meshtastic sticks now report their real region/frequency/settings.** Previously every packet was stamped with a fake placeholder frequency and settings regardless of the stick's actual configuration. Also added a topbar badge showing each connected stick's status.
-- **Serial Meshtastic sticks no longer capture their own self-reports as noisy, confusing packets.** A cleanup script is available for old rows already affected.
 - **Fixed: labeling a MeshCore companion could silently disable its transmit/status.** The dashboard's lookup for "which companion is connected" only matched an exact name, which broke the moment a companion got a custom label.
 - **MeshCore signal metadata** (frequency, bandwidth, spreading factor, hop count) now reported correctly per companion. Each companion now reports its own real connect-time radio settings instead of a shared or guessed value.
 - **Simultaneous LoRaWAN + Meshtastic 868 + MeshCore 868/433 + Meshtastic 433** all run side by side on one box. Only Meshtastic traffic is ever relayed onward; every other network stays listen-only.
-- **Chat replies now go out over whichever radio can actually reach the contact**, instead of always the "primary" one — fixes replies silently failing to arrive on a multi-radio box. A contact heard only on one companion's frequency physically can't receive a reply sent out on a different one.
 - **Chat header shows which physical radio a conversation is on** (e.g. "433", "868", "Concentrator"), including several follow-on fixes for missing styling, slow loading, and channel/broadcast conversations. This matters once a box has more than one radio on the same protocol and the usual protocol badge alone can't tell them apart.
 - **Fixed: the Messages page headers were invisible** on real deployments — the whole panel was sized one topbar too tall. Opening a conversation would push both the chat header and sidebar header up out of view with no way to scroll back to them.
 - **Channel pills are now per-channel, not shared across a whole protocol.** With two same-band companions, every channel used to show the same (sometimes wrong) badge.
@@ -119,13 +111,8 @@ First tagged release of the javastraat/meshpoint fork. Adds LoRaWAN sniffing, mu
 
 #### Roles and access
 
-- **Viewer role fully locked down server-side.** Every settings-changing action now requires admin; viewers get a clean "not allowed" message instead of it silently going through (or, previously, sometimes being silently accepted with no real effect).
-- **Channel secrets hidden from viewers.** Encryption keys are no longer sent to viewer sessions.
-- **Admin links stay in place for viewers.** Clicking an admin-only link no longer navigates away; a message explains admin access is needed.
-- **Blocked message sends now show a toast** instead of leaving a failed message in the chat. A viewer trying to send now sees a clear notice that admin access is required, rather than a message that silently fails to appear.
 - **Login page no longer prefills the username.** Both fields now start empty on every visit to the login page.
 - **Role permissions now correctly cover LoRaWAN, Meshtastic, MeshCore, and RTL-SDR pages.** These sections were missing from the permission lists behind each role, which could affect how future access gating on those pages behaves.
-- **Upstream's new broadcast-interval settings are now properly admin-gated.** These settings had no role check at all when they were first merged in, so a viewer could technically change them.
 - **SDR start/stop/tune actions are now properly admin-gated too** — previously any logged-in viewer could retune the dongle or stop a running decoder. This closes the gap across the RTL-SDR, DAB+, and pager listener tabs; the read-only status views stay open to viewers as before.
 
 #### Hardware page and band spectrum
@@ -147,13 +134,11 @@ First tagged release of the javastraat/meshpoint fork. Adds LoRaWAN sniffing, mu
 - **Serial port fields now suggest connected USB devices** and prefer stable, reconnect-proof device paths over ones that can shift around. Went through several rounds of refinement: filtering out unrelated onboard ports, clearer labels, and warnings when a port is already used by another device.
 - **`install.sh` skips reinstalling tools that are already present**, speeding up repeat installer runs. This covers rtl_433, the DAB+ decoder, and the Meshtastic/MeshCore command-line tools, which previously reinstalled on every single run.
 - **Fixed: MeshCore packets could be stored under the wrong companion's label**, masking which physical companion actually captured them. A hardcoded label meant every packet looked like it came from an unlabeled companion, even on boxes running two or more.
-- **Fixed a real data-integrity bug where MeshCore node names could cross-contaminate between different physical nodes.** A one-time cleanup script fixes already-affected data; new devices are unaffected going forward.
 - **New Stray Frames card on the RF Environment page**, showing radio frames that don't decode as any known protocol, for diagnostics. Previously these frames simply vanished with no trace; now up to 500 recent ones are kept in memory for inspection.
 - **Fixed: the "no scan yet" placeholder message on the channel histogram sometimes stayed visible after a real scan loaded.** It could overflow past its own box and spill into whatever card sat below it on the page.
 
 #### Stats and node insights
 
-- **Telemetry history is now auto-pruned**, closing the one database table that could grow without bound. A real deployment was found to grow its database by over 20 MB in just three days before this was fixed.
 - **Fixed: charts and node history could silently stop updating once a device's history grew large enough.** Long-running charts now always show the full history, evenly sampled, instead of quietly truncating.
 - **Mesh topology graph.** A new Topology page draws the mesh as a live, interactive graph — nodes colored by protocol, edges from real traceroutes/receptions/neighbour reports — with a map view, filters, and click-through to node details. Updates live as new data comes in.
 - **Recent packets shown in the node drawer**, for both Meshtastic and MeshCore nodes. Opening a node now shows its last several packets alongside its existing metrics history.
@@ -174,9 +159,6 @@ First tagged release of the javastraat/meshpoint fork. Adds LoRaWAN sniffing, mu
 - **Installer sets up RTL-SDR support end to end** — driver conflicts, permissions, and the RTL-SDR library are now all handled automatically. Previously this all had to be done manually on every box, including working around a kernel driver that would otherwise claim the dongle before Meshpoint could use it.
 - **Installer builds redsea**, giving the FM listener RDS station/radio-text decoding. This is what lets the Radio tab show station names and scrolling text while tuned to FM.
 - **Installer sets up mDNS**, so a fresh box is reachable as `meshpoint.local` without knowing its IP. Previously an IP address was the only way to reach a brand-new box before it had a fixed address.
-- **Fixed: messages on a channel this box doesn't recognize used to silently blend into the main channel's history**, and briefly became invisible entirely partway through the fix. They now show up in their own "Unmapped" section, and replying to them was disabled until it could be done safely.
-- **Meshpoint can now reply correctly on a channel whose key it has under a different local name**, instead of refusing to send. Live-verified.
-- **Fixed: a 433 MHz Meshtastic USB stick could misroute channels**, both receiving and sending, due to confusing its own internal channel numbering with the real on-air channel identity. This meant a reply could go out on the wrong channel, or an incoming message could get filed under the wrong conversation entirely.
 - **Fixed a rare channel-hash mismatch** that could route messages to the wrong channel when config was reloaded in a different order. The inbound and outbound hash calculations could disagree about which hash belonged to which channel, depending on load order.
 - **Installer builds multimon-ng**, the decoder behind the POCSAG/pager tabs. It's built from source rather than an outdated package, since the project's older build system is no longer available in current Raspberry Pi OS repositories.
 - **Installer installs rtl_433**, a generic short-range sensor decoder (dashboard integration not yet built). It covers weather stations, tire-pressure sensors, and hundreds of other short-range devices, though there's no dedicated dashboard tab for it yet.
@@ -193,7 +175,6 @@ First tagged release of the javastraat/meshpoint fork. Adds LoRaWAN sniffing, mu
 - **Configuration → MeshCore can now change a companion's radio frequency/bandwidth/settings directly from the dashboard.** It offers the same list of official MeshCore region presets as the command-line tool, without needing to stop the whole service to apply a change.
 - **Fixed: a MeshCore companion whose command channel silently died could get stuck "connected" forever**, blocking every dashboard action against it until a manual unplug. Ongoing reception could mask the problem, since the health check skipped its own recovery step whenever there'd been recent activity.
 - **Fixed: MeshCore reconnect attempts could sometimes run twice at once**, causing extra radio resets. Two separate triggers could each start their own reconnect at the same time, both resetting the same physical connection.
-- **Opt-in publishing to the official Meshtastic map.** A new "Official map" toggle in Configuration → MQTT publishes this Meshpoint's own identity (name, approximate location, firmware, region, modem preset) as a public, unencrypted MQTT MapReport — separate from the existing packet-relay gateway, MQTT-only, no LoRa airtime used. Off by default; requires MQTT itself to be enabled. Interval (minimum 3600s, matching the Meshtastic minimum) and position precision (12–15 bits, default 14) are both configurable.
 
 #### CLI
 
@@ -224,7 +205,6 @@ First tagged release of the javastraat/meshpoint fork. Adds LoRaWAN sniffing, mu
 - **24-hour clock everywhere.** Packet feeds, panels, the node drawer, charts, and messaging all switched from 12-hour AM/PM display to a 24-hour format.
 - **24-hour clock, three more stragglers** — the packet detail popup and MQTT config timestamps were missed on the first pass; also fixed a repeater date that was locked to US formatting. These three spots had quietly slipped through the original sweep.
 - **Metric units by default** for new browsers (Celsius, kilometers); existing imperial choices are kept. This only affects browsers that haven't already chosen a unit preference.
-- **Unified Updates-page commit timeline.** The two separate "incoming commits" and "latest commits" lists on Settings → Updates are now one timeline: a connector rail marks each commit, unseen ones get a glowing "NEW" pill, and the header badge reads "N commits waiting" or "Up to date" at a glance. The Apply button now pulses gently whenever there's something ready to apply.
 
 #### Import and maintenance scripts
 
@@ -294,6 +274,50 @@ First tagged release of the javastraat/meshpoint fork. Adds LoRaWAN sniffing, mu
 
 - **Home Assistant cookbook**, for MQTT discovery and sensor wiring. It walks through setting up MQTT discovery so Meshpoint's sensors show up automatically in Home Assistant.
 - **Complete API endpoint reference.** A full route audit found the README's table only covered about half of the app's real routes; a new dedicated doc lists every route and what access level it needs.
+
+### v0.7.8 (July 2026)
+
+Our own `src/version.py` jumped straight from 0.7.7 to 0.7.9 and never cut a v0.7.8 tag, so this section didn't exist until now. It's added retroactively to keep the written history accurate: KMX415's fork ([`docs/CHANGELOG.md`](https://github.com/KMX415/meshpoint/blob/main/docs/CHANGELOG.md)) bundled this same functional scope under its own "v0.7.8 (July 2026)" release, and the section below is organized to match his grouping for easy cross-reference. Full audit trail in `memory/merge-todo.md`. This section is not shown by the dashboard's live release-notes preview, which matches the installed version exactly.
+
+#### MQTT and community map
+
+- **Opt-in publishing to the official Meshtastic map.** A new "Official map" toggle in Configuration → MQTT publishes this Meshpoint's own identity (name, approximate location, firmware, region, modem preset) as a public, unencrypted MQTT MapReport — separate from the existing packet-relay gateway, MQTT-only, no LoRa airtime used. Off by default; requires MQTT itself to be enabled. Interval (minimum 3600s, matching the Meshtastic minimum) and position precision (12–15 bits, default 14) are both configurable.
+
+#### Settings and Updates
+
+- **Release-notes preview grouped by CHANGELOG category.** The Updates page's release-notes preview groups bullets under their CHANGELOG "#### Category" headings instead of one flat list, so operators can scan a sprint by area before applying.
+- **Full release-notes modal on the Updates page.** A "Read full release notes" link opens the complete, untruncated CHANGELOG section for the selected channel, instead of just the trimmed preview.
+- **Unified Updates-page commit timeline.** The two separate "incoming commits" and "latest commits" lists on Settings → Updates are now one timeline: a connector rail marks each commit, unseen ones get a glowing "NEW" pill, and the header badge reads "N commits waiting" or "Up to date" at a glance. The Apply button now pulses gently whenever there's something ready to apply.
+
+#### Dashboard and storage
+
+- **Dashboard JS/CSS cache-busting after restart.** Static asset URLs now carry a per-restart cache-busting token, so applying an update no longer leaves open browser tabs on stale cached JS/CSS until a hard reload.
+- **Telemetry history is now auto-pruned**, closing the one database table that could grow without bound. A real deployment was found to grow its database by over 20 MB in just three days before this was fixed.
+- **Server-side telemetry chart downsampling.** Repeater Trends and node-drawer telemetry charts downsample into time buckets, bounded regardless of how much history exists — the newest buckets win once history exceeds the chart's limit.
+
+#### Auth and viewers
+
+- **Viewer role fully locked down server-side.** Every settings-changing action now requires admin; viewers get a clean "not allowed" message instead of it silently going through (or, previously, sometimes being silently accepted with no real effect).
+- **Channel secrets hidden from viewers.** Encryption keys are no longer sent to viewer sessions.
+- **Admin links stay in place for viewers.** Clicking an admin-only link no longer navigates away; a message explains admin access is needed.
+- **Blocked message sends now show a toast** instead of leaving a failed message in the chat. A viewer trying to send now sees a clear notice that admin access is required, rather than a message that silently fails to appear.
+- **Upstream's new broadcast-interval settings are now properly admin-gated.** These settings had no role check at all when they were first merged in, so a viewer could technically change them.
+
+#### Serial Meshtastic and messaging
+
+- **Multiple Meshtastic USB sticks** can now be configured at once too (e.g. one on 433 MHz, one on 868 MHz), also editable from Configuration. Also fixes a bug where packets from different sticks could get mixed up.
+- **Fixed: a serial Meshtastic USB stick would crash the whole capture pipeline**, and was silently dropping packets it couldn't decrypt. The stick's library always hands back a raw packet object rather than plain bytes, and packets it couldn't decrypt itself were being discarded instead of being handed to Meshpoint's own decoder.
+- **Fixed: serial Meshtastic packets the stick decrypted itself always showed as "Unknown" type.** They now decode and show their real content.
+- **Band tag on node cards.** Nodes now show a "433 MHz" / "868 MHz" chip so a multi-stick setup is easy to read at a glance.
+- **Serial Meshtastic sticks now report their real region/frequency/settings.** Previously every packet was stamped with a fake placeholder frequency and settings regardless of the stick's actual configuration. Also added a topbar badge showing each connected stick's status.
+- **Serial Meshtastic sticks no longer capture their own self-reports as noisy, confusing packets.** A cleanup script is available for old rows already affected.
+- **Chat replies now go out over whichever radio can actually reach the contact**, instead of always the "primary" one — fixes replies silently failing to arrive on a multi-radio box. A contact heard only on one companion's frequency physically can't receive a reply sent out on a different one.
+- **Fixed: a 433 MHz Meshtastic USB stick could misroute channels**, both receiving and sending, due to confusing its own internal channel numbering with the real on-air channel identity. This meant a reply could go out on the wrong channel, or an incoming message could get filed under the wrong conversation entirely.
+- **Meshpoint can now reply correctly on a channel whose key it has under a different local name**, instead of refusing to send. Live-verified.
+- **Fixed: messages on a channel this box doesn't recognize used to silently blend into the main channel's history**, and briefly became invisible entirely partway through the fix. They now show up in their own "Unmapped" section, and replying to them was disabled until it could be done safely.
+- **Clicking a node name in Messages now opens its node details**, for both direct messages and channel/broadcast messages. Direct-message sender names already worked this way; channel and broadcast messages needed a small backend fix first, since the server was resolving a sender's display name without keeping track of their actual node ID.
+- **Fixed a real data-integrity bug where MeshCore node names could cross-contaminate between different physical nodes.** A one-time cleanup script fixes already-affected data; new devices are unaffected going forward.
+
 ### v0.7.6 (June 2026)
 
 Meshtastic mesh participant release on `main` (merge `feat/v0.7.6`). Edge-only, pure Python, no concentrator recompile. **Upgrade:** Settings → Updates → **Stable**, or the full SSH block in `docs/COMMON-ERRORS.md` (`git fetch`, `checkout main`, `pull`, `scripts/install.sh`, `restart`). Required this release: new `cryptography` dependency for PKI and an updated `meshpoint.service` unit (RAK V2 reset fix). Pull-only upgrades can miss both. Witness-tested on RAK V2. Settings → Updates RC picker now points at **v0.7.7** on `feat/v0.7.7`.
