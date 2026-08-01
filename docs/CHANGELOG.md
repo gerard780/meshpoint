@@ -83,6 +83,7 @@ First tagged release of the javastraat/meshpoint fork. Adds LoRaWAN sniffing, mu
 - **Fixed: the topbar chip row didn't wrap on narrow/mobile screens**, so extra chips could run off-screen. A second MeshCore companion or Meshtastic stick's chip could end up completely unreachable on a small screen.
 - **Fixed: concentrator Meshtastic transmissions were invisible to real Meshtastic radios** — a wrong radio setting meant sent messages, replies, and adverts never actually reached the mesh, even though everything looked fine locally. The dashboard showed messages as sent successfully the whole time, masking the problem until it was checked against a real radio.
 - **Fixed a real regression caught by the test suite** after refactoring how companion names are stored and applied. The automated tests caught it before it ever reached a live deployment.
+- **Fixed: a blank second serial-device row could crash startup.** Saving the Meshtastic USB serial list with an empty "Device 2" row persisted `serial_port: null`, which auto-detects on start — colliding with whatever port Device 1 already had exclusively locked and crashing the pipeline. Blank rows among 2+ configured devices are now dropped on save instead of persisted as an ambiguous auto-detect entry (a single device with no port is still valid auto-detect).
 
 #### RTL-SDR web listener (Radio tab)
 
