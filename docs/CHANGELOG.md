@@ -224,6 +224,7 @@ First tagged release of the javastraat/meshpoint fork. Adds LoRaWAN sniffing, mu
 - **24-hour clock everywhere.** Packet feeds, panels, the node drawer, charts, and messaging all switched from 12-hour AM/PM display to a 24-hour format.
 - **24-hour clock, three more stragglers** — the packet detail popup and MQTT config timestamps were missed on the first pass; also fixed a repeater date that was locked to US formatting. These three spots had quietly slipped through the original sweep.
 - **Metric units by default** for new browsers (Celsius, kilometers); existing imperial choices are kept. This only affects browsers that haven't already chosen a unit preference.
+- **Unified Updates-page commit timeline.** The two separate "incoming commits" and "latest commits" lists on Settings → Updates are now one timeline: a connector rail marks each commit, unseen ones get a glowing "NEW" pill, and the header badge reads "N commits waiting" or "Up to date" at a glance. The Apply button now pulses gently whenever there's something ready to apply.
 
 #### Import and maintenance scripts
 

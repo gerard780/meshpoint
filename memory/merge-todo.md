@@ -45,16 +45,10 @@ Not yet individually compared (same file cluster, probably same story, needs a r
 - [ ] ❓ **`ab6a517`** Make channel message sender names clickable via `source_id`
 - [ ] ❓ **`872e42d`** Fix MeshCore name cross-contamination and sticky conversation titles
 
-## Updates page UX — probably have our own version, needs a look
+## Updates page UX
 
-We've touched `update_panel_controller.js` (12 commits since base), `release_notes_view.js` (2), `src/api/update/install_status.py` (7), `release_notes.py` (3) — so we likely built equivalent Updates-page UX independently, but his side adds standalone new files we don't have at all:
-
-- [ ] ❓ **`1fa053f`** Unify Updates commits into one NEW-marked timeline — new files `frontend/js/settings/update_commit_timeline_view.js`, `update_incoming_view.js`, `update_remote_commits_view.js`, `frontend/css/update_commits.css` (all missing on our side)
-- [ ] ❓ **`982411d`** Show latest origin commits on the Updates card
-- [ ] ❓ **`2566748`** List incoming commit subjects when Updates is behind origin
-- [ ] ❓ **`91cde6d`** Group release-notes preview under CHANGELOG category headings
-- [ ] ❓ **`a3210f4`** Add full release-notes modal — new `frontend/css/update_release_notes_modal.css`
-- [ ] ❓ **`95a79cb`** Fix awkward Updates status copy after a successful check
+- [x] ✅ **`91cde6d`, `2566748`, `982411d`, `a3210f4`** — all four are co-authored by us / "From javastraat/meshpoint" and confirmed already present on our side: `release_notes.py` already has `_CATEGORY_RE`/`category` (CHANGELOG category grouping), `install_status.py` already has `list_incoming_commits`/`list_branch_commits`, and `full_section` (release-notes modal) already exists. The deleted upstream files even carried "Credit: javastraat/meshpoint `<hash>`" headers confirming the origin. Nothing to port.
+- [x] ✅ **`1fa053f` + `95a79cb`** — **Ported this session.** His own genuine follow-up work (no co-author, not from us): merged our two separate "incoming commits" / "latest commits" lists into one unified visual timeline (`UpdateCommitTimelineView`, connector rail, glowing NEW pills, dynamic "N commits waiting"/"Up to date" badge, pulsing Apply-button cue when something's ready) plus a copy fix. Hand-integrated since our `update_panel_controller.js` never had the separate `UpdateIncomingView`/`UpdateRemoteCommitsView` classes upstream did (ours rendered inline) — added the new view class, new `frontend/css/update_commits.css`, removed the superseded inline CSS/JS, applied the "waiting on"/"Locked on with"/"not on origin" copy updates. `node --check` clean, CSS brace-balanced, changelog parser still 26 sections. Not yet live-tested visually (no browser in this dev environment).
 
 ## Low priority / infra
 
