@@ -145,6 +145,32 @@ class ConfigurationPanel {
                 card.mount(host);
                 this._cards.set('pocsag-serial', card);
             }
+        } else if (section === 'firmware') {
+            const host = document.getElementById('cfg-firmware-panel');
+            if (host) {
+                host.innerHTML = `
+                    <div class="cfg-section">
+                        <div data-firmware-meshtastic></div>
+                        <div data-firmware-meshcore></div>
+                        <div data-firmware-pocsag></div>
+                    </div>
+                `;
+                if (window.MeshtasticFirmwareConfigCard) {
+                    const meshtastic = new window.MeshtasticFirmwareConfigCard(api);
+                    meshtastic.mount(host.querySelector('[data-firmware-meshtastic]'));
+                    this._cards.set('firmware-meshtastic', meshtastic);
+                }
+                if (window.MeshcoreFirmwareConfigCard) {
+                    const meshcore = new window.MeshcoreFirmwareConfigCard(api);
+                    meshcore.mount(host.querySelector('[data-firmware-meshcore]'));
+                    this._cards.set('firmware-meshcore', meshcore);
+                }
+                if (window.PocsagFirmwareConfigCard) {
+                    const pocsag = new window.PocsagFirmwareConfigCard(api);
+                    pocsag.mount(host.querySelector('[data-firmware-pocsag]'));
+                    this._cards.set('firmware-pocsag', pocsag);
+                }
+            }
         } else if (section === 'transmit' && window.TransmitConfigCard) {
             const host = document.getElementById('cfg-transmit-panel');
             if (host) {
@@ -264,15 +290,19 @@ class ConfigurationPanel {
         try {
             const res = await fetch(url, init);
             if (!res.ok) {
-                if (!isGet) {
-                    const err = await res.json().catch(() => ({}));
-                    this._toast(`Error: ${err.detail || res.status}`);
-                }
+                // Toast on GET failures too (used to be save-only) -- a
+                // failed read used to leave whatever empty/default state
+                // the caller started with, no visible sign anything went
+                // wrong (e.g. the Firmware page's Version/Board dropdowns
+                // silently staying empty when GitHub rate-limits the
+                // Pi's IP, with the real error only visible in DevTools).
+                const err = await res.json().catch(() => ({}));
+                this._toast(`${isGet ? 'Error' : 'Save failed'}: ${err.detail || res.status}`);
                 return null;
             }
             return await res.json();
         } catch (e) {
-            if (!isGet) this._toast(`Save failed: ${e.message}`);
+            this._toast(`${isGet ? 'Error' : 'Save failed'}: ${e.message}`);
             return null;
         }
     }

@@ -220,7 +220,10 @@ class NodeMetricsChart {
 
         this._addSeries(out, 'Battery', '#22c55e', 'y', telem, (t) => {
             const v = t.battery_level;
-            return v != null && v > 0 ? v : null;
+            // 101 is Meshtastic's "externally powered, no battery"
+            // sentinel, not a real reading -- exclude it from the chart
+            // so a powered node doesn't draw a spike above the 100% axis.
+            return v != null && v > 0 && v <= 100 ? v : null;
         }, false);
         this._addSeries(out, 'Voltage', '#eab308', 'y1', telem, (t) => t.voltage, false);
         this._addSeries(out, 'ChUtil', '#a855f7', 'y', telem, (t) => t.channel_utilization, false);

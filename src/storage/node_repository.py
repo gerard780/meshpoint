@@ -130,11 +130,19 @@ class NodeRepository:
         row = await self._db.fetch_one("SELECT COUNT(*) as cnt FROM nodes")
         return row["cnt"] if row else 0
 
-    async def get_active_count(self, hours: int = 24) -> int:
+    async def get_active_count(
+        self, hours: int = 24, protocol: Optional[str] = None
+    ) -> int:
         cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
-        row = await self._db.fetch_one(
-            "SELECT COUNT(*) as cnt FROM nodes WHERE last_heard >= ?", (cutoff,)
-        )
+        if protocol:
+            row = await self._db.fetch_one(
+                "SELECT COUNT(*) as cnt FROM nodes WHERE last_heard >= ? AND protocol = ?",
+                (cutoff, protocol),
+            )
+        else:
+            row = await self._db.fetch_one(
+                "SELECT COUNT(*) as cnt FROM nodes WHERE last_heard >= ?", (cutoff,)
+            )
         return row["cnt"] if row else 0
 
     async def get_network_totals(self) -> dict:

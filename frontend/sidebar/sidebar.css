@@ -116,33 +116,27 @@
 
 /* Visual sizing of the brand mark inside the frame.
  *
- * The shipped PNG has roughly 25-30% transparent padding baked in
- * around the actual mark. To make the mark dominate the frame
- * instead of floating inside a too-large square, we render the
- * image element 1.5x the frame size and clip-path it back down
- * to frame dimensions. This effectively crops into the PNG's
- * internal whitespace so the mark itself fills the visible area.
- *
- * Geometry: 84x84 image, clip-path inset 14px on each side,
- * leaving a 56x56 visible region matching the frame. Adjust the
- * inset down if a tighter PNG asset is shipped later (smaller
- * crop = more visible padding); adjust up to crop deeper.
- *
- * The clip-path is relative to the image's own coordinate space,
- * so the frame's hover scale composes cleanly without warping
- * the crop.
+ * meshpoint-logo.png used to ship with ~25-30% transparent padding
+ * baked in around the actual mark (an exported icon-preview mockup,
+ * not full-bleed artwork), which this rule used to compensate for by
+ * rendering the image 1.5x the frame size and clip-path-ing 14px off
+ * each edge to "zoom into" that built-in whitespace. The asset was
+ * redone to fill its canvas edge to edge (see docs/CHANGELOG.md, PWA
+ * icon fix), so that compensation is gone too -- rendering at the
+ * frame's own 56x56 with no clip now shows the mark correctly; the
+ * old 84x84 + inset(14px) combination was cropping into the actual
+ * logo (cutting off the "Meshpoint" wordmark) once the padding it was
+ * built around no longer existed.
  */
 .sidebar__logo {
     position: relative;
     z-index: 2;
-    width: 84px;
-    height: 84px;
+    width: 56px;
+    height: 56px;
     flex-shrink: 0;
     border-radius: 14px;
     display: block;
-    clip-path: inset(14px round 14px);
     filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.5));
-    transition: clip-path var(--motion-fast) var(--ease-out-expo);
 }
 
 /* Animated accent ring sitting just outside the logo. Kept low

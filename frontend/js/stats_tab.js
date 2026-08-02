@@ -789,6 +789,11 @@ class StatsTab {
 
         if (this._charts[canvasId]) {
             const chart = this._charts[canvasId];
+            // centerLabel was accepted here but never actually used on the
+            // update path -- _updateQuality's "NN dBm" center text (unlike
+            // _renderDoughnut's charts, which store/redraw it the same way)
+            // was silently dropped on every refresh after the first render.
+            if (centerLabel != null) chart._meshCenterText = centerLabel;
             chart.data = data;
             chart.update('none');
             return;
@@ -806,7 +811,32 @@ class StatsTab {
         const opts = { ...baseOpts, ...(extraOpts || {}) };
         const plugins = extraPlugins || [];
 
+        // Same center-text-drawing plugin _renderDoughnut() already has for
+        // its two donuts -- _renderChart() accepted a centerLabel param but
+        // never actually drew it anywhere, so "Avg Signal Quality" (the one
+        // caller that passes one) rendered as a bare ring with no reading.
+        if (centerLabel != null) {
+            plugins.push({
+                id: `center-${canvasId}`,
+                afterDraw(chart) {
+                    if (chart._meshCenterText == null) return;
+                    const { ctx, chartArea } = chart;
+                    if (!chartArea) return;
+                    const cx = (chartArea.left + chartArea.right) / 2;
+                    const cy = (chartArea.top + chartArea.bottom) / 2;
+                    ctx.save();
+                    ctx.font = 'bold 16px "JetBrains Mono", monospace';
+                    ctx.fillStyle = '#f1f5f9';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(String(chart._meshCenterText), cx, cy);
+                    ctx.restore();
+                },
+            });
+        }
+
         this._charts[canvasId] = new Chart(canvas, { type, data, options: opts, plugins });
+        if (centerLabel != null) this._charts[canvasId]._meshCenterText = centerLabel;
     }
 }
 

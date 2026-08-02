@@ -298,7 +298,13 @@ class NodeDrawer {
         const air = n.latest_air_util;
 
         if (v != null) rows.push(['Voltage', `${v.toFixed(2)} V`]);
-        if (b != null && b > 0) rows.push(['Battery', `${b}%`]);
+        if (b === 101) {
+            // Meshtastic firmware convention: 101 = externally powered,
+            // no battery attached (not a real percentage).
+            rows.push(['Battery', '\u{1F50C} Powered']);
+        } else if (b != null && b > 0) {
+            rows.push(['Battery', `${b}%`]);
+        }
         if (ch != null) rows.push(['Channel Util', `${ch.toFixed(1)}%`]);
         if (air != null) rows.push(['Air Util TX', `${air.toFixed(1)}%`]);
 

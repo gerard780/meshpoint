@@ -161,6 +161,35 @@ class TestFarthestDirect(unittest.TestCase):
         report = self.reporter.build_report()
         self.assertEqual(report["farthest_direct"]["node_id"], "far")
 
+    def test_ignores_null_island(self):
+        """A node with no GPS fix reports (0, 0), not a missing value --
+        indistinguishable from a real position at Null Island unless
+        explicitly rejected, and would otherwise compute as a bogus
+        multi-thousand-km "farthest" record."""
+        self.reporter.record_farthest_direct(
+            source_id="no-fix",
+            rssi=-90.0,
+            device_lat=52.37, device_lon=4.90,
+            node_lat=0.0, node_lon=0.0,
+            hop_start=3, hop_limit=3,
+        )
+        report = self.reporter.build_report()
+        self.assertNotIn("farthest_direct", report)
+
+    def test_ignores_implausibly_far_node(self):
+        """Beyond the 3600 km sanity cap even with a non-(0,0) position --
+        catches other implausible-position cases the Null Island check
+        alone wouldn't."""
+        self.reporter.record_farthest_direct(
+            source_id="impossible",
+            rssi=-90.0,
+            device_lat=52.37, device_lon=4.90,
+            node_lat=-52.37, node_lon=-175.10,
+            hop_start=3, hop_limit=3,
+        )
+        report = self.reporter.build_report()
+        self.assertNotIn("farthest_direct", report)
+
 
 class TestNodeRoster(unittest.TestCase):
     def setUp(self):

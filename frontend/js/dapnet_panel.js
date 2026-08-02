@@ -64,6 +64,16 @@ class DapnetPanel {
         this._liveOnlyIds.add(packet.packet_id);
         this._packets.unshift({
             packet_id: packet.packet_id,
+            // protocol/source_id kept (not just flattened out to capcode/
+            // function/text) so a row clicked while still live-only --
+            // arrived over the WS feed, not yet caught up by the next
+            // _loadPackets() poll -- still normalizes correctly in
+            // PacketDetailModal (it keys off packet.protocol === 'dapnet'
+            // to know to reshape this flattened row into the nested
+            // decoded_payload shape every other protocol's rows already
+            // have); without it the popup silently showed no page text.
+            protocol: packet.protocol,
+            source_id: packet.source_id,
             capcode: packet.destination_id,
             packet_type: packet.packet_type,
             capture_source: packet.capture_source,
@@ -209,6 +219,41 @@ class DapnetPanel {
                 this._renderCapcodes();
             });
         }
+
+        const pktTbody = document.getElementById('dp-packet-tbody');
+        if (pktTbody) {
+            pktTbody.addEventListener('click', (e) => {
+                const tr = e.target.closest('tr[data-pkt]');
+                if (!tr || !window.PacketDetailModal) return;
+                const pkt = (this._packets || [])[Number(tr.dataset.pkt)];
+                if (!pkt) return;
+                window.PacketDetailModal.show(pkt, { selectedRow: tr });
+            });
+        }
+
+        const capcodeTbody = document.getElementById('dp-capcode-tbody');
+        if (capcodeTbody) {
+            capcodeTbody.addEventListener('click', (e) => {
+                const tr = e.target.closest('tr[data-capcode]');
+                if (!tr || !window.CapcodeHistoryModal) return;
+                this._openCapcodeHistory(tr.dataset.capcode);
+            });
+        }
+    }
+
+    async _openCapcodeHistory(capcode) {
+        window.CapcodeHistoryModal.show(capcode, null);
+        try {
+            const r = await fetch(`/api/dapnet/packets?capcode=${encodeURIComponent(capcode)}&limit=200`);
+            if (!r.ok) return;
+            const pages = await r.json();
+            // Only redraw if the modal is still open on this same capcode --
+            // the fetch could resolve after the operator already closed it
+            // or clicked a different row.
+            if (window.CapcodeHistoryModal.isShowing(capcode)) {
+                window.CapcodeHistoryModal.show(capcode, pages);
+            }
+        } catch (_) {}
     }
 
     _setTab(tab) {
@@ -302,7 +347,7 @@ class DapnetPanel {
         if (empty) empty.style.display = 'none';
 
         tbody.innerHTML = capcodes.map((c) => `
-            <tr class="lw-device-row">
+            <tr class="lw-device-row" data-capcode="${this._esc(String(c.capcode ?? ''))}">
                 <td class="lw-time">${this._fmtTime(c.last_seen)}</td>
                 <td class="lw-time">${this._fmtTime(c.first_seen)}</td>
                 <td class="lw-id">${this._esc(String(c.capcode ?? '--'))}</td>
@@ -346,8 +391,8 @@ class DapnetPanel {
         }
         if (empty) empty.style.display = 'none';
 
-        tbody.innerHTML = packets.map((p) => `
-            <tr class="lw-pkt-row">
+        tbody.innerHTML = packets.map((p, i) => `
+            <tr class="lw-pkt-row" data-pkt="${i}">
                 <td class="lw-time">${this._fmtTime(p.timestamp)}</td>
                 <td>${this._fmtType(p.packet_type)}</td>
                 <td class="lw-id">${this._esc(String(p.capcode ?? '--'))}</td>

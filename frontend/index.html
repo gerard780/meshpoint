@@ -6,6 +6,8 @@
     <title>Meshpoint Dashboard</title>
     <link rel="icon" type="image/png" href="/assets/favicon.png">
     <link rel="apple-touch-icon" href="/assets/meshpoint-logo.png">
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#0a0e17">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
@@ -38,6 +40,7 @@
     <link rel="stylesheet" href="css/repeaters.css" />
     <link rel="stylesheet" href="css/topology.css" />
     <link rel="stylesheet" href="css/settings.css" />
+    <link rel="stylesheet" href="css/update_commits.css" />
     <link rel="stylesheet" href="css/configuration.css" />
     <link rel="stylesheet" href="css/lorawan.css" />
     <link rel="stylesheet" href="css/listener.css" />
@@ -291,6 +294,7 @@
                             <li class="sidebar__subitem"><a href="#/configuration/meshcore" class="sidebar__link" data-route="configuration/meshcore"><span class="sidebar__label">MeshCore</span></a></li>
                             <li class="sidebar__subitem"><a href="#/configuration/serial" class="sidebar__link" data-route="configuration/serial"><span class="sidebar__label">Serial</span></a></li>
                             <li class="sidebar__subitem"><a href="#/configuration/pocsag-serial" class="sidebar__link" data-route="configuration/pocsag-serial"><span class="sidebar__label">POCSAG</span></a></li>
+                            <li class="sidebar__subitem"><a href="#/configuration/firmware" class="sidebar__link" data-route="configuration/firmware"><span class="sidebar__label">Firmware</span></a></li>
                             <li class="sidebar__group-header" aria-hidden="true">
                                 <span class="sidebar__group-header-label">Network</span>
                             </li>
@@ -691,6 +695,7 @@
             <section class="section" data-section="configuration/meshcore" style="display:none"><div id="cfg-meshcore-panel" class="section__placeholder"><h2>Configuration · MeshCore</h2><p>Skeleton; companion channel keys + Send Advert.</p></div></section>
             <section class="section" data-section="configuration/serial" style="display:none"><div id="cfg-serial-panel" class="section__placeholder"><h2>Configuration · Serial</h2><p>Skeleton; Meshtastic USB device list.</p></div></section>
             <section class="section" data-section="configuration/pocsag-serial" style="display:none"><div id="cfg-pocsag-serial-panel" class="section__placeholder"><h2>Configuration · POCSAG</h2><p>Skeleton; POCSAG companion USB device list.</p></div></section>
+            <section class="section" data-section="configuration/firmware" style="display:none"><div id="cfg-firmware-panel" class="section__placeholder"><h2>Configuration · Firmware</h2><p>Skeleton; flash-a-spare-board cards.</p></div></section>
             <section class="section" data-section="configuration/transmit" style="display:none"><div id="cfg-transmit-panel" class="section__placeholder"><h2>Configuration · Transmit</h2><p>Skeleton; TX power + duty cycle + relay.</p></div></section>
             <section class="section" data-section="configuration/mqtt" style="display:none"><div id="cfg-mqtt-panel" class="section__placeholder"><h2>Configuration · MQTT</h2><p>Loading…</p></div></section>
             <section class="section" data-section="configuration/gps" style="display:none"><div id="cfg-gps-panel" class="section__placeholder"><h2>Configuration · GPS</h2><p>Loading…</p></div></section>
@@ -733,17 +738,20 @@
                         <p class="update-sync-status" data-update-sync-hint>
                             Select a channel, then check how far behind GitHub you are.
                         </p>
-                        <ul class="update-incoming" data-update-incoming hidden></ul>
+                        <div class="update-history" data-update-commits hidden>
+                            <div class="update-history__head">
+                                <p class="update-history__title" data-update-commits-title>On this channel</p>
+                                <span class="update-history__badge" data-update-commits-badge hidden></span>
+                            </div>
+                            <ul class="update-history__list" data-update-commits-list></ul>
+                            <p class="update-history__foot" data-update-commits-foot hidden></p>
+                        </div>
                         <div class="update-card__actions">
                             <button class="terminal-button terminal-button--ghost" type="button" data-update-check>Check for updates</button>
                             <button class="terminal-button terminal-button--primary" type="button" data-update-apply>Apply update</button>
                             <button class="terminal-button terminal-button--ghost" type="button" data-update-rollback disabled>Roll back last apply</button>
                         </div>
                         <p class="update-rollback-hint" data-update-rollback-hint></p>
-                        <div class="update-history" data-update-commits hidden>
-                            <p class="update-history__title">Latest commits</p>
-                            <ul class="update-history__list" data-update-commits-list></ul>
-                        </div>
                         <p class="update-status" data-update-status aria-live="polite"></p>
                     </article>
                     <article class="update-card">
@@ -955,6 +963,35 @@
         <div id="node-drawer" class="nd-drawer"></div>
     </div>
 
+    <script>
+        // Dashboard is the only [data-section] shipped visible by default
+        // (fast first paint) -- every other route stays display:none until
+        // sidebar/sidebar_controller.js's _renderActive() runs, which only
+        // happens after every <script> below has loaded and app.js
+        // constructs the router. On a reload landing anywhere else (e.g.
+        // #/settings/updates), that gap showed as a flash of Dashboard's
+        // stat cards before "jumping" to the real page. This runs
+        // immediately, before any of those scripts load, and does the same
+        // match the router would -- so the correct section is what
+        // actually paints first. Comparing dataset.section directly (not a
+        // querySelector built from the hash) sidesteps ever needing to
+        // escape/validate the hash as a selector.
+        (function () {
+            try {
+                var route = (location.hash || '').replace(/^#\/?/, '').trim() || 'dashboard';
+                var sections = document.querySelectorAll('[data-section]');
+                var matched = false;
+                sections.forEach(function (el) {
+                    if (el.dataset.section === route) matched = true;
+                });
+                if (!matched) return;
+                sections.forEach(function (el) {
+                    el.style.display = el.dataset.section === route ? '' : 'none';
+                });
+            } catch (e) {}
+        })();
+    </script>
+
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
     <script src="js/websocket_client.js"></script>
@@ -969,6 +1006,7 @@
     <script src="js/node_drawer.js"></script>
     <script src="js/packet_detail_modal.js"></script>
     <script src="js/neighbours_modal.js"></script>
+    <script src="js/capcode_history_modal.js"></script>
     <script src="js/simple_packet_feed.js"></script>
     <script src="js/messaging_contacts.js"></script>
     <script src="js/messaging_chat.js"></script>
@@ -996,6 +1034,7 @@
     <script src="js/settings/update_progress_view.js"></script>
     <script src="js/settings/update_stream_client.js"></script>
     <script src="js/settings/release_notes_view.js"></script>
+    <script src="js/settings/update_commit_timeline_view.js"></script>
     <script src="js/settings/update_panel_controller.js"></script>
     <script src="js/settings/meshpoint_display_form.js"></script>
     <script src="js/settings/backup_restore_card.js"></script>
@@ -1013,6 +1052,9 @@
     <script src="js/configuration/meshcore_card.js"></script>
     <script src="js/configuration/serial_card.js"></script>
     <script src="js/configuration/pocsag_serial_card.js"></script>
+    <script src="js/configuration/meshcore_firmware_card.js"></script>
+    <script src="js/configuration/meshtastic_firmware_card.js"></script>
+    <script src="js/configuration/pocsag_firmware_card.js"></script>
     <script src="js/configuration/repeater_poll_card.js"></script>
     <script src="js/configuration/metrics_card.js"></script>
     <script src="js/configuration/transmit_card.js"></script>

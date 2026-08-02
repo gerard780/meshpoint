@@ -1,19 +1,19 @@
 /**
  * Configuration → MeshCore card.
  *
- * Renders three cards: "USB capture sources" (one row per configured
+ * Renders two cards: "USB capture sources" (one row per configured
  * companion, each with its own live radio/firmware readouts AND its own
  * editable name/advert controls -- mirrors SerialConfigCard's per-device
  * layout, since every companion has an independent connection and
- * identity), "MeshCore Companion" (connection status plus the shared
+ * identity) and "MeshCore Companion" (connection status plus the shared
  * channel-key table, since MeshCore channels are mesh-wide config synced
- * only through the primary/TX-bound companion, not per-device), and
- * "MeshCore firmware" (drives src/api/routes/meshcore_firmware_routes.py
- * -- downloads official MeshCore companion releases and flashes a spare
- * board with esptool, no compiling, mirroring SerialConfigCard's own
- * "Meshtastic firmware" card exactly: curated board pulldown, device
- * picker only shown with 2+ configured companions, confirm-modal-gated
- * destructive flash, NDJSON-streamed output).
+ * only through the primary/TX-bound companion, not per-device).
+ *
+ * The "MeshCore firmware" flash card used to live here too; it moved to
+ * the standalone Configuration → Firmware page (frontend/js/configuration/
+ * meshcore_firmware_card.js) so flashing a spare board reads as its own
+ * action instead of being buried inside this specific protocol's settings
+ * page.
  */
 
 class MeshcoreConfigCard {
@@ -24,6 +24,36 @@ class MeshcoreConfigCard {
     }
 
     _MAX_COMPANIONS = 4;
+
+    /** Mirrors REGION_PRESETS in src/cli/meshcore_radio_config.py key-for-
+     * key (values/labels transcribed from the official MeshCore client's
+     * own "Select Radio Settings" community preset picker) -- keep the
+     * two lists in sync if that table ever changes. Sent to the backend
+     * as a preset KEY (PUT /api/config/meshcore/companion-radio), which
+     * resolves the actual freq/bw/sf/cr server-side -- this list is only
+     * for display/selection, not the source of truth for the numbers. */
+    static _RADIO_PRESETS = [
+        { value: 'AUSTRALIA', label: 'Australia (915.800 MHz / BW250 / SF10 / CR5)' },
+        { value: 'AUSTRALIA_NARROW', label: 'Australia (Narrow) (916.575 MHz / BW62.5 / SF7 / CR8)' },
+        { value: 'AUSTRALIA_MID', label: 'Australia (Mid) (915.075 MHz / BW125 / SF9 / CR5)' },
+        { value: 'AUSTRALIA_SA_WA', label: 'Australia: SA, WA (923.125 MHz / BW62.5 / SF8 / CR8)' },
+        { value: 'AUSTRALIA_QLD', label: 'Australia: QLD (923.125 MHz / BW62.5 / SF8 / CR5)' },
+        { value: 'BRAZIL', label: 'Brazil (923.125 MHz / BW62.5 / SF8 / CR8)' },
+        { value: 'CZECH_NARROW', label: 'Czech Republic (Narrow) (869.432 MHz / BW62.5 / SF7 / CR5)' },
+        { value: 'EU_433_LONG_RANGE', label: 'EU 433MHz (Long Range) (433.650 MHz / BW250 / SF11 / CR5)' },
+        { value: 'EU_433_NARROW', label: 'EU 433MHz (Narrow) (433.650 MHz / BW62.5 / SF8 / CR8)' },
+        { value: 'EU_UK_NARROW', label: 'EU/UK (Narrow) (869.618 MHz / BW62.5 / SF8 / CR8)' },
+        { value: 'EU_UK_DEPRECATED', label: 'EU/UK (Deprecated) (869.525 MHz / BW250 / SF11 / CR5)' },
+        { value: 'NETHERLANDS', label: 'Netherlands (869.618 MHz / BW62.5 / SF7 / CR5)' },
+        { value: 'NEW_ZEALAND', label: 'New Zealand (917.375 MHz / BW250 / SF11 / CR5)' },
+        { value: 'NEW_ZEALAND_NARROW', label: 'New Zealand (Narrow) (917.375 MHz / BW62.5 / SF7 / CR5)' },
+        { value: 'PORTUGAL_433', label: 'Portugal 433 (433.375 MHz / BW62.5 / SF9 / CR6)' },
+        { value: 'PORTUGAL_868', label: 'Portugal 868 (869.618 MHz / BW62.5 / SF7 / CR6)' },
+        { value: 'SWITZERLAND', label: 'Switzerland (869.618 MHz / BW62.5 / SF8 / CR8)' },
+        { value: 'USA_CANADA', label: 'USA/Canada (Recommended) (910.525 MHz / BW62.5 / SF7 / CR5)' },
+        { value: 'VIETNAM_NARROW', label: 'Vietnam (Narrow) (920.250 MHz / BW62.5 / SF8 / CR5)' },
+        { value: 'VIETNAM_DEPRECATED', label: 'Vietnam (Deprecated) (920.250 MHz / BW250 / SF11 / CR5)' },
+    ];
 
     mount(root) {
         this._root = root;
@@ -71,38 +101,6 @@ class MeshcoreConfigCard {
                     <div data-mc-body></div>
                     <p class="cfg-status" data-mc-status aria-live="polite"></p>
                 </article>
-
-                <article class="cfg-card">
-                    <header class="cfg-card__head">
-                        <h3 class="cfg-card__title">MeshCore firmware</h3>
-                        <p class="cfg-card__hint">
-                            Flash a spare board with official MeshCore companion firmware
-                            straight from this dashboard -- downloads the latest release and
-                            writes it with esptool, no compiling needed. Erases the ENTIRE
-                            flash first, so this also works on a board currently running
-                            something else entirely (e.g. Meshtastic or extra/pocsag_companion).
-                        </p>
-                    </header>
-                    <label class="cfg-field cfg-field--narrow cfg-firmware-board-field">
-                        <span class="cfg-field__label">Board</span>
-                        <select class="cfg-field__input" data-mc-firmware-board></select>
-                    </label>
-                    <label class="cfg-field cfg-field--narrow" data-mc-firmware-device-wrap hidden>
-                        <span class="cfg-field__label">Device to flash</span>
-                        <select class="cfg-field__input" data-mc-firmware-device></select>
-                    </label>
-                    <div class="cfg-card__actions">
-                        <button class="terminal-button terminal-button--primary"
-                                type="button" data-mc-firmware-flash>
-                            Flash
-                        </button>
-                        <button class="terminal-button" type="button" data-mc-firmware-toggle-output>
-                            Show output
-                        </button>
-                    </div>
-                    <pre class="cfg-firmware-output" data-mc-firmware-output hidden></pre>
-                    <p class="cfg-status" data-mc-firmware-status aria-live="polite"></p>
-                </article>
             </div>
         `;
         this._body = this._root.querySelector('[data-mc-body]');
@@ -115,13 +113,6 @@ class MeshcoreConfigCard {
             .addEventListener('click', () => this._saveCompanions());
         this._root.querySelector('[data-mc-rescan-usb]')
             .addEventListener('click', (e) => this._rescanUsb(e.currentTarget));
-
-        this._root.querySelector('[data-mc-firmware-flash]')
-            .addEventListener('click', () => this._flashMeshcoreFirmware());
-        this._root.querySelector('[data-mc-firmware-toggle-output]')
-            .addEventListener('click', (e) => this._toggleMcFirmwareOutput(e.currentTarget));
-
-        this._loadMcFirmwareTargets();
     }
 
     /** Manual re-scan for the port-picker datalist -- lets a user unplug
@@ -138,134 +129,6 @@ class MeshcoreConfigCard {
             button.textContent = original;
             button.disabled = false;
         }
-    }
-
-    /** Board pulldown options for the MeshCore firmware card, from the
-     * curated list GET .../targets returns (see
-     * meshcore_firmware_routes.py's _CURATED_BOARDS) -- not auto-
-     * discovered from anything in this repo, since MeshCore firmware
-     * isn't built from anything here either. */
-    async _loadMcFirmwareTargets() {
-        const select = this._root.querySelector('[data-mc-firmware-board]');
-        if (!select) return;
-        const result = await this._api.get('/api/config/meshcore/firmware/targets');
-        const boards = (result && Array.isArray(result.boards)) ? result.boards : [];
-        select.innerHTML = boards.map((b) => (
-            `<option value="${this._esc(b.board)}">${this._esc(b.label)}</option>`
-        )).join('');
-    }
-
-    /** Populates the "Device to flash" pulldown from currently configured
-     * MeshCore USB companions -- only shown when there's more than one,
-     * same pattern as the POCSAG/Serial firmware cards: nothing to
-     * choose between otherwise. Keyed on `label`, resolved server-side
-     * to a port -- never a raw path trusted from the browser. */
-    _renderMcFirmwareDevicePicker(companions) {
-        const wrap = this._root.querySelector('[data-mc-firmware-device-wrap]');
-        const select = this._root.querySelector('[data-mc-firmware-device]');
-        const flashBtn = this._root.querySelector('[data-mc-firmware-flash]');
-        if (!wrap || !select || !flashBtn) return;
-
-        const configured = companions.filter((c) => c.serial_port);
-        this._mcFirmwareCompanions = configured;
-
-        if (configured.length === 0) {
-            wrap.hidden = true;
-            flashBtn.disabled = true;
-            flashBtn.title = 'No configured MeshCore companion with a serial port to flash.';
-            return;
-        }
-
-        flashBtn.disabled = false;
-        flashBtn.title = '';
-        wrap.hidden = configured.length <= 1;
-        select.innerHTML = configured.map((c) => {
-            const name = c.label || c.serial_port;
-            return `<option value="${this._esc(c.label || '')}">${this._esc(name)}</option>`;
-        }).join('');
-    }
-
-    _toggleMcFirmwareOutput(button) {
-        const pre = this._root.querySelector('[data-mc-firmware-output]');
-        if (!pre) return;
-        pre.hidden = !pre.hidden;
-        button.textContent = pre.hidden ? 'Show output' : 'Hide output';
-    }
-
-    _appendMcFirmwareOutput(text) {
-        const pre = this._root.querySelector('[data-mc-firmware-output]');
-        if (!pre || !text) return;
-        pre.textContent = pre.textContent ? `${pre.textContent}\n${text}` : text;
-        pre.scrollTop = pre.scrollHeight;
-    }
-
-    async _flashMeshcoreFirmware() {
-        const boardSelect = this._root.querySelector('[data-mc-firmware-board]');
-        const deviceSelect = this._root.querySelector('[data-mc-firmware-device]');
-        const board = boardSelect?.value;
-        if (!board) return;
-        const boardLabel = boardSelect.options[boardSelect.selectedIndex]?.text || board;
-
-        const companions = this._mcFirmwareCompanions || [];
-        const label = companions.length > 1
-            ? (deviceSelect?.value ?? '')
-            : (companions[0]?.label || '');
-        const companion = companions.find((c) => (c.label || '') === label) || companions[0];
-        if (!companion) return;
-
-        const ok = await window.confirmModal({
-            label: 'Flash MeshCore firmware',
-            description: `Erase the ENTIRE flash on "${companion.label || companion.serial_port}" `
-                + `(${companion.serial_port}) and write official MeshCore companion firmware `
-                + `for ${boardLabel}? This replaces whatever is currently on the board -- `
-                + 'not reversible from here.',
-        });
-        if (!ok) return;
-
-        const status = this._root.querySelector('[data-mc-firmware-status]');
-        const flashBtn = this._root.querySelector('[data-mc-firmware-flash]');
-        const outputPre = this._root.querySelector('[data-mc-firmware-output]');
-
-        flashBtn.disabled = true;
-        status.dataset.kind = 'pending';
-        status.textContent = `Flashing ${companion.label || companion.serial_port}…`;
-        if (outputPre) outputPre.textContent = '';
-        this._appendMcFirmwareOutput(`# Flashing ${boardLabel} onto ${companion.serial_port}…`);
-
-        let finalResult = null;
-        try {
-            finalResult = await window.UpdateStreamClient.postNdjson(
-                '/api/config/meshcore/firmware/flash/stream',
-                { board, label },
-                (event) => {
-                    if (event.type === 'started' && Array.isArray(event.cmd)) {
-                        this._appendMcFirmwareOutput(`$ ${event.cmd.join(' ')}`);
-                    } else if (event.type === 'line') {
-                        this._appendMcFirmwareOutput(event.text);
-                    }
-                },
-            );
-        } catch (err) {
-            status.dataset.kind = 'error';
-            status.textContent = `Request failed: ${err.message || err}`;
-            this._appendMcFirmwareOutput(`! ${err.message || err}`);
-            flashBtn.disabled = false;
-            return;
-        }
-
-        const success = !!(finalResult && finalResult.success);
-        status.dataset.kind = success ? 'success' : 'error';
-        status.textContent = success
-            ? 'Flashed.'
-            : `Failed (exit code ${finalResult ? finalResult.returncode : '?'}). See output below.`;
-        if (!success && outputPre) outputPre.hidden = false;
-        const toggleBtn = this._root.querySelector('[data-mc-firmware-toggle-output]');
-        if (toggleBtn && outputPre) {
-            toggleBtn.textContent = outputPre.hidden ? 'Show output' : 'Hide output';
-        }
-
-        flashBtn.disabled = false;
-        if (success) await this._api.refresh();
     }
 
     render(config) {
@@ -289,7 +152,6 @@ class MeshcoreConfigCard {
         const list = companions.length > 0 ? companions : [{ label: '', serial_port: '', baud_rate: 115200, auto_detect: true }];
         list.forEach((c) => this._addCompanionRow(c));
         this._syncAddBtn();
-        this._renderMcFirmwareDevicePicker(companions);
 
         if (!mc.connected) {
             this._renderOffline(config);
@@ -444,6 +306,7 @@ class MeshcoreConfigCard {
             </label>
             ${this._companionIdentityHtml(data, live)}
             ${this._companionReadoutsHtml(live)}
+            ${this._radioSettingsHtml(live)}
         `;
 
         div.querySelector('.cfg-companion__remove').addEventListener('click', () => {
@@ -463,6 +326,13 @@ class MeshcoreConfigCard {
         if (saveNameBtn) {
             saveNameBtn.addEventListener('click', () => {
                 this._saveCompanionName(div, data.label || '');
+            });
+        }
+
+        const saveRadioBtn = div.querySelector('[data-companion-radio-save]');
+        if (saveRadioBtn) {
+            saveRadioBtn.addEventListener('click', () => {
+                this._saveCompanionRadio(div, data.label || '');
             });
         }
 
@@ -520,6 +390,90 @@ class MeshcoreConfigCard {
                 </div>
             </div>
         `;
+    }
+
+    /** Radio frequency/BW/SF/CR preset picker, same nested `.cfg-card`
+     * layout as Configuration -> Serial's "Modem settings" block
+     * (select + Set button + status line inside a `.cfg-form`) --
+     * matches that page's look intentionally, not a coincidence.
+     * Unlike Serial's Region (which only needs a name -- the modem
+     * preset is a second, separate control there), MeshCore bundles
+     * freq/bw/sf/cr into one preset key, so this is a single select.
+     * Applying it reboots the companion (see the backend route's own
+     * docstring) -- the hint below makes that explicit so a "Not
+     * connected" readout right after saving doesn't read as a bug. */
+    _radioSettingsHtml(live) {
+        if (!live || !live.connected) return '';
+        const radio = live.radio || {};
+        const currentFreq = radio.frequency_mhz;
+        return `
+            <div class="cfg-card">
+                <header class="cfg-card__head">
+                    <h3 class="cfg-card__title">Radio settings</h3>
+                    <p class="cfg-card__hint">
+                        Community-suggested frequency/bandwidth/SF/CR presets, set over
+                        this companion's live connection. Applying one reboots the
+                        companion to take effect -- it will briefly show "Not connected"
+                        while it reconnects.
+                    </p>
+                </header>
+                <div class="cfg-form">
+                    <label class="cfg-field cfg-field--narrow">
+                        <span class="cfg-field__label">Preset</span>
+                        <select class="cfg-field__input" data-companion-radio-input>
+                            <option value="" disabled selected>-- select --</option>
+                            ${MeshcoreConfigCard._RADIO_PRESETS.map((p) => `
+                                <option value="${p.value}">${this._esc(p.label)}</option>
+                            `).join('')}
+                        </select>
+                        ${currentFreq ? `
+                            <span class="cfg-field__hint">
+                                Currently ${this._fmtFreq(currentFreq)} / ${this._fmtBw(radio.bandwidth_khz)}
+                                / ${this._fmtSf(radio.spreading_factor)}
+                            </span>
+                        ` : ''}
+                    </label>
+                    <div class="cfg-card__actions">
+                        <button class="terminal-button terminal-button--primary"
+                                type="button" data-companion-radio-save>
+                            Set Radio
+                        </button>
+                    </div>
+                    <p class="cfg-status" data-companion-radio-status aria-live="polite"></p>
+                </div>
+            </div>
+        `;
+    }
+
+    async _saveCompanionRadio(companionDiv, label) {
+        const input = companionDiv.querySelector('[data-companion-radio-input]');
+        const status = companionDiv.querySelector('[data-companion-radio-status]');
+        const button = companionDiv.querySelector('[data-companion-radio-save]');
+        if (!input || !status) return;
+
+        const preset = input.value;
+        if (!preset) {
+            status.dataset.kind = 'error';
+            status.textContent = 'Pick a preset.';
+            return;
+        }
+
+        button.disabled = true;
+        status.dataset.kind = 'pending';
+        status.textContent = 'Setting radio…';
+
+        const result = await this._api.put('/api/config/meshcore/companion-radio', { label, preset });
+
+        if (result) {
+            status.dataset.kind = 'success';
+            status.textContent = 'Applied -- companion is rebooting, this can take up to a minute.';
+            this._api.toast('MeshCore radio updated, companion rebooting');
+            await this._api.refresh();
+        } else {
+            status.dataset.kind = 'error';
+            status.textContent = 'Save failed.';
+        }
+        button.disabled = false;
     }
 
     async _checkCompanionFirmwareUpdate(companionDiv, currentVersion) {

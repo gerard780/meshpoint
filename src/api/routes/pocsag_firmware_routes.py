@@ -8,8 +8,9 @@ IDE or a separate machine. Two actions, each streamed to the browser as
 NDJSON -- same wire shape as ``src/api/update/streaming.py``'s
 ``stream_update()``, just driven by an arbitrary subprocess's stdout/stderr
 instead of a named git/pip step chain: compile produces a cached build for
-a chosen board target, flash writes that cached build to a chosen
-configured companion's serial port.
+a chosen board target, flash writes that cached build to a chosen USB-
+serial port -- any currently-connected device, not just an already-
+configured companion (see ``flash_firmware_stream``'s own docstring).
 
 The board target ("Heltec V3" vs "TTGO LoRa32") is a source-level
 ``#define`` in the sketch, not an ``arduino-cli`` flag -- see
@@ -244,7 +245,7 @@ async def compile_firmware_stream(
 
 class FlashRequest(BaseModel):
     board_macro: str
-    label: str = ""
+    port: str
 
 
 @router.post("/flash/stream")
@@ -254,37 +255,55 @@ async def flash_firmware_stream(
     audit: AuditLogWriter = Depends(get_audit_writer),
 ) -> StreamingResponse:
     """Upload the board's already-compiled artifact (see compile/stream
-    above -- flash does not recompile) to one configured companion's
-    serial port. The port is resolved server-side from
-    capture.pocsag_serial (never trusted from the request) so the
-    frontend can only ever target an already-configured device.
+    above -- flash does not recompile) to ``port``.
 
-    If that device's DapnetSerialSource is currently connected, its
-    serial connection is released before flashing (esptool needs
-    exclusive access to reset+write the board) and re-opened afterward --
-    without this, a flash triggered here would leave capture silently
-    dead until a manual service restart, the exact gap confirmed live
-    while testing the underlying toolchain by hand.
+    ``port`` can be ANY currently-connected USB-serial device, not just
+    one already added as a configured POCSAG companion -- flashing a
+    spare board (or a friend's, just passing through) shouldn't require
+    adding-then-removing a permanent device entry first, same reasoning
+    as the Meshtastic/MeshCore flash routes. It's validated against the
+    live enumeration below (same one GET /api/config/serial-ports uses),
+    never trusted as a raw path from the browser.
+
+    If ``port`` happens to match a configured companion's serial_port,
+    that companion's DapnetSerialSource is released before flashing
+    (esptool needs exclusive access to reset+write the board) and
+    re-opened afterward -- without this, a flash triggered here would
+    leave capture silently dead until a manual service restart, the exact
+    gap confirmed live while testing the underlying toolchain by hand. If
+    it doesn't match anything configured, there's nothing to release/
+    restart, which is exactly right for a board that isn't part of this
+    box's own config at all.
     """
     board = _KNOWN_BOARDS.get(req.board_macro)
     if board is None:
         raise HTTPException(400, "Unknown board_macro")
 
-    port = None
+    from src.hal.usb_classifier import list_serial_ports_with_stable_paths
+    real_ports = {
+        value
+        for dev in list_serial_ports_with_stable_paths()
+        if dev.vid is not None
+        for value in (dev.device, dev.stable_path, dev.by_id, dev.by_path)
+        if value
+    }
+    if req.port not in real_ports:
+        raise HTTPException(400, "Selected port is not a currently connected USB-serial device")
+    port = req.port
+
+    label = ""
+    source = None
     if _config is not None:
         for d in _config.capture.pocsag_serial:
-            if (d.label or "") == (req.label or ""):
-                port = d.serial_port
+            if d.serial_port == port:
+                label = d.label or ""
+                source = _resolve_dapnet_source(label)
                 break
-    if not port:
-        raise HTTPException(400, "No configured serial port for this device")
-
-    source = _resolve_dapnet_source(req.label)
 
     async def body() -> AsyncIterator[bytes]:
         with audit.timed_action(
             user=claims.subject, action="pocsag_firmware.flash",
-            params={"board_macro": req.board_macro, "label": req.label, "port": port},
+            params={"board_macro": req.board_macro, "label": label, "port": port},
         ) as ctx:
             released = source is not None and source.connected
             if released:

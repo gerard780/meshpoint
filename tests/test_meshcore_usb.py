@@ -522,6 +522,275 @@ class TestMeshcoreUsbStartupRetry(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(source._reconnect_task)
 
 
+class TestSetRadioParams(unittest.IsolatedAsyncioTestCase):
+    """MeshcoreUsbCaptureSource.set_radio_params() -- the live-connection
+    path Configuration -> MeshCore's Radio settings card uses, in place
+    of the standalone `meshpoint meshcore-radio` CLI's cold-reconnect
+    dance. Patches send_set_radio_params (the module-level import) so
+    these stay pure asyncio-loop tests, no real meshcore/serial needed.
+    """
+
+    async def test_not_connected_short_circuits(self):
+        from src.capture.meshcore_usb_source import MeshcoreUsbCaptureSource
+
+        source = MeshcoreUsbCaptureSource(serial_port="/dev/ttyFAKE", auto_detect=False)
+        result = await source.set_radio_params(433.650, 62.5, 8, 8)
+        self.assertFalse(result.success)
+        self.assertEqual(result.error, "Not connected")
+
+    async def test_success_cancels_health_task_and_schedules_reconnect(self):
+        from unittest.mock import AsyncMock, patch
+        from src.capture.meshcore_usb_source import MeshcoreUsbCaptureSource
+        from src.transmit.meshcore_tx_client import SendResult
+
+        source = MeshcoreUsbCaptureSource(serial_port="/dev/ttyFAKE", auto_detect=False)
+        source._connected = True
+        source._meshcore = object()  # anything non-None; send_set_radio_params is patched
+        source._resolved_port = "/dev/ttyFAKE"
+
+        async def fake_health_loop():
+            await asyncio.sleep(60)
+
+        source._health_task = asyncio.create_task(fake_health_loop())
+
+        async def fake_reconnect_until_connected():
+            await asyncio.sleep(0)
+
+        source._reconnect_until_connected = fake_reconnect_until_connected  # type: ignore[assignment]
+
+        with patch(
+            "src.capture.meshcore_usb_source.send_set_radio_params",
+            AsyncMock(return_value=SendResult(success=True)),
+        ) as mock_send:
+            result = await source.set_radio_params(433.650, 62.5, 8, 8)
+
+        try:
+            mock_send.assert_awaited_once_with(source._meshcore, 433.650, 62.5, 8, 8)
+            self.assertTrue(result.success)
+            # The reboot the command just triggered will kill this
+            # connection -- must be reflected immediately, not left for
+            # the health-check loop to eventually notice.
+            self.assertFalse(source._connected)
+            self.assertIsNone(source._health_task)
+            self.assertIsNotNone(source._reconnect_task)
+        finally:
+            if source._reconnect_task:
+                await source._reconnect_task
+
+    async def test_failure_does_not_disconnect_or_reconnect(self):
+        from unittest.mock import AsyncMock, patch
+        from src.capture.meshcore_usb_source import MeshcoreUsbCaptureSource
+        from src.transmit.meshcore_tx_client import SendResult
+
+        source = MeshcoreUsbCaptureSource(serial_port="/dev/ttyFAKE", auto_detect=False)
+        source._connected = True
+        source._meshcore = object()
+
+        with patch(
+            "src.capture.meshcore_usb_source.send_set_radio_params",
+            AsyncMock(return_value=SendResult(success=False, error="Companion rejected radio params")),
+        ):
+            result = await source.set_radio_params(433.650, 62.5, 8, 8)
+
+        self.assertFalse(result.success)
+        # A rejected command didn't reboot the companion -- connection
+        # state must be left exactly as it was.
+        self.assertTrue(source._connected)
+        self.assertIsNone(source._reconnect_task)
+
+    async def test_timeout_triggers_reconnect_same_as_a_deliberate_reboot(self):
+        # Found live: a companion whose command channel had silently
+        # died still reported connected=True and every subsequent
+        # command timed out with nothing recovering it. A timeout must
+        # trigger the same immediate reconnect as a successful
+        # set_radio (which deliberately reboots the companion) --
+        # both mean "there's nothing listening on this connection
+        # right now".
+        from unittest.mock import AsyncMock, patch
+        from src.capture.meshcore_usb_source import MeshcoreUsbCaptureSource
+        from src.transmit.meshcore_tx_client import SendResult
+
+        source = MeshcoreUsbCaptureSource(serial_port="/dev/ttyFAKE", auto_detect=False)
+        source._connected = True
+        source._meshcore = object()
+
+        async def fake_reconnect_until_connected():
+            await asyncio.sleep(0)
+
+        source._reconnect_until_connected = fake_reconnect_until_connected  # type: ignore[assignment]
+
+        with patch(
+            "src.capture.meshcore_usb_source.send_set_radio_params",
+            AsyncMock(return_value=SendResult(success=False, error="set_radio timed out", timed_out=True)),
+        ):
+            result = await source.set_radio_params(433.650, 62.5, 8, 8)
+
+        try:
+            self.assertFalse(result.success)
+            self.assertFalse(source._connected)
+            self.assertIsNotNone(source._reconnect_task)
+        finally:
+            if source._reconnect_task:
+                await source._reconnect_task
+
+
+class TestSetCompanionNameTimeoutRecovery(unittest.IsolatedAsyncioTestCase):
+    """set_companion_name() must treat a send_set_companion_name timeout
+    the same as set_radio_params does -- immediate reconnect, not left
+    dangling for the health-check loop."""
+
+    async def test_timeout_triggers_reconnect_and_skips_restart_auto_fetching(self):
+        from unittest.mock import AsyncMock, patch
+        from src.capture.meshcore_usb_source import MeshcoreUsbCaptureSource
+        from src.transmit.meshcore_tx_client import SendResult
+
+        source = MeshcoreUsbCaptureSource(serial_port="/dev/ttyFAKE", auto_detect=False)
+        source._connected = True
+        source._meshcore = object()
+        source.restart_auto_fetching = AsyncMock()  # type: ignore[method-assign]
+
+        async def fake_reconnect_until_connected():
+            await asyncio.sleep(0)
+
+        source._reconnect_until_connected = fake_reconnect_until_connected  # type: ignore[assignment]
+
+        with patch(
+            "src.capture.meshcore_usb_source.send_set_companion_name",
+            AsyncMock(return_value=SendResult(success=False, error="set_name timed out", timed_out=True)),
+        ):
+            result = await source.set_companion_name("New Name")
+
+        try:
+            self.assertFalse(result.success)
+            self.assertFalse(source._connected)
+            self.assertIsNotNone(source._reconnect_task)
+            # Restarting auto-fetch on a connection we just declared dead
+            # would be pointless -- must not even try.
+            source.restart_auto_fetching.assert_not_called()
+        finally:
+            if source._reconnect_task:
+                await source._reconnect_task
+
+    async def test_firmware_rejection_does_not_reconnect(self):
+        from unittest.mock import AsyncMock, patch
+        from src.capture.meshcore_usb_source import MeshcoreUsbCaptureSource
+        from src.transmit.meshcore_tx_client import SendResult
+
+        source = MeshcoreUsbCaptureSource(serial_port="/dev/ttyFAKE", auto_detect=False)
+        source._connected = True
+        source._meshcore = object()
+        source.restart_auto_fetching = AsyncMock()  # type: ignore[method-assign]
+
+        with patch(
+            "src.capture.meshcore_usb_source.send_set_companion_name",
+            AsyncMock(return_value=SendResult(success=False, error="Companion rejected name")),
+        ):
+            result = await source.set_companion_name("New Name")
+
+        self.assertFalse(result.success)
+        self.assertTrue(source._connected)
+        self.assertIsNone(source._reconnect_task)
+        source.restart_auto_fetching.assert_awaited_once()
+
+
+class TestReconnectReentrancyGuard(unittest.IsolatedAsyncioTestCase):
+    """_reconnect_in_progress prevents two reconnect attempts from ever
+    running concurrently -- e.g. the health-check loop's own inline call
+    racing with a command timeout's _trigger_reconnect() moments later.
+    Without this, both could call _disconnect()/_connect() on the same
+    port at once (orphaned MeshCore object risk) and double up DTR reset
+    pulses on what live testing showed can be a marginal line."""
+
+    async def test_reconnect_no_ops_while_already_in_progress(self):
+        from unittest.mock import AsyncMock
+        from src.capture.meshcore_usb_source import MeshcoreUsbCaptureSource
+
+        source = MeshcoreUsbCaptureSource(serial_port="/dev/ttyFAKE", auto_detect=False)
+        source._reconnect_in_progress = True
+        source._disconnect = AsyncMock()  # type: ignore[method-assign]
+
+        await source._reconnect()
+
+        # A reconnect already "in progress" (per the flag) means this
+        # call must do nothing at all -- not even the disconnect step.
+        source._disconnect.assert_not_called()
+
+    async def test_flag_is_set_during_and_cleared_after_a_real_run(self):
+        from unittest.mock import AsyncMock, patch
+        from src.capture.meshcore_usb_source import MeshcoreUsbCaptureSource
+
+        source = MeshcoreUsbCaptureSource(serial_port="/dev/ttyFAKE", auto_detect=False)
+        source._running = True
+        source._resolved_port = "/dev/ttyFAKE"
+
+        flag_during_connect = None
+
+        async def fake_disconnect():
+            return None
+
+        async def fake_connect(port):
+            nonlocal flag_during_connect
+            flag_during_connect = source._reconnect_in_progress
+            source._connected = True
+
+        source._disconnect = fake_disconnect  # type: ignore[method-assign]
+        source._connect = fake_connect  # type: ignore[assignment]
+
+        self.assertFalse(source._reconnect_in_progress)
+        # _reconnect()'s backoff sleep (5s base delay) is real production
+        # timing, not something this test should actually wait through.
+        with patch("src.capture.meshcore_usb_source.asyncio.sleep", AsyncMock()):
+            await source._reconnect()
+
+        self.assertTrue(flag_during_connect)
+        self.assertFalse(source._reconnect_in_progress)
+
+    async def test_flag_clears_even_if_reconnect_raises(self):
+        from src.capture.meshcore_usb_source import MeshcoreUsbCaptureSource
+
+        source = MeshcoreUsbCaptureSource(serial_port="/dev/ttyFAKE", auto_detect=False)
+
+        async def raise_disconnect():
+            raise RuntimeError("boom")
+
+        source._disconnect = raise_disconnect  # type: ignore[method-assign]
+
+        with self.assertRaises(RuntimeError):
+            await source._reconnect()
+
+        self.assertFalse(source._reconnect_in_progress)
+
+    async def test_trigger_reconnect_skips_when_already_in_progress(self):
+        from src.capture.meshcore_usb_source import MeshcoreUsbCaptureSource
+
+        source = MeshcoreUsbCaptureSource(serial_port="/dev/ttyFAKE", auto_detect=False)
+        source._connected = True
+        source._reconnect_in_progress = True
+
+        async def fake_health_loop():
+            await asyncio.sleep(60)
+
+        source._health_task = asyncio.create_task(fake_health_loop())
+
+        try:
+            source._trigger_reconnect("some command timed out")
+
+            # A reconnect is already underway -- must not cancel the
+            # health task or spawn a redundant second attempt.
+            self.assertIsNotNone(source._health_task)
+            self.assertFalse(source._health_task.done())
+            self.assertIsNone(source._reconnect_task)
+            # Also left _connected untouched -- that's the in-progress
+            # reconnect's job, not this no-op call's.
+            self.assertTrue(source._connected)
+        finally:
+            source._health_task.cancel()
+            try:
+                await source._health_task
+            except asyncio.CancelledError:
+                pass
+
+
 class TestMeshcoreUsbSignalStitching(unittest.TestCase):
     """Verify rx_log_data RSSI/SNR are grafted onto the next parsed event.
 

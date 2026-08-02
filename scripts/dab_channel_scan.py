@@ -90,15 +90,24 @@ def merge_channel_result(existing: Optional[dict], new: dict) -> dict:
     """
     if existing is None:
         new = dict(new)
-        new["stations"] = sorted(new["stations"], key=str.casefold)
+        new["stations"] = sorted(new["stations"], key=lambda s: s["name"].casefold())
         return new
     if not new["ensemble"] and not new["stations"]:
         return existing
     merged_stations = list(existing.get("stations", []))
+    # A DAB SId is broadcaster-assigned (part of the multiplex definition,
+    # not a welle-cli session artifact), so it's the real stable identity
+    # to dedup on when present -- falls back to name only for the rare
+    # station a scan somehow didn't get a sid for.
+    existing_sids = {s["sid"] for s in merged_stations if s.get("sid")}
+    existing_names = {s["name"] for s in merged_stations}
     for s in new["stations"]:
-        if s not in merged_stations:
-            merged_stations.append(s)
-    merged_stations.sort(key=str.casefold)
+        if s.get("sid") and s["sid"] in existing_sids:
+            continue
+        if not s.get("sid") and s["name"] in existing_names:
+            continue
+        merged_stations.append(s)
+    merged_stations.sort(key=lambda s: s["name"].casefold())
     # Start from a copy of the existing entry so any extra field the
     # dashboard's DAB+ Config tab may have added (e.g. a user-set
     # "custom_name" override) survives a rescan instead of being dropped
@@ -158,7 +167,10 @@ def scan_channel(channel: str, port: int, timeout: float) -> dict:
             if isinstance(snr, (int, float)):
                 result["snr"] = float(snr)
             stations = [
-                (s.get("label") or {}).get("label", "").strip()
+                {
+                    "name": (s.get("label") or {}).get("label", "").strip(),
+                    "sid": s.get("sid"),
+                }
                 for s in data.get("services", [])
                 if s.get("url_mp3") and (s.get("label") or {}).get("label", "").strip()
             ]
@@ -266,7 +278,7 @@ def main() -> int:
     for r in hits:
         print(f"\n{r['channel']} -- {r['ensemble']} (SNR {r['snr']:.1f} dB)")
         for s in r["stations"]:
-            print(f"    - {s}")
+            print(f"    - {s['name']}")
 
     merged_channels = sorted(merged_by_channel.values(), key=lambda r: channel_sort_key(r["channel"]))
 

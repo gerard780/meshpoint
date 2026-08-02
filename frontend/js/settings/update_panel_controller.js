@@ -37,9 +37,10 @@ class UpdatePanelController {
         this.rollbackBtn = rootEl.querySelector('[data-update-rollback]');
         this.rollbackHintEl = rootEl.querySelector('[data-update-rollback-hint]');
         this.syncHintEl = rootEl.querySelector('[data-update-sync-hint]');
-        this.incomingEl = rootEl.querySelector('[data-update-incoming]');
-        this.commitsEl = rootEl.querySelector('[data-update-commits]');
-        this.commitsListEl = rootEl.querySelector('[data-update-commits-list]');
+        this.commitsView = new window.UpdateCommitTimelineView(
+            rootEl.querySelector('[data-update-commits]'),
+            rootEl.querySelector('[data-update-commits-list]')
+        );
         this.statusEl = rootEl.querySelector('[data-update-status]');
         this.descriptionEl = rootEl.querySelector('[data-update-description]');
         this.localVersionEl = rootEl.querySelector('[data-update-local-version]');
@@ -138,45 +139,17 @@ class UpdatePanelController {
         }
     }
 
-    /** Last commits on origin/<branch> — what the fork looks like on GitHub. */
-    _renderRemoteCommits(status) {
-        if (!this.commitsEl || !this.commitsListEl) return;
-        const commits = (status && status.remote_commits) || [];
-        this.commitsListEl.textContent = '';
-        if (!commits.length) {
-            this.commitsEl.hidden = true;
-            return;
-        }
-        commits.slice(0, 5).forEach((c) => {
-            const li = document.createElement('li');
-            li.className = 'update-history__row';
-
-            const when = document.createElement('span');
-            when.className = 'update-history__when';
-            when.textContent = this._formatCommitTime(c.committed_at);
-            li.appendChild(when);
-
-            const what = document.createElement('span');
-            what.className = 'update-history__what';
-            const sha = document.createElement('code');
-            sha.textContent = c.sha || '';
-            what.appendChild(sha);
-            what.appendChild(document.createTextNode(` ${c.subject || ''}`));
-            li.appendChild(what);
-
-            this.commitsListEl.appendChild(li);
-        });
-        this.commitsEl.hidden = false;
+    /** Unified NEW-marked timeline: tip of origin/<branch>. */
+    _renderCommits(status) {
+        if (!this.commitsView) return;
+        this.commitsView.render(status || {});
     }
 
-    _formatCommitTime(iso) {
-        if (!iso) return '--';
-        const d = new Date(iso);
-        if (Number.isNaN(d.getTime())) return '--';
-        return d.toLocaleString([], {
-            month: 'short', day: 'numeric',
-            hour: '2-digit', minute: '2-digit', hour12: false,
-        });
+    _syncApplyCue() {
+        if (!this.applyBtn) return;
+        const behind = this._installStatus && this._installStatus.commits_behind;
+        const ready = Number(behind) > 0;
+        this.applyBtn.classList.toggle('update-apply--ready', ready);
     }
 
     async _loadChannels() {
@@ -204,12 +177,13 @@ class UpdatePanelController {
             if (!response.ok) return;
             this._installStatus = await response.json();
             this._renderVersionCards(this._installStatus);
-            this._renderRemoteCommits(this._installStatus);
+            this._renderCommits(this._installStatus);
             if (!this._installStatus.checked_at) {
                 this._renderSyncHint(null);
             }
         } catch (_e) { /* install status is best-effort */ }
         this._syncRollbackButton();
+        this._syncApplyCue();
     }
 
     async _checkForUpdates() {
@@ -241,7 +215,7 @@ class UpdatePanelController {
             }
             this._installStatus = await response.json();
             this._renderVersionCards(this._installStatus);
-            this._renderRemoteCommits(this._installStatus);
+            this._renderCommits(this._installStatus);
             this._renderSyncHint(this._installStatus);
             // A plain check (no channel override) just refreshed the
             // same cache the sidebar badge reads -- pull it immediately
@@ -253,7 +227,7 @@ class UpdatePanelController {
             } else if (behind != null && behind > 0) {
                 this._setStatus(
                     'success',
-                    `${behind} commit${behind === 1 ? '' : 's'} behind — use Apply when ready.`,
+                    `${behind} commit${behind === 1 ? '' : 's'} ready to land. Use Apply update when ready.`,
                 );
             } else {
                 this._setStatus('success', 'Up to date with the selected channel.');
@@ -264,6 +238,7 @@ class UpdatePanelController {
         } finally {
             if (this.checkBtn) this.checkBtn.disabled = false;
             this._syncRollbackButton();
+            this._syncApplyCue();
         }
     }
 
@@ -299,37 +274,8 @@ class UpdatePanelController {
         }
     }
 
-    _renderIncoming(status) {
-        if (!this.incomingEl) return;
-        const commits = (status && status.incoming_commits) || [];
-        const behind = status && status.commits_behind;
-        this.incomingEl.textContent = '';
-        if (!behind || !commits.length) {
-            this.incomingEl.hidden = true;
-            return;
-        }
-        commits.forEach((c) => {
-            const li = document.createElement('li');
-            const sha = document.createElement('code');
-            sha.textContent = c.sha || '';
-            li.appendChild(sha);
-            li.appendChild(
-                document.createTextNode(` ${c.subject || ''}`),
-            );
-            this.incomingEl.appendChild(li);
-        });
-        if (behind > commits.length) {
-            const li = document.createElement('li');
-            li.className = 'update-incoming__more';
-            li.textContent = `… and ${behind - commits.length} more`;
-            this.incomingEl.appendChild(li);
-        }
-        this.incomingEl.hidden = false;
-    }
-
     _renderSyncHint(status) {
         if (!this.syncHintEl) return;
-        this._renderIncoming(status);
         if (!status) {
             this.syncHintEl.dataset.kind = '';
             this.syncHintEl.textContent =
@@ -356,8 +302,8 @@ class UpdatePanelController {
             this.syncHintEl.dataset.kind = 'ok';
             this.syncHintEl.textContent = this._withLastChecked(
                 branch
-                    ? `Up to date with origin/${branch}.`
-                    : 'Up to date with GitHub.',
+                    ? `Locked on with origin/${branch}.`
+                    : 'Locked on with GitHub.',
                 status,
             );
             return;
@@ -365,12 +311,12 @@ class UpdatePanelController {
         const parts = [];
         if (behind > 0) {
             parts.push(
-                `${behind} commit${behind === 1 ? '' : 's'} behind origin/${branch}`,
+                `${behind} commit${behind === 1 ? '' : 's'} waiting on origin/${branch}`,
             );
         }
         if (ahead > 0) {
             parts.push(
-                `${ahead} commit${ahead === 1 ? '' : 's'} ahead of origin/${branch}`,
+                `${ahead} local commit${ahead === 1 ? '' : 's'} not on origin`,
             );
         }
         this.syncHintEl.dataset.kind = behind > 0 ? 'behind' : '';
@@ -474,6 +420,9 @@ class UpdatePanelController {
         if (!this._installStatus?.checked_at
             || this._installStatus?.compare_branch !== this._compareBranchForChannel(channel)) {
             this._renderSyncHint(null);
+            if (this.applyBtn) {
+                this.applyBtn.classList.remove('update-apply--ready');
+            }
         }
         this._loadReleaseNotes(channel);
     }

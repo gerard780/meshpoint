@@ -9,7 +9,17 @@
  */
 const _DAB_DONGLE_OWNER_LABELS = {
     radio: 'Radio', p2000: 'P2000', pagers: 'Pagers', pocsag: 'POCSAG', rtl433: 'RTL433', dab: 'DAB+',
+    dab_scan: 'DAB+ scan',
 };
+
+// How long a favorite/preset click waits for its station to actually show
+// up in welle-cli's progressively-decoded list before giving up (see
+// _resolvePendingPlay()). Was 30s; live testing on a weaker channel (7D,
+// ~9dB SNR vs e.g. 12C's 19dB) showed that's not always enough headroom
+// for a cold dongle spin-up + OFDM sync lock + full station-list decode,
+// so a click could silently time out even though the station would have
+// shown up seconds later.
+const _DAB_PENDING_PLAY_TIMEOUT_MS = 60000;
 
 // Full Band III DAB channel raster (5A-13F, 38 channels; ETSI EN 300 401)
 // for the manual channel dropdown, alongside the curated presets above --
@@ -154,7 +164,12 @@ class DabPanel {
             if (presetPlayBtn) {
                 this._pendingPlay = {
                     channel: presetPlayBtn.dataset.dabPresetChannel,
-                    sid: null,
+                    // A sid captured by the scan script (see
+                    // scripts/dab_channel_scan.py) lets this resolve by
+                    // exact identity below instead of the name-normalize
+                    // fallback -- null for a station scanned before that
+                    // change, or one welle-cli never handed a sid for.
+                    sid: presetPlayBtn.dataset.dabPresetSid || null,
                     label: presetPlayBtn.dataset.dabPresetPlay,
                 };
                 this._pendingPlayAt = Date.now();
@@ -212,7 +227,7 @@ class DabPanel {
             const res = await fetch('/api/dab/scan-results');
             if (!res.ok) {
                 this._channelPresets = [];
-                hint = 'No preset channels found — run scripts/dab_channel_scan.py on the device, then reopen this tab.';
+                hint = 'No preset channels found — run a scan from the DAB+ Config tab, then reopen this tab.';
             } else {
                 const data = await res.json();
                 this._channelPresets = (data.channels || [])
@@ -220,19 +235,21 @@ class DabPanel {
                     .map((c) => ({
                         channel: c.channel,
                         name: c.custom_name || c.ensemble || c.channel,
-                        // Station names only (the scan JSON has no sid --
-                        // welle-cli only hands one out once actually tuned)
-                        // so a click here tunes in and matches by name once
-                        // decoded, same wait-and-match idea as a favorite.
+                        // {name, sid} per station -- sid is the DAB SId
+                        // captured by scripts/dab_channel_scan.py (may be
+                        // null for a station scanned before that existed).
+                        // A click here tunes in and resolves by sid when
+                        // known, else by name once decoded -- same
+                        // wait-and-match idea as a favorite.
                         stations: c.stations || [],
                     }));
                 if (!this._channelPresets.length) {
-                    hint = 'No preset channels found — run scripts/dab_channel_scan.py on the device, then reopen this tab.';
+                    hint = 'No preset channels found — run a scan from the DAB+ Config tab, then reopen this tab.';
                 }
             }
         } catch (_e) {
             this._channelPresets = [];
-            hint = 'No preset channels found — run scripts/dab_channel_scan.py on the device, then reopen this tab.';
+            hint = 'No preset channels found — run a scan from the DAB+ Config tab, then reopen this tab.';
         }
         const bar = this._root && this._root.querySelector('[data-dab-chantabs]');
         if (bar) bar.innerHTML = this._chanTabsHtml();
@@ -329,7 +346,7 @@ class DabPanel {
             const preset = this._channelPresets.find((c) => c.channel === forChannel);
             const presetStations = (preset && preset.stations) || [];
             const list = presetStations.length
-                ? `<div class="dab-stations" data-dab-stations>${presetStations.map((name) => this._presetStationRowHtml(name, forChannel)).join('')}</div>`
+                ? `<div class="dab-stations" data-dab-stations>${presetStations.map((station) => this._presetStationRowHtml(station, forChannel)).join('')}</div>`
                 : '';
             return `
                 <div class="dab-scan-prompt">
@@ -359,7 +376,7 @@ class DabPanel {
             const preset = status.channel ? this._channelPresets.find((c) => c.channel === status.channel) : null;
             const presetStations = (preset && preset.stations) || [];
             const pending = presetStations.length
-                ? `<div class="dab-stations" data-dab-stations>${presetStations.map((name) => this._pendingStationRowHtml(name)).join('')}</div>`
+                ? `<div class="dab-stations" data-dab-stations>${presetStations.map((station) => this._pendingStationRowHtml(station)).join('')}</div>`
                 : '';
             return rescan + '<div class="pager-log__empty">Scanning… stations appear as they decode.</div>' + pending;
         }
@@ -765,6 +782,13 @@ class DabPanel {
         if (playing) {
             text = (playing.dls && playing.dls !== playing.label)
                 ? `${playing.label} — ${playing.dls}` : playing.label;
+        } else if (this._pendingPlay && this._pendingPlay.channel === status.channel) {
+            // A favorite click is waiting on this channel's station list to
+            // decode its target sid/label (see _resolvePendingPlay) -- say
+            // so, instead of the generic "select a station below" prompt,
+            // which reads as if nothing was chosen when a specific station
+            // is in fact already queued up.
+            text = `finding ${this._pendingPlay.label}…`;
         } else if (status.running) {
             text = 'select a station below';
         } else {
@@ -805,15 +829,17 @@ class DabPanel {
 
     /** If a favorite (or scan-preset station) jump is waiting on a channel
      * switch, check whether its sid has shown up in the (progressively-
-     * decoded) station list yet; give up after 30 s (channel might
-     * genuinely not carry that station anymore) rather than waiting
-     * forever. A preset station (clicked before ever being tuned) has no
-     * sid yet -- matched by name instead, case/whitespace-insensitive. */
+     * decoded) station list yet; give up after _DAB_PENDING_PLAY_TIMEOUT_MS
+     * (channel might genuinely not carry that station anymore, or be too
+     * weak to lock in time) rather than waiting forever. A preset station
+     * scanned before sid-capture existed (or one welle-cli didn't report a
+     * sid for) has no sid -- matched by name instead, case/whitespace-
+     * insensitive. */
     _resolvePendingPlay(status) {
         const pending = this._pendingPlay;
         if (!pending) return;
         if (!status.running || status.channel !== pending.channel) {
-            if (Date.now() - this._pendingPlayAt > 30000) this._pendingPlay = null;
+            if (Date.now() - this._pendingPlayAt > _DAB_PENDING_PLAY_TIMEOUT_MS) this._pendingPlay = null;
             return;
         }
         const found = (status.services || []).find((s) => (
@@ -822,7 +848,7 @@ class DabPanel {
         if (found) {
             this._pendingPlay = null;
             this._playOrStop(found.sid);
-        } else if (Date.now() - this._pendingPlayAt > 30000) {
+        } else if (Date.now() - this._pendingPlayAt > _DAB_PENDING_PLAY_TIMEOUT_MS) {
             this._pendingPlay = null;
             this._setStatus(true, `tuned to ${status.channel} — station not found`);
         }
@@ -853,24 +879,29 @@ class DabPanel {
     }
 
     // A station known from the last scan, on a channel not currently
-    // tuned -- no sid available yet (welle-cli only hands one out once
-    // actually decoding), so the star here stores/matches by name instead
-    // (see _favMatches); Play has no Stop state to reflect since nothing
-    // on this channel can be playing yet.
-    _presetStationRowHtml(name, channel) {
+    // tuned. `station` is {name, sid} -- sid is the DAB SId captured by
+    // scripts/dab_channel_scan.py (broadcaster-assigned, stable across
+    // scans/days), so favoriting/playing from here can match by exact
+    // identity below instead of only the name-normalize fallback (still
+    // used for a station scanned before sid capture existed, or one
+    // welle-cli didn't report a sid for). Play has no Stop state to
+    // reflect since nothing on this channel can be playing yet.
+    _presetStationRowHtml(station, channel) {
         const esc = this._esc.bind(this);
-        const isFav = this._isFav(channel, null, name);
+        const { name, sid } = station;
+        const isFav = this._isFav(channel, sid, name);
         return `
             <div class="dab-station-row">
                 <span class="lsn-fav${isFav ? ' on' : ''}" data-dab-favtoggle title="Favorite"
-                      data-dab-channel="${esc(channel)}" data-dab-sid="" data-dab-label="${esc(name)}">
+                      data-dab-channel="${esc(channel)}" data-dab-sid="${esc(sid || '')}" data-dab-label="${esc(name)}">
                     ${isFav ? '★' : '☆'}
                 </span>
                 <span class="lsn-station__scroll dab-station-row__text">
                     <span class="lsn-station__text" data-dab-scrolltext>${esc(name)}</span>
                 </span>
                 <button type="button" class="terminal-button"
-                        data-dab-preset-play="${esc(name)}" data-dab-preset-channel="${esc(channel)}">Play</button>
+                        data-dab-preset-play="${esc(name)}" data-dab-preset-channel="${esc(channel)}"
+                        data-dab-preset-sid="${esc(sid || '')}">Play</button>
             </div>
         `;
     }
@@ -878,13 +909,14 @@ class DabPanel {
     // A known-from-last-scan station shown while the channel is tuned but
     // welle-cli hasn't decoded it (back) yet -- purely a placeholder, so
     // no star/Play interactivity, just a dimmed row that gets replaced by
-    // the real, clickable one once it actually decodes.
-    _pendingStationRowHtml(name) {
+    // the real, clickable one once it actually decodes. `station` is
+    // {name, sid} -- sid unused here, display-only row.
+    _pendingStationRowHtml(station) {
         const esc = this._esc.bind(this);
         return `
             <div class="dab-station-row dab-station-row--pending">
                 <span class="lsn-station__scroll dab-station-row__text">
-                    <span class="lsn-station__text" data-dab-scrolltext>${esc(name)}</span>
+                    <span class="lsn-station__text" data-dab-scrolltext>${esc(station.name)}</span>
                 </span>
                 <button type="button" class="terminal-button" disabled>Play</button>
             </div>

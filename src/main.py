@@ -29,6 +29,16 @@ def _add_serial_source(coordinator: PipelineCoordinator, config) -> None:
             serial_baud=config.capture.serial_baud,
         )
     ]
+    if len(devices) > 1:
+        # A blank serial_port falls back to auto-detect, which is fine
+        # for a single device but can re-open whatever port another
+        # configured device already has claimed -- drop ambiguous blank
+        # rows once there's more than one (belt-and-braces: the save
+        # route already filters these, but a hand-edited config file
+        # could still have one).
+        filtered = [dev for dev in devices if dev.serial_port]
+        if filtered:
+            devices = filtered
     for dev in devices:
         coordinator.capture_coordinator.add_source(
             SerialCaptureSource(

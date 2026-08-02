@@ -8,22 +8,33 @@ active -- only one process can hold the dongle at a time.
 
 from __future__ import annotations
 
+import asyncio
 import json
+import sys
 from pathlib import Path
-from typing import Optional
+from typing import AsyncIterator, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from src.api.audit import AuditLogWriter
+from src.api.audit.dependencies import get_audit_writer
 from src.api.auth.dependencies import require_admin
 from src.api.auth.jwt_session import SessionClaims
+from src.audio import sdr_registry
 from src.audio.dab_listener import DabListener
 from src.backup.paths import resolve_meshpoint_root
 
 router = APIRouter(prefix="/api/dab", tags=["dab"])
 
 _listener: Optional[DabListener] = None
+
+# Registry owner name for a running scan -- distinct from DabListener's own
+# "dab" (live tuning/playback), even though they're mutually exclusive
+# anyway, so a "busy" message can say which DAB+ activity is holding the
+# dongle rather than just "dab" for both.
+_SCAN_OWNER = "dab_scan"
 
 # scripts/dab_channel_scan.py's default --output, resolved the same
 # Mac-dev-vs-Pi-install-portable way as repo_source.py -- MESHPOINT_DIR
@@ -118,8 +129,8 @@ def _read_scan_results(path: Path) -> dict:
     if not path.exists():
         raise HTTPException(
             404,
-            f"No DAB channel scan results found at {path} -- run scripts/dab_channel_scan.py "
-            "on the device first, then reload this tab.",
+            f"No DAB channel scan results found at {path} -- use the Full scan/Scan specific "
+            "channels buttons above to find some.",
         )
     try:
         return json.loads(path.read_text())
@@ -153,3 +164,135 @@ async def dab_scan_results_set_name(
         entry.pop("custom_name", None)
     path.write_text(json.dumps(data, indent=2))
     return entry
+
+
+def _ndjson(payload: dict) -> bytes:
+    return (json.dumps(payload, separators=(",", ":")) + "\n").encode("utf-8")
+
+
+async def _stream_subprocess(cmd: list[str]) -> AsyncIterator[bytes]:
+    """Same NDJSON subprocess-streaming shape as meshtastic_firmware_routes.py/
+    pocsag_firmware_routes.py's own helper -- duplicated rather than imported
+    since dab_routes.py is otherwise independent of those two modules."""
+    yield _ndjson({"type": "started", "cmd": cmd})
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+    except (FileNotFoundError, OSError) as exc:
+        yield _ndjson({
+            "type": "result",
+            "result": {"returncode": -1, "success": False, "error": str(exc)},
+        })
+        return
+
+    queue: asyncio.Queue = asyncio.Queue()
+
+    async def pump(stream, name: str) -> None:
+        if stream is not None:
+            while True:
+                line = await stream.readline()
+                if not line:
+                    break
+                await queue.put({
+                    "type": "line", "stream": name,
+                    "text": line.decode("utf-8", errors="replace").rstrip("\n"),
+                })
+        await queue.put(None)
+
+    stdout_task = asyncio.create_task(pump(process.stdout, "stdout"))
+    stderr_task = asyncio.create_task(pump(process.stderr, "stderr"))
+
+    pending = 2
+    while pending:
+        item = await queue.get()
+        if item is None:
+            pending -= 1
+            continue
+        yield _ndjson(item)
+
+    await stdout_task
+    await stderr_task
+    returncode = await process.wait()
+    yield _ndjson({
+        "type": "result",
+        "result": {"returncode": returncode, "success": returncode == 0},
+    })
+
+
+class ScanRequest(BaseModel):
+    channels: list[str] = Field(
+        default_factory=list,
+        description="Specific channel codes to scan (e.g. ['7D', '8B']); empty = all 38",
+    )
+    timeout: float = Field(default=60.0, ge=5.0, le=240.0)
+    discard_existing: bool = Field(
+        default=False,
+        description="Pass --new: discard whatever's already on file instead of merging into it",
+    )
+
+
+@router.post("/scan/stream")
+async def dab_scan_stream(
+    req: ScanRequest,
+    claims: SessionClaims = Depends(require_admin),
+    audit: AuditLogWriter = Depends(get_audit_writer),
+) -> StreamingResponse:
+    """Runs scripts/dab_channel_scan.py as a subprocess and streams its
+    output live, same NDJSON-over-subprocess shape as the Meshtastic/
+    MeshCore/POCSAG firmware-flash cards.
+
+    Claims the RTL-SDR dongle via sdr_registry for the duration, same as
+    every other listener -- the script itself talks to welle-cli directly
+    and knows nothing about the registry (its own docstring warns "stop
+    any active Radio/DAB+/... tab first"), so without this a scan
+    triggered from here could silently collide with a live listener
+    running in another browser session instead of failing cleanly with
+    the same "busy" messaging every other tab already shows.
+    """
+    try:
+        sdr_registry.claim(_SCAN_OWNER)
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc))
+
+    script = resolve_meshpoint_root() / "scripts" / "dab_channel_scan.py"
+    cmd = [sys.executable, str(script)]
+    if req.channels:
+        cmd += ["--channels", *req.channels]
+    # str(180.0) == "180.0" -- cosmetic only (the script's own --timeout is
+    # type=float, "180" and "180.0" parse identically), but the trailing
+    # ".0" on every whole-number timeout in the echoed command line was
+    # just visual noise for the common case of an admin typing a plain
+    # integer into the seconds field.
+    timeout_val = req.timeout
+    timeout_str = str(int(timeout_val)) if timeout_val == int(timeout_val) else str(timeout_val)
+    cmd += ["--timeout", timeout_str]
+    if req.discard_existing:
+        cmd.append("--new")
+
+    async def body() -> AsyncIterator[bytes]:
+        with audit.timed_action(
+            user=claims.subject, action="dab.scan",
+            params={
+                "channels": req.channels or "all", "timeout": req.timeout,
+                "discard_existing": req.discard_existing,
+            },
+        ) as ctx:
+            success = False
+            try:
+                async for chunk in _stream_subprocess(cmd):
+                    yield chunk
+                    event = json.loads(chunk)
+                    if event.get("type") == "result":
+                        success = bool((event.get("result") or {}).get("success"))
+            finally:
+                sdr_registry.release(_SCAN_OWNER)
+            ctx.set_result("success" if success else "error")
+
+    return StreamingResponse(
+        body(),
+        media_type="application/x-ndjson",
+        headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
+    )

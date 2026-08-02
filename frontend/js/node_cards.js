@@ -342,8 +342,13 @@ class NodeCards {
         if (voltage != null) {
             parts.push(`<span class="nc-chip nc-chip--telem">&#9889; ${voltage.toFixed(2)}V</span>`);
         }
-        if (battery != null && battery > 0) {
-            parts.push(`<span class="nc-chip nc-chip--telem">${this._batteryIcon(battery)} ${battery}%</span>`);
+        if (battery === 101) {
+            // Meshtastic firmware convention: 101 = externally powered,
+            // no battery attached (not a real percentage).
+            parts.push(`<span class="nc-chip nc-chip--telem">&#128268; Powered</span>`);
+        } else if (battery != null && battery > 0) {
+            const bt = this._batteryTier(battery);
+            parts.push(`<span class="nc-chip nc-chip--${bt.cls}">${bt.icon} ${battery}%</span>`);
         }
         if (alt != null) {
             const altLabel = window.MeshpointDisplayUnits
@@ -428,10 +433,14 @@ class NodeCards {
         return { label: 'Poor', cls: 'poor' };
     }
 
-    _batteryIcon(pct) {
-        if (pct > 75) return '&#128267;';
-        if (pct > 25) return '&#128268;';
-        return '&#128269;';
+    _batteryTier(pct) {
+        // Only 2 real battery emoji exist in Unicode (full/low -- no
+        // standard "half battery"), so severity is conveyed via the
+        // same color-tier chip classes _signalQuality() already uses
+        // (nc-chip--excellent/fair/poor), not a 3rd invented icon.
+        if (pct > 50) return { icon: '\u{1F50B}', cls: 'excellent' };
+        if (pct > 25) return { icon: '\u{1F50B}', cls: 'fair' };
+        return { icon: '\u{1FAAB}', cls: 'poor' };
     }
 
     _roleName(role) {

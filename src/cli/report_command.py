@@ -35,6 +35,7 @@ class ReportData:
     config: dict = field(default_factory=dict)
     lorawan_stats: dict = field(default_factory=dict)
     spectrum: dict = field(default_factory=dict)
+    dapnet_stats: dict = field(default_factory=dict)
 
 
 def run_report() -> None:
@@ -86,6 +87,7 @@ def _fetch_all() -> ReportData | None:
     data.config = _get(client, "/api/config")
     data.lorawan_stats = _get(client, "/api/lorawan/stats")
     data.spectrum = _get(client, "/api/device/spectrum")
+    data.dapnet_stats = _get(client, "/api/dapnet/stats")
 
     return data
 
@@ -279,6 +281,15 @@ def _print_protocols_section(d: ReportData) -> None:
     mc_parts.append("via companion")
     _kv("MeshCore", " · ".join(mc_parts))
 
+    dapnet_status = cfg.get("dapnet_status") or []
+    if dapnet_status:
+        capcodes = d.dapnet_stats.get("unique_capcodes")
+        dp_parts = [f"{proto_pkts.get('dapnet', 0):,} pkts"]
+        if capcodes is not None:
+            dp_parts.append(f"{capcodes} capcodes")
+        dp_parts.append("via companion")
+        _kv("DAPNET", " · ".join(dp_parts))
+
     _sep()
 
 
@@ -383,6 +394,20 @@ def _print_sources_section(d: ReportData) -> None:
     if not companions and mc:
         state = "connected" if mc.get("connected") else "disconnected"
         _kv("meshcore_usb", state)
+
+    pocsag_devices = {
+        (f"dapnet_{dev.get('label')}" if dev.get("label") else "dapnet"): dev
+        for dev in (capture.get("pocsag_serial") or [])
+    }
+    for dp in cfg.get("dapnet_status") or []:
+        name = dp.get("name") or "dapnet"
+        port = (pocsag_devices.get(name) or {}).get("serial_port") or ""
+        state = (
+            f"{_GREEN}connected{_RESET}" if dp.get("connected") else f"{_DIM}--{_RESET}"
+        )
+        callsign = dp.get("callsign") or ""
+        board = dp.get("board") or ""
+        _kv(name, " · ".join(x for x in (port, state, callsign, board) if x))
 
     # Meshtastic USB serial sticks -- live status lives at the payload's
     # top level (cfg["serial"]), not under capture, since config_routes

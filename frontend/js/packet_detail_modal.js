@@ -17,6 +17,7 @@ class PacketDetailModal {
     show(packet, opts = {}) {
         this.close({ skipCallback: true });
 
+        packet = this._normalize(packet);
         this._onClose = opts.onClose || null;
         this._selectedRow = opts.selectedRow || null;
         if (this._selectedRow) {
@@ -38,7 +39,7 @@ class PacketDetailModal {
             <header class="pdm-modal__header">
                 <div>
                     <h2 class="pdm-modal__title">Packet detail</h2>
-                    <div class="pdm-modal__meta">${this._esc(timeLabel)} · ${this._esc(packet.packet_type || 'unknown')}</div>
+                    <div class="pdm-modal__meta">${this._esc(timeLabel)} · ${this._esc(this._typeLabel(packet.packet_type))}</div>
                 </div>
                 <button type="button" class="pdm-modal__close" aria-label="Close">&times;</button>
             </header>
@@ -46,10 +47,14 @@ class PacketDetailModal {
         `;
 
         const body = modal.querySelector('.pdm-modal__body');
-        body.appendChild(this._buildLayer('RF', this._rfRows(packet)));
-        body.appendChild(this._buildLayer('Mesh', this._meshRows(packet, opts.formatNodeId)));
-        body.appendChild(this._buildLayer('Payload', this._payloadRows(packet)));
-        body.appendChild(this._buildLayer('Capture', this._captureRows(packet)));
+        for (const layer of [
+            this._buildLayer('RF', this._rfRows(packet)),
+            this._buildLayer('Mesh', this._meshRows(packet, opts.formatNodeId)),
+            this._buildLayer('Payload', this._payloadRows(packet)),
+            this._buildLayer('Capture', this._captureRows(packet)),
+        ]) {
+            if (layer) body.appendChild(layer);
+        }
 
         modal.querySelector('.pdm-modal__close').addEventListener('click', () => this.close());
         overlay.addEventListener('click', () => this.close());
@@ -80,9 +85,36 @@ class PacketDetailModal {
         if (e.key === 'Escape') this.close();
     }
 
+    /** DAPNET's /api/dapnet/packets (and dapnet_panel.js's own live-WS
+     * mirror of that shape) return capcode/function/text as top-level
+     * fields rather than the destination_id + nested decoded_payload
+     * object every other protocol's packet rows already have -- reshape
+     * it to the common shape here so the rest of this file doesn't need
+     * a DAPNET-specific branch in every _xRows method below. */
+    _normalize(packet) {
+        if (packet && packet.protocol === 'dapnet' && !packet.decoded_payload) {
+            return {
+                ...packet,
+                destination_id: packet.capcode,
+                decoded_payload: {
+                    capcode: packet.capcode, function: packet.function, text: packet.text,
+                },
+            };
+        }
+        return packet;
+    }
+
+    /** DAPNET's packet_type values carry a "dapnet_" prefix (dapnet_alpha,
+     * dapnet_numeric, ...) to stay unambiguous next to Meshtastic/MeshCore's
+     * own type constants in the shared `packets` table -- strip it back
+     * off for display, since every other protocol's types (text, position,
+     * advert, ...) already read as plain words. */
+    _typeLabel(type) {
+        if (!type) return type;
+        return type.startsWith('dapnet_') ? type.slice('dapnet_'.length) : type;
+    }
+
     _buildLayer(label, rows) {
-        const layer = document.createElement('section');
-        layer.className = 'pdm-layer';
         const rowsEl = document.createElement('div');
         rowsEl.className = 'pdm-layer__rows';
         for (const row of rows) {
@@ -102,6 +134,15 @@ class PacketDetailModal {
                 rowsEl.appendChild(this._row(row.key, row.val, row.valClass));
             }
         }
+        // DAPNET has no RF signal metrics at all (see dapnet_source.py --
+        // the companion's serial protocol reports none), so its RF layer
+        // would otherwise render as a bare "RF" heading with nothing under
+        // it once every row above gets skipped -- drop the whole layer
+        // instead whenever that happens, for any protocol.
+        if (!rowsEl.children.length) return null;
+
+        const layer = document.createElement('section');
+        layer.className = 'pdm-layer';
         layer.innerHTML = `<div class="pdm-layer__label">${this._esc(label)}</div>`;
         layer.appendChild(rowsEl);
         return layer;
@@ -195,7 +236,7 @@ class PacketDetailModal {
         const rows = [
             { key: 'From', val: `${fmt(packet.source_id)} (${packet.source_id || 'n/a'})` },
             { key: 'To', val: `${fmt(packet.destination_id)} (${packet.destination_id || 'n/a'})` },
-            { key: 'Type', val: packet.packet_type || 'n/a' },
+            { key: 'Type', val: this._typeLabel(packet.packet_type) || 'n/a' },
             { key: 'Protocol', val: packet.protocol || 'n/a' },
         ];
         // Hop info is often unknown (MeshCore direct packets, Meshtastic
@@ -243,11 +284,14 @@ class PacketDetailModal {
         const protocol = (packet.protocol || '').toLowerCase();
         // MeshCore adverts/nodeinfo are decoded, not decrypted with a
         // Meshtastic channel key, so the "Decrypt / No matching key" row
-        // is meaningless for it -- always show its decoded content.
+        // is meaningless for it -- always show its decoded content. Same
+        // for DAPNET: POCSAG pages are broadcast in the clear, there's no
+        // key/decrypt step to report on at all.
         const isMeshcore = protocol === 'meshcore';
+        const isDapnet = protocol === 'dapnet';
         const isLorawan = protocol === 'lorawan';
         const decrypted =
-            isMeshcore || (packet.decrypted !== false && type !== 'encrypted');
+            isMeshcore || isDapnet || (packet.decrypted !== false && type !== 'encrypted');
         const hasObj = p && typeof p === 'object' && Object.keys(p).length > 0;
 
         if (!decrypted && !isLorawan) {
@@ -272,7 +316,7 @@ class PacketDetailModal {
         }
 
         const rows = [];
-        if (!isMeshcore) {
+        if (!isMeshcore && !isDapnet) {
             if (isLorawan && packet.decrypted === false) {
                 rows.push({ key: 'Decrypt', val: 'No app session keys', valClass: 'bad' });
             } else {
@@ -335,6 +379,13 @@ class PacketDetailModal {
         switch (packet.packet_type) {
             case 'text':
                 return p.text || '';
+            case 'dapnet_alpha':
+            case 'dapnet_numeric':
+                return p.text || '';
+            case 'dapnet_tone':
+                return 'Tone-only page (no text)';
+            case 'dapnet_activation':
+                return 'Activation page (no text)';
             case 'position': {
                 const parts = [];
                 if (p.latitude != null) parts.push(`${Number(p.latitude).toFixed(5)}°`);
@@ -346,7 +397,13 @@ class PacketDetailModal {
                 return [p.long_name, p.short_name, p.hw_model].filter(Boolean).join(' · ');
             case 'telemetry': {
                 const parts = [];
-                if (p.battery_level != null) parts.push(`battery ${p.battery_level}%`);
+                if (p.battery_level != null) {
+                    // Meshtastic firmware convention: 101 = externally
+                    // powered, no battery attached (not a real percentage).
+                    parts.push(p.battery_level === 101
+                        ? '\u{1F50C} battery powered'
+                        : `battery ${p.battery_level}%`);
+                }
                 if (p.voltage != null) parts.push(`${Number(p.voltage).toFixed(2)} V`);
                 if (p.temperature != null) {
                     const t = window.MeshpointDisplayUnits

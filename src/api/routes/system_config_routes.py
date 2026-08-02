@@ -343,6 +343,14 @@ async def update_serial_devices(
         d.label: (d.long_name, d.short_name) for d in _config.capture.serial
     }
 
+    # A blank serial_port means "auto-detect" -- fine for a single device,
+    # but among 2+ devices an ambiguous auto-detect row can re-open
+    # whatever port another row already has claimed and crash on the
+    # exclusive lock. Drop blank rows once there's more than one.
+    devices_in = req.devices
+    if len(devices_in) > 1:
+        devices_in = [d for d in devices_in if (d.serial_port or "").strip()]
+
     new_devices = [
         SerialDeviceConfig(
             label=d.label,
@@ -351,7 +359,7 @@ async def update_serial_devices(
             long_name=old_identity.get(d.label, (None, None))[0],
             short_name=old_identity.get(d.label, (None, None))[1],
         )
-        for d in req.devices
+        for d in devices_in
     ]
     _config.capture.serial = new_devices
 

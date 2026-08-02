@@ -307,6 +307,10 @@ class TestSetCompanionName(unittest.IsolatedAsyncioTestCase):
         result = await self._run("Mesh Lab East")
         self.assertFalse(result.success)
         self.assertIn("name in use", result.error)
+        # A clean firmware rejection is NOT the same as a dead
+        # connection -- timed_out must stay False so the caller doesn't
+        # unnecessarily reconnect a perfectly healthy companion.
+        self.assertFalse(result.timed_out)
         # Cache must NOT update if the rename was rejected -- otherwise
         # the dashboard would show a name the device doesn't actually
         # have.
@@ -343,6 +347,11 @@ class TestSetCompanionName(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(result.success)
         self.assertIn("timed out", result.error)
+        # timed_out=True is what tells MeshcoreUsbCaptureSource to treat
+        # this as a dead connection and reconnect immediately, rather
+        # than leaving it marked connected -- distinct from a clean
+        # firmware ERROR response, which doesn't set this flag.
+        self.assertTrue(result.timed_out)
         # On timeout we don't know whether the firmware accepted the
         # name; do not update the cache.
         self.assertEqual(self.mc.self_info["name"], "old-name")
@@ -355,6 +364,129 @@ class TestSetCompanionName(unittest.IsolatedAsyncioTestCase):
         self.mc.self_info = None
         result = await self._run("Mesh Lab East")
         self.assertTrue(result.success)
+
+
+class TestSendSetRadioParams(unittest.IsolatedAsyncioTestCase):
+    """Cover send_set_radio_params(): local range validation, the
+    set_radio()+reboot() sequence, ERROR/timeout handling. Standalone
+    function (no MeshCoreTxClient wrapper, unlike set_companion_name --
+    MeshcoreUsbCaptureSource.set_radio_params() calls it directly per
+    companion), so tests call it directly too."""
+
+    async def asyncSetUp(self):
+        from src.transmit.meshcore_tx_client import send_set_radio_params
+        self._send_set_radio_params = send_set_radio_params
+
+        self.mc = MagicMock()
+        self.set_radio_mock = AsyncMock()
+        self.reboot_mock = AsyncMock()
+        self.mc.commands.set_radio = self.set_radio_mock
+        self.mc.commands.reboot = self.reboot_mock
+        self._meshcore_mod = MagicMock(EventType=_FakeEventType)
+
+    def _ok_result(self):
+        result = MagicMock()
+        result.type = _FakeEventType.OK
+        return result
+
+    def _error_result(self, payload=None):
+        result = MagicMock()
+        result.type = _FakeEventType.ERROR
+        result.payload = payload
+        return result
+
+    async def _run(self, freq=433.650, bw=62.5, sf=8, cr=8):
+        async def immediate_wait_for(coro, timeout):
+            return await coro
+
+        with patch.dict("sys.modules", {"meshcore": self._meshcore_mod}):
+            with patch(
+                "src.transmit.meshcore_tx_client.asyncio.wait_for",
+                side_effect=immediate_wait_for,
+            ):
+                return await self._send_set_radio_params(self.mc, freq, bw, sf, cr)
+
+    async def test_not_connected_short_circuits(self):
+        result = await self._send_set_radio_params(None, 433.650, 62.5, 8, 8)
+        self.assertFalse(result.success)
+        self.assertEqual(result.error, "Not connected")
+        self.set_radio_mock.assert_not_called()
+
+    async def test_frequency_out_of_range_rejected_locally(self):
+        result = await self._run(freq=100.0)
+        self.assertFalse(result.success)
+        self.assertIn("frequency", result.error.lower())
+        self.set_radio_mock.assert_not_called()
+
+    async def test_bandwidth_out_of_range_rejected_locally(self):
+        result = await self._run(bw=1000.0)
+        self.assertFalse(result.success)
+        self.assertIn("bandwidth", result.error.lower())
+        self.set_radio_mock.assert_not_called()
+
+    async def test_spreading_factor_out_of_range_rejected_locally(self):
+        result = await self._run(sf=20)
+        self.assertFalse(result.success)
+        self.assertIn("spreading factor", result.error.lower())
+        self.set_radio_mock.assert_not_called()
+
+    async def test_coding_rate_out_of_range_rejected_locally(self):
+        result = await self._run(cr=1)
+        self.assertFalse(result.success)
+        self.assertIn("coding rate", result.error.lower())
+        self.set_radio_mock.assert_not_called()
+
+    async def test_ok_path_sets_radio_then_reboots(self):
+        self.set_radio_mock.return_value = self._ok_result()
+        self.reboot_mock.return_value = self._ok_result()
+        result = await self._run(433.650, 62.5, 8, 8)
+        self.assertTrue(result.success)
+        self.set_radio_mock.assert_awaited_once_with(433.650, 62.5, 8, 8)
+        self.reboot_mock.assert_awaited_once()
+
+    async def test_error_result_skips_reboot(self):
+        self.set_radio_mock.return_value = self._error_result({"reason": "bad params"})
+        result = await self._run()
+        self.assertFalse(result.success)
+        self.assertIn("bad params", result.error)
+        self.assertFalse(result.timed_out)
+        self.reboot_mock.assert_not_called()
+
+    async def test_error_with_no_payload(self):
+        self.set_radio_mock.return_value = self._error_result(None)
+        result = await self._run()
+        self.assertFalse(result.success)
+        self.assertIn("rejected", result.error.lower())
+        self.reboot_mock.assert_not_called()
+
+    async def test_reboot_failure_still_reports_success(self):
+        # set_radio already succeeded -- the companion commonly drops
+        # the connection immediately on reboot without a clean ack.
+        # That's expected, not a failure of the params-set itself.
+        self.set_radio_mock.return_value = self._ok_result()
+        self.reboot_mock.side_effect = Exception("connection closed")
+        result = await self._run()
+        self.assertTrue(result.success)
+
+    async def test_set_radio_timeout_returns_error(self):
+        import asyncio as _asyncio
+
+        async def raise_timeout(coro, *_args, **_kwargs):
+            if hasattr(coro, "close"):
+                coro.close()
+            raise _asyncio.TimeoutError()
+
+        with patch.dict("sys.modules", {"meshcore": self._meshcore_mod}):
+            with patch(
+                "src.transmit.meshcore_tx_client.asyncio.wait_for",
+                side_effect=raise_timeout,
+            ):
+                result = await self._send_set_radio_params(self.mc, 433.650, 62.5, 8, 8)
+
+        self.assertFalse(result.success)
+        self.assertIn("timed out", result.error)
+        self.assertTrue(result.timed_out)
+        self.reboot_mock.assert_not_called()
 
 
 if __name__ == "__main__":

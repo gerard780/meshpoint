@@ -1121,6 +1121,9 @@ mqtt:
   publish_json: false            # also publish JSON on /json/ topic
   location_precision: "exact"    # exact | approximate | none
   homeassistant_discovery: false # publish HA auto-discovery configs
+  map_reporting_enabled: false            # publish to the official Meshtastic map (opt-in)
+  map_report_interval_seconds: 3600       # minimum 3600 (Meshtastic's own minimum)
+  map_report_position_precision: 14       # 12 (least precise) - 15 (most precise)
 ```
 
 ### Transport TLS (not yet available)
@@ -1150,6 +1153,20 @@ Control how much location detail leaves the device via MQTT:
 | `none` | Location stripped entirely from MQTT messages |
 
 Full-precision location data is always available on the [Meshradar](https://meshradar.io) dashboard regardless of this setting.
+
+### Official Meshtastic Map
+
+The MQTT gateway above republishes packets *heard from other nodes*. This is separate: it publishes the Meshpoint's *own* identity onto the official Meshtastic map (a public, unencrypted MQTT `MapReport`, no LoRa airtime used). Off by default; requires `mqtt.enabled: true` and configured `device.latitude`/`device.longitude`/`transmit.node_id`.
+
+```yaml
+mqtt:
+  enabled: true
+  map_reporting_enabled: true
+  map_report_interval_seconds: 3600   # minimum 3600, matching Meshtastic's own minimum
+  map_report_position_precision: 14   # 12 (least precise) - 15 (most precise)
+```
+
+See [MQTT-AND-MESHRADAR.md](MQTT-AND-MESHRADAR.md#official-meshtastic-map) for details.
 
 ### Home Assistant Integration
 

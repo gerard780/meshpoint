@@ -79,6 +79,28 @@ class UpdateSerialDevicesTest(unittest.TestCase):
         self._put([{"label": "", "serial_port": "", "serial_baud": 115200}])
         self.assertIsNone(self.config.capture.serial[0].serial_port)
 
+    def test_blank_row_dropped_when_another_device_has_a_port(self):
+        """A blank row among 2+ devices is ambiguous auto-detect that could
+        re-open a port another row already claims -- must be dropped rather
+        than persisted (regression test for the startup-crash bug)."""
+        result, mock_save = self._put([
+            {"label": "433", "serial_port": "/dev/ttyUSB0", "serial_baud": 115200},
+            {"label": "", "serial_port": "", "serial_baud": 115200},
+        ])
+        self.assertEqual(result["saved"], True)
+        self.assertEqual(len(self.config.capture.serial), 1)
+        self.assertEqual(self.config.capture.serial[0].serial_port, "/dev/ttyUSB0")
+        section, values = mock_save.call_args[0]
+        self.assertEqual(len(values["serial"]), 1)
+
+    def test_two_blank_rows_both_dropped(self):
+        result, _ = self._put([
+            {"label": "", "serial_port": "", "serial_baud": 115200},
+            {"label": "", "serial_port": "  ", "serial_baud": 115200},
+        ])
+        self.assertEqual(result["saved"], True)
+        self.assertEqual(self.config.capture.serial, [])
+
     def test_enable_source_true_adds_serial_to_sources(self):
         self.config.capture.sources = ["concentrator"]
         self._put([{"label": "433", "serial_port": None}], enable_source=True)

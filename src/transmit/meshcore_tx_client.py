@@ -44,11 +44,25 @@ MESHCORE_MAX_USER_CHANNELS = MESHCORE_MAX_DEVICE_SLOTS - 1
 
 @dataclass
 class SendResult:
-    """Outcome of a MeshCore send attempt."""
+    """Outcome of a MeshCore send attempt.
+
+    ``timed_out`` is distinct from a plain ``success=False``: a firmware
+    ERROR response (e.g. "name in use") means the connection is healthy
+    and just rejected the request -- no action needed. A timeout means
+    we got NO answer at all within the deadline, which is real evidence
+    the connection itself is wedged (confirmed live: a companion whose
+    command channel died kept reporting `connected=True` and silently
+    swallowed every subsequent command -- set_name, set_radio, health
+    probes -- until something forced a reconnect). Callers use this
+    flag to trigger an immediate reconnect instead of waiting on the
+    health-check loop, which can be masked for a long time by ongoing
+    passive RX activity (see MeshcoreUsbCaptureSource._has_recent_event_activity).
+    """
 
     success: bool
     event_type: str = ""
     error: str = ""
+    timed_out: bool = False
 
 
 @dataclass
@@ -148,6 +162,78 @@ async def read_device_info(mc) -> Optional[DeviceInfo]:
     return DeviceInfo(protocol_version=int(fw_ver))
 
 
+async def send_set_radio_params(mc, freq: float, bw: float, sf: int, cr: int) -> SendResult:
+    """Set radio frequency/bandwidth/SF/CR via CMD_SET_RADIO_PARAMS on a
+    raw connection, then reboot the companion to apply it.
+
+    Mirrors the standalone `meshpoint meshcore-radio` CLI's
+    `_configure_async()` (src/cli/meshcore_radio_config.py) exactly --
+    same `set_radio()` + `reboot()` sequence, same firmware-side
+    validation range (confirmed against examples/companion_radio/
+    MyMesh.cpp's CMD_SET_RADIO_PARAMS handler: 150-2500 MHz, SF 5-12,
+    CR 5-8, BW 7-500 kHz) -- but reuses the ALREADY-OPEN connection
+    instead of stopping the service and cold-connecting a second
+    process. The standalone CLI has to do that cold reconnect within a
+    fixed handshake timeout, which can fail on ESP32-S3 boards that
+    need longer to come back up after a prior disconnect; going
+    through the live capture source instead means MeshcoreUsbCaptureSource's
+    own battle-tested reconnect loop (exponential backoff + DTR reset
+    pulse, see meshcore_usb_source.py's _reconnect()) picks the
+    connection back up post-reboot, rather than a single one-shot
+    attempt.
+
+    Unlike send_set_companion_name(), does NOT try to update any local
+    cache afterward -- the reboot invalidates the whole connection, so
+    there's nothing left to cache into. Callers are expected to treat
+    the source as disconnected immediately after a successful call and
+    let their normal reconnect path pick up the new settings.
+    """
+    if mc is None:
+        return SendResult(success=False, error="Not connected")
+
+    if not (150.0 <= freq <= 2500.0):
+        return SendResult(success=False, error=f"Frequency {freq} MHz out of range (150-2500)")
+    if not (7.0 <= bw <= 500.0):
+        return SendResult(success=False, error=f"Bandwidth {bw} kHz out of range (7-500)")
+    if not (5 <= sf <= 12):
+        return SendResult(success=False, error=f"Spreading factor {sf} out of range (5-12)")
+    if not (5 <= cr <= 8):
+        return SendResult(success=False, error=f"Coding rate {cr} out of range (5-8)")
+
+    try:
+        from meshcore import EventType
+    except Exception:
+        return SendResult(success=False, error="meshcore library unavailable")
+
+    try:
+        result = await asyncio.wait_for(mc.commands.set_radio(freq, bw, sf, cr), timeout=10.0)
+    except asyncio.TimeoutError:
+        return SendResult(success=False, error="set_radio timed out", timed_out=True)
+    except Exception as exc:
+        logger.exception("MeshCore set_radio failed")
+        return SendResult(success=False, error=str(exc))
+
+    if hasattr(result, "type") and result.type == EventType.ERROR:
+        payload = getattr(result, "payload", None)
+        detail = ""
+        if isinstance(payload, dict):
+            detail = str(payload.get("reason") or payload.get("error") or payload)
+        elif payload is not None:
+            detail = str(payload)
+        error = f"Companion rejected radio params: {detail}" if detail else "Companion rejected radio params"
+        return SendResult(success=False, error=error)
+
+    try:
+        await asyncio.wait_for(mc.commands.reboot(), timeout=10.0)
+    except Exception:
+        # The companion may drop the connection immediately on reboot
+        # without acking the command cleanly -- that's expected, not a
+        # failure: the params were already accepted above.
+        logger.debug("MeshCore reboot command did not cleanly ack (expected)", exc_info=True)
+
+    return SendResult(success=True)
+
+
 async def send_set_companion_name(mc, name: str) -> SendResult:
     """Rename a companion via CMD_SET_ADVERT_NAME (0x08) on a raw connection.
 
@@ -182,7 +268,7 @@ async def send_set_companion_name(mc, name: str) -> SendResult:
     try:
         result = await asyncio.wait_for(mc.commands.set_name(cleaned), timeout=10.0)
     except asyncio.TimeoutError:
-        return SendResult(success=False, error="set_name timed out")
+        return SendResult(success=False, error="set_name timed out", timed_out=True)
     except Exception as exc:
         logger.exception("MeshCore set_name failed")
         return SendResult(success=False, error=str(exc))
@@ -231,7 +317,7 @@ async def send_companion_advert(mc, flood: bool = False) -> SendResult:
         logger.info("MeshCore advert sent: %s", event_type)
         return SendResult(success=True, event_type=event_type)
     except asyncio.TimeoutError:
-        return SendResult(success=False, error="Advert timed out")
+        return SendResult(success=False, error="Advert timed out", timed_out=True)
     except Exception as exc:
         logger.exception("MeshCore advert send failed")
         return SendResult(success=False, error=str(exc))
@@ -254,7 +340,7 @@ async def send_mc_channel_message(mc, channel: int, text: str) -> SendResult:
         logger.info("MeshCore channel %d message sent: %s", channel, event_type)
         return SendResult(success=True, event_type=event_type)
     except asyncio.TimeoutError:
-        return SendResult(success=False, error="Send timed out")
+        return SendResult(success=False, error="Send timed out", timed_out=True)
     except Exception as exc:
         logger.exception("MeshCore channel send failed")
         return SendResult(success=False, error=str(exc))
@@ -275,7 +361,7 @@ async def send_mc_direct_message(mc, destination, text: str) -> SendResult:
         logger.info("MeshCore DM sent: %s", event_type)
         return SendResult(success=True, event_type=event_type)
     except asyncio.TimeoutError:
-        return SendResult(success=False, error="Send timed out")
+        return SendResult(success=False, error="Send timed out", timed_out=True)
     except Exception as exc:
         logger.exception("MeshCore DM send failed")
         return SendResult(success=False, error=str(exc))

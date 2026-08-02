@@ -83,14 +83,38 @@
 }
 
 /* Shared by the POCSAG "Companion firmware" and Serial "Meshtastic
-   firmware" cards -- each card's Board field sits directly above its
-   action buttons with nothing else in between (unlike most cards'
-   actions row, which follows several fields and gets incidental
-   breathing room from their combined height) -- scoped here rather
-   than adding margin-top to .cfg-card__actions globally, which would
-   touch ~30 other action rows across the app. */
+   firmware" cards, and Configuration -> Firmware's own MeshCore card --
+   each card's LAST field before its action buttons has nothing else in
+   between (unlike most cards' actions row, which follows several fields
+   and gets incidental breathing room from their combined height) --
+   scoped here rather than adding margin-top to .cfg-card__actions
+   globally, which would touch ~30 other action rows across the app. */
 .cfg-firmware-board-field {
     margin-bottom: 14px;
+}
+
+/* Configuration -> Firmware's own fields (Version/Flavor/Board/Device) --
+   .cfg-field--narrow's 140px was fine for the old MeshCore-card home,
+   but board names ("LilyGo_TLora_V2_1_1_6"), release tags
+   ("companion-v1.16.0"), and port descriptions ("ttyUSB3 -- CP2104 USB
+   to UART...") all clipped badly at that width. Scoped to this page's
+   own class rather than widening the shared .cfg-field--narrow, which
+   ~30 other, genuinely narrow fields elsewhere still rely on. */
+.cfg-firmware-field {
+    max-width: 340px;
+}
+
+/* "↻ Refresh"/"↻ Rescan USB" -- small manual-refresh buttons sitting
+   directly under the Version/Device fields (both are one-time fetches
+   at page mount, not kept live by a periodic poll the way meshcore_card
+   .js's own copy of this picker is). align-self overrides the parent
+   .cfg-field's flex-column stretch so this doesn't fill the full 340px
+   field width like the select above it. */
+.cfg-firmware-rescan {
+    align-self: flex-start;
+    margin-top: 4px;
+    padding: 4px 10px;
+    font-size: 12px;
 }
 
 .cfg-field--toggle {
@@ -737,5 +761,24 @@ select.cfg-field__input option:checked {
 @media (max-width: 720px) {
     .cfg-quick-deploy {
         grid-template-columns: 1fr;
+    }
+}
+
+/* Phone-width Configuration: the page/card padding stack (up to 32px +
+   20px per side) plus .cfg-firmware-field's 340px cap were sized for
+   desktop, leaving a wide unused gutter on both sides of every card on
+   a phone -- confirmed against a live screenshot, where the card was
+   visibly narrower than the topbar's own companion-status pills above
+   it. Tightens both paddings and lifts the 340px cap so fields (and the
+   card itself) actually use the available phone width. */
+@media (max-width: 480px) {
+    [data-section^="configuration/"] {
+        padding: 16px 12px;
+    }
+    .cfg-card {
+        padding: 14px;
+    }
+    .cfg-firmware-field {
+        max-width: none;
     }
 }

@@ -29,6 +29,7 @@ from src.transmit.meshcore_tx_client import (
     send_mc_channel_message,
     send_mc_direct_message,
     send_set_companion_name,
+    send_set_radio_params,
 )
 
 logger = logging.getLogger(__name__)
@@ -66,6 +67,14 @@ class MeshcoreUsbCaptureSource(CaptureSource):
         self._resolved_port: Optional[str] = None
         self._health_task: Optional[asyncio.Task] = None
         self._reconnect_task: Optional[asyncio.Task] = None
+        # Guards against two reconnect attempts running concurrently --
+        # e.g. the health-check loop's own inline _reconnect() call
+        # racing with a dashboard-command timeout's _trigger_reconnect()
+        # firing moments later. Both would otherwise call _disconnect()/
+        # _connect() on the same serial port at once, risking an
+        # orphaned MeshCore object and redundant DTR reset pulses on
+        # what may be an already-marginal DTR line. See _reconnect().
+        self._reconnect_in_progress: bool = False
         self._last_rf_signal: Optional[SignalMetrics] = None
         self._last_event_at: float = 0.0
         self._on_connected_callback = None
@@ -253,33 +262,55 @@ class MeshcoreUsbCaptureSource(CaptureSource):
         recovers from a stuck USB-CDC state that otherwise requires
         a manual unplug/replug. On boards where DTR is not wired
         to RESET the pulse is a harmless no-op.
+
+        Guarded against re-entrancy (self._reconnect_in_progress): two
+        different triggers can both decide a reconnect is needed within
+        the same window -- the health-check loop's own inline call and
+        a dashboard-command timeout's _trigger_reconnect(), for
+        instance. Without this guard both would call _disconnect()/
+        _connect() on the same port concurrently, risking an orphaned
+        MeshCore object from whichever attempt loses the race, and
+        doubling up DTR reset pulses on what confirmed live testing
+        showed can be a marginal line on some ports (only MeshCore's
+        capture source touches DTR at all -- the identical port/cable/
+        board worked fine under both Meshtastic and DAPNET firmware,
+        neither of which ever pulses it).
         """
-        await self._disconnect()
-        delay = _RECONNECT_BASE_DELAY_SECONDS
-        attempt = 0
-
-        while self._running:
-            logger.info(
-                "MeshCore USB reconnecting in %ds...", delay
+        if self._reconnect_in_progress:
+            logger.debug(
+                "MeshCore USB reconnect already in progress, skipping duplicate trigger"
             )
-            await asyncio.sleep(delay)
-            if not self._running:
-                return
+            return
+        self._reconnect_in_progress = True
+        try:
+            await self._disconnect()
+            delay = _RECONNECT_BASE_DELAY_SECONDS
+            attempt = 0
 
-            attempt += 1
-            if attempt >= 2 and self._resolved_port:
-                await asyncio.to_thread(
-                    self._pulse_dtr_reset, self._resolved_port
+            while self._running:
+                logger.info(
+                    "MeshCore USB reconnecting in %ds...", delay
                 )
-                # Give the chip a moment to come back from reset.
-                await asyncio.sleep(2.0)
+                await asyncio.sleep(delay)
+                if not self._running:
+                    return
 
-            await self._connect(self._resolved_port)
-            if self._connected:
-                logger.info("MeshCore USB reconnected successfully")
-                return
+                attempt += 1
+                if attempt >= 2 and self._resolved_port:
+                    await asyncio.to_thread(
+                        self._pulse_dtr_reset, self._resolved_port
+                    )
+                    # Give the chip a moment to come back from reset.
+                    await asyncio.sleep(2.0)
 
-            delay = min(delay * 2, _RECONNECT_MAX_DELAY_SECONDS)
+                await self._connect(self._resolved_port)
+                if self._connected:
+                    logger.info("MeshCore USB reconnected successfully")
+                    return
+
+                delay = min(delay * 2, _RECONNECT_MAX_DELAY_SECONDS)
+        finally:
+            self._reconnect_in_progress = False
 
     def _pulse_dtr_reset(self, port: str) -> None:
         """Toggle DTR low to soft-reset an ESP32 companion. Best-effort.
@@ -461,6 +492,42 @@ class MeshcoreUsbCaptureSource(CaptureSource):
             self._device_info_cache = info
         return info
 
+    def _trigger_reconnect(self, reason: str) -> None:
+        """Mark this companion disconnected and kick off recovery NOW,
+        via the same backoff+DTR-reset-pulse machinery that already
+        handles unexpected drops (_reconnect()) -- instead of leaving a
+        dead connection sitting there as "connected" until the
+        health-check loop eventually notices (which can take minutes,
+        and can be masked indefinitely by ongoing passive RX activity,
+        see _has_recent_event_activity()). Confirmed live: a companion
+        whose command channel silently died kept reporting connected
+        while every subsequent command (rename, radio change, health
+        probes) timed out, with nothing recovering it on its own.
+
+        No-ops if a reconnect is already running (_reconnect_in_progress)
+        -- e.g. the health-check loop's own inline reconnect already
+        kicked in moments earlier. Avoids cancelling _health_task and
+        spawning a second concurrent attempt for no benefit, since
+        _reconnect() itself would just no-op the duplicate anyway.
+        """
+        if self._reconnect_in_progress:
+            logger.debug(
+                "MeshCore companion %r: %s -- reconnect already in progress, skipping",
+                self.name, reason,
+            )
+            return
+        logger.warning(
+            "MeshCore companion %r: %s -- reconnecting now", self.name, reason,
+        )
+        if self._health_task:
+            self._health_task.cancel()
+            self._health_task = None
+        self._connected = False
+        self._reconnect_task = asyncio.create_task(
+            self._reconnect_until_connected(),
+            name="meshcore-command-timeout-reconnect",
+        )
+
     async def set_companion_name(self, name: str) -> SendResult:
         """Rename THIS companion via its own connection.
 
@@ -471,9 +538,46 @@ class MeshcoreUsbCaptureSource(CaptureSource):
         if not self.connected:
             return SendResult(success=False, error="Not connected")
         result = await send_set_companion_name(self._meshcore, name)
+        if result.timed_out:
+            self._trigger_reconnect("set_name timed out")
+            return result
         await self.restart_auto_fetching()
         if result.success:
             logger.info("MeshCore companion %r renamed to %r", self.name, (name or "").strip())
+        return result
+
+    async def set_radio_params(self, freq: float, bw: float, sf: int, cr: int) -> SendResult:
+        """Set THIS companion's radio frequency/bandwidth/SF/CR and reboot
+        it to apply, over its own already-open connection.
+
+        Unlike the standalone `meshpoint meshcore-radio` CLI (which has
+        to stop the whole meshpoint service, steal the port, and cold-
+        connect within a fixed handshake timeout -- and can fail on
+        ESP32-S3 boards that need longer than that to come back up),
+        this reuses the live connection the source already holds and
+        hands recovery off to the SAME reconnect machinery that
+        already handles unexpected disconnects (_reconnect(): backoff
+        + DTR reset pulse). The reboot the command triggers WILL kill
+        this connection -- that's expected, not an error condition, so
+        it's handled here rather than left for the health-check loop
+        to eventually notice (which could take minutes). A TIMEOUT
+        (as opposed to a clean firmware rejection) gets the same
+        treatment -- it means the connection was already wedged before
+        we even asked, so there's nothing to gain by leaving it marked
+        connected.
+        """
+        if not self.connected:
+            return SendResult(success=False, error="Not connected")
+        result = await send_set_radio_params(self._meshcore, freq, bw, sf, cr)
+        if result.timed_out:
+            self._trigger_reconnect("set_radio timed out")
+            return result
+        if not result.success:
+            return result
+
+        self._trigger_reconnect(
+            f"radio set to {freq:.3f} MHz / BW{bw:.1f} / SF{sf} / CR{cr} -- rebooting"
+        )
         return result
 
     async def send_advert(self, flood: bool = False) -> SendResult:
@@ -481,6 +585,9 @@ class MeshcoreUsbCaptureSource(CaptureSource):
         if not self.connected:
             return SendResult(success=False, error="Not connected")
         result = await send_companion_advert(self._meshcore, flood=flood)
+        if result.timed_out:
+            self._trigger_reconnect("advert send timed out")
+            return result
         await self.restart_auto_fetching()
         return result
 
@@ -492,6 +599,9 @@ class MeshcoreUsbCaptureSource(CaptureSource):
         if not self.connected:
             return SendResult(success=False, error="Not connected")
         result = await send_mc_direct_message(self._meshcore, destination, text)
+        if result.timed_out:
+            self._trigger_reconnect("direct message send timed out")
+            return result
         await self.restart_auto_fetching()
         return result
 
@@ -500,6 +610,9 @@ class MeshcoreUsbCaptureSource(CaptureSource):
         if not self.connected:
             return SendResult(success=False, error="Not connected")
         result = await send_mc_channel_message(self._meshcore, channel, text)
+        if result.timed_out:
+            self._trigger_reconnect("channel message send timed out")
+            return result
         await self.restart_auto_fetching()
         return result
 
