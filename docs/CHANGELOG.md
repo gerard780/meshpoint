@@ -210,6 +210,9 @@ First tagged release of the javastraat/meshpoint fork. Adds LoRaWAN sniffing, mu
 - **24-hour clock, three more stragglers** — the packet detail popup and MQTT config timestamps were missed on the first pass; also fixed a repeater date that was locked to US formatting. These three spots had quietly slipped through the original sweep.
 - **Metric units by default** for new browsers (Celsius, kilometers); existing imperial choices are kept. This only affects browsers that haven't already chosen a unit preference.
 - **Meshtastic and MeshCore sidebar icons are now their real marks**, not generic placeholders — Meshtastic's official "M-Powered" badge (greyed out until you're on the Meshtastic page, then shows full color) and MeshCore's own "M" glyph. Topology picked up MeshCore's old icon, freed up by the swap.
+- **DAPNET moved up in the sidebar**, right under MeshCore instead of after Topology — groups the four protocol pages (LoRaWAN, Meshtastic, MeshCore, DAPNET) together ahead of the cross-protocol views (Messages, Stats, Topology). Still only shows once a POCSAG companion is configured, unchanged.
+- **Hardware sidebar icon changed to a proper router glyph** (svgrepo.com), replacing the generic wifi-wave icon it used to share with Meshtastic (which now has its own real badge, see above).
+
 
 #### Import and maintenance scripts
 
