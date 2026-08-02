@@ -214,7 +214,8 @@ First tagged release of the javastraat/meshpoint fork. Adds LoRaWAN sniffing, mu
 - **Hardware sidebar icon changed to a proper router glyph** (svgrepo.com), replacing the generic wifi-wave icon it used to share with Meshtastic (which now has its own real badge, see above).
 - **RTL-SDR sidebar icon changed to a USB dongle glyph**, replacing an abstract antenna icon — RTL-SDR is literally a USB stick, so this reads clearer.
 - **Repeaters sidebar icon changed to a base-station/tower glyph**, replacing the old broadcast-arcs icon.
-- **Configuration → System subgroup dissolved.** Metrics moved under Configuration → Network (next to MQTT/Repeater Poll, since it's a network-exposed endpoint too); Advanced moved under Settings as an interim home (its two cards, Storage and Radio-advanced, are a temporary bundle pending a proper split later). Removes the confusing "System" showing up as both a Configuration subgroup and a separate Settings page.
+- **Configuration → System subgroup dissolved.** Metrics moved under Configuration → Network (next to MQTT/Repeater Poll, since it's a network-exposed endpoint too); Advanced moved under Settings as an interim home. Removes the confusing "System" showing up as both a Configuration subgroup and a separate Settings page.
+- **"Radio (advanced)" (spectral scan interval, SX1261 SPI path) split out of Settings → Advanced and moved onto Configuration → Radio**, between the main Radio card and NodeInfo — it's a radio-hardware setting, not a host-management one, so it belongs with the rest of the radio config. Settings → Advanced now holds only Storage retention.
 
 
 #### Import and maintenance scripts

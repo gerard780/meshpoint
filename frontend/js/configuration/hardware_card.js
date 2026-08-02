@@ -4,7 +4,8 @@
  * SenseCap M1 onboard fan/LED/button -- opt-in, this hardware doesn't
  * exist on RAK V2/Chameleon/DIY builds. Three independent forms (each
  * peripheral saves on its own), same multi-card-in-one-page layout as
- * AdvancedConfigCard.
+ * Configuration → Radio (RadioConfigEditCard + RadioAdvancedConfigCard
+ * + NodeInfoConfigCard stacked on one page).
  */
 
 class HardwareConfigCard {
