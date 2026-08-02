@@ -439,6 +439,19 @@
     stroke-width: 1.75;
 }
 
+/* Meshtastic's "M-Powered" mark is a fixed-palette badge, not a
+   currentColor line-icon, so it can't pick up the sidebar's normal
+   muted/active color tokens. Desaturated + dimmed until its route is
+   active, then shown at full brand color (including its own green). */
+.sidebar__icon--badge-mt svg {
+    filter: grayscale(1) opacity(0.5);
+    transition: filter var(--motion-fast) var(--ease-out-expo);
+}
+
+.sidebar__link[aria-current="page"] .sidebar__icon--badge-mt svg {
+    filter: none;
+}
+
 .sidebar__label {
     flex: 1;
     overflow: hidden;
