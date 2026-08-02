@@ -66,8 +66,8 @@ class ConfigurationPanel {
                         <div data-cfg-radio></div>
                         <div data-cfg-radio-advanced></div>
                         <div data-cfg-nodeinfo-edit></div>
-                        <div data-cfg-nodeinfo-status></div>
                         <div data-cfg-telemetry-edit></div>
+                        <div data-cfg-nodeinfo-status></div>
                         <div data-cfg-telemetry-status></div>
                     </div>
                 `;

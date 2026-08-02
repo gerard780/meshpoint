@@ -216,6 +216,7 @@ First tagged release of the javastraat/meshpoint fork. Adds LoRaWAN sniffing, mu
 - **Repeaters sidebar icon changed to a base-station/tower glyph**, replacing the old broadcast-arcs icon.
 - **Configuration → System subgroup dissolved.** Metrics moved under Configuration → Network (next to MQTT/Repeater Poll, since it's a network-exposed endpoint too); Advanced moved under Settings as an interim home. Removes the confusing "System" showing up as both a Configuration subgroup and a separate Settings page.
 - **"Radio (advanced)" (spectral scan interval, SX1261 SPI path) split out of Settings → Advanced and moved onto Configuration → Radio**, between the main Radio card and NodeInfo — it's a radio-hardware setting, not a host-management one, so it belongs with the rest of the radio config. Settings → Advanced now holds only Storage retention.
+- **Configuration → Radio card order fixed**: NodeInfo and Telemetry Broadcast edit forms now sit together, followed by both their status cards — previously edit/status pairs were interleaved per-feature instead of grouped by input-then-output.
 
 
 #### Import and maintenance scripts
