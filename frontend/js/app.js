@@ -45,7 +45,7 @@ document.addEventListener('DOMContentLoaded', async () => {
             'configuration/identity', 'configuration/radio',
             'configuration/channels', 'configuration/transmit',
             'configuration/mqtt',
-            'configuration/gps', 'configuration/advanced',
+            'configuration/gps', 'configuration/storage',
             'configuration/peripherals',
             'configuration/meshcore', 'configuration/serial',
             'configuration/pocsag-serial', 'configuration/firmware',

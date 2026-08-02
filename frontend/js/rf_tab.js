@@ -124,7 +124,7 @@ class RfTab {
                         <div class="rf-histogram-wrap">
                             <canvas id="rf-histogram" aria-label="Spectral scan histogram"></canvas>
                             <div id="rf-histogram-empty" class="rf-histogram-empty" hidden>
-                                No hardware scan yet. Enable spectral scan under Configuration → Advanced
+                                No hardware scan yet. Enable spectral scan under Configuration → Radio
                                 or wait for the first scheduled scan.
                             </div>
                         </div>
@@ -463,9 +463,9 @@ class RfTab {
             );
         }
         if (!scan.enabled) {
-            return 'Hardware scan disabled. Set spectral scan interval under Configuration → Advanced.';
+            return 'Hardware scan disabled. Set spectral scan interval under Configuration → Radio.';
         }
-        return 'No hardware scan yet. Wait for the first scheduled scan or check Configuration → Advanced.';
+        return 'No hardware scan yet. Wait for the first scheduled scan or check Configuration → Radio.';
     }
 }
 

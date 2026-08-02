@@ -1,12 +1,15 @@
 /**
- * Configuration → Advanced card.
+ * Settings → Storage card.
  *
- * Storage retention only. Radio spectral-scan tuning moved to
- * Configuration → Radio (RadioAdvancedConfigCard); relay enable/rate
- * live on Transmit; MeshCore USB on Configuration → MeshCore.
+ * Storage retention only. Route/permission scope is `configuration/storage`
+ * (kept under the `configuration` prefix rather than moving to `settings/`
+ * -- only the sidebar position and label changed, see project memory
+ * 2026-08-02). Radio spectral-scan tuning moved to Configuration → Radio
+ * (RadioAdvancedConfigCard); relay enable/rate live on Transmit; MeshCore
+ * USB on Configuration → MeshCore.
  */
 
-class AdvancedConfigCard {
+class StorageConfigCard {
     constructor(api) {
         this._api = api;
         this._root = null;
@@ -96,4 +99,4 @@ class AdvancedConfigCard {
     }
 }
 
-window.AdvancedConfigCard = AdvancedConfigCard;
+window.StorageConfigCard = StorageConfigCard;

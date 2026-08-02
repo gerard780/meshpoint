@@ -4,9 +4,11 @@
  * Single responsibility: load ``/api/config`` once, mount the right
  * editable card into each Configuration subsection container, and
  * re-render every card on data changes. The subsections (Identity,
- * Radio, Channels, MeshCore, Serial, Transmit, MQTT, GPS, Advanced,
+ * Radio, Channels, MeshCore, Serial, Transmit, MQTT, GPS, Storage,
  * Peripherals, Repeater Poll, Metrics)
  * all mount dedicated editable cards from ``frontend/js/configuration/``.
+ * ("Storage" lives under the Settings sidebar group, not Configuration --
+ * kept on this same panel/route prefix regardless, see storage_card.js.)
  * The observational read-only versions (``RadioIdentityCard``,
  * ``RadioConfigCard``, ``RadioChannels``, ``RadioCompanionCard``)
  * live on the top-level Radio page only.
@@ -222,13 +224,13 @@ class ConfigurationPanel {
                     this._cards.set('position-status', posStatus);
                 }
             }
-        } else if (section === 'advanced' && window.AdvancedConfigCard) {
-            const host = document.getElementById('cfg-advanced-panel');
+        } else if (section === 'storage' && window.StorageConfigCard) {
+            const host = document.getElementById('cfg-storage-panel');
             if (host) {
                 host.innerHTML = '';
-                const card = new window.AdvancedConfigCard(api);
+                const card = new window.StorageConfigCard(api);
                 card.mount(host);
-                this._cards.set('advanced', card);
+                this._cards.set('storage', card);
             }
         } else if (section === 'peripherals' && window.HardwareConfigCard) {
             const host = document.getElementById('cfg-peripherals-panel');

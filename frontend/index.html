@@ -348,11 +348,11 @@
                         <ul class="sidebar__sublist">
                             <li class="sidebar__subitem"><a href="#/settings/updates" class="sidebar__link" data-route="settings/updates"><span class="sidebar__label">Updates</span></a></li>
                             <li class="sidebar__subitem"><a href="#/settings/auth" class="sidebar__link" data-route="settings/auth"><span class="sidebar__label">Auth</span></a></li>
-                            <!-- Route/permission scope deliberately left as configuration/advanced --
-                                 only the sidebar position moved. Its two cards (Storage, Radio
-                                 advanced) are a temporary bundle; user plans to split them out to
-                                 their correct pages later, see project memory 2026-08-02. -->
-                            <li class="sidebar__subitem"><a href="#/configuration/advanced" class="sidebar__link" data-route="configuration/advanced"><span class="sidebar__label">Advanced</span></a></li>
+                            <!-- Lives under Settings; kept under the "configuration" route/permission
+                                 prefix since the page's own content (storage.py backend, /api/config/storage)
+                                 is unrelated to the configuration/settings split -- only the sidebar
+                                 position and label changed, see project memory 2026-08-02. -->
+                            <li class="sidebar__subitem"><a href="#/configuration/storage" class="sidebar__link" data-route="configuration/storage"><span class="sidebar__label">Storage</span></a></li>
                             <li class="sidebar__subitem" data-requires-section="settings.dangerous"><a href="#/settings/dangerous" class="sidebar__link" data-route="settings/dangerous"><span class="sidebar__label">System</span></a></li>
                         </ul>
                     </li>
@@ -723,7 +723,7 @@
             <section class="section" data-section="configuration/transmit" style="display:none"><div id="cfg-transmit-panel" class="section__placeholder"><h2>Configuration · Transmit</h2><p>Skeleton; TX power + duty cycle + relay.</p></div></section>
             <section class="section" data-section="configuration/mqtt" style="display:none"><div id="cfg-mqtt-panel" class="section__placeholder"><h2>Configuration · MQTT</h2><p>Loading…</p></div></section>
             <section class="section" data-section="configuration/gps" style="display:none"><div id="cfg-gps-panel" class="section__placeholder"><h2>Configuration · GPS</h2><p>Loading…</p></div></section>
-            <section class="section" data-section="configuration/advanced" style="display:none"><div id="cfg-advanced-panel" class="section__placeholder"><h2>Configuration · Advanced</h2><p>Loading…</p></div></section>
+            <section class="section" data-section="configuration/storage" style="display:none"><div id="cfg-storage-panel" class="section__placeholder"><h2>Settings · Storage</h2><p>Loading…</p></div></section>
             <section class="section" data-section="configuration/peripherals" style="display:none"><div id="cfg-peripherals-panel" class="section__placeholder"><h2>Configuration · Peripherals</h2><p>Loading…</p></div></section>
             <section class="section" data-section="configuration/repeater-poll" style="display:none"><div id="cfg-repeater-poll-panel" class="section__placeholder"><h2>Configuration · Repeater Poll</h2><p>Loading…</p></div></section>
             <section class="section" data-section="configuration/metrics" style="display:none"><div id="cfg-metrics-panel" class="section__placeholder"><h2>Configuration · Metrics</h2><p>Loading…</p></div></section>
@@ -1087,7 +1087,7 @@
     <script src="js/configuration/gps_skyplot.js"></script>
     <script src="js/configuration/gps_stats_column.js"></script>
     <script src="js/configuration/gps_card.js"></script>
-    <script src="js/configuration/advanced_card.js"></script>
+    <script src="js/configuration/storage_card.js"></script>
     <script src="js/configuration/hardware_card.js"></script>
     <script src="js/configuration/configuration_panel.js"></script>
     <script src="/vendor/xterm/xterm.js"></script>

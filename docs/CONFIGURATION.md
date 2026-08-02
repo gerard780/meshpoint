@@ -791,7 +791,7 @@ storage:
   cleanup_interval_seconds: 3600
 ```
 
-Packets and telemetry are stored in a local SQLite database. Old rows are pruned automatically once each table exceeds its cap (oldest-first) — `max_packets_retained` covers raw captured RF packets, `max_telemetry_retained` covers battery/voltage/temperature history (feeds the node drawer and Repeater Trends charts). Messages (DM/channel chat history) and the node roster are never auto-pruned. Both editable from Configuration → Advanced.
+Packets and telemetry are stored in a local SQLite database. Old rows are pruned automatically once each table exceeds its cap (oldest-first) — `max_packets_retained` covers raw captured RF packets, `max_telemetry_retained` covers battery/voltage/temperature history (feeds the node drawer and Repeater Trends charts). Messages (DM/channel chat history) and the node roster are never auto-pruned. Both editable from Settings → Storage.
 
 ### Prometheus metrics (`/metrics`)
 
@@ -869,7 +869,7 @@ Open **RF Environment** in the sidebar for a full-page noise-floor sparkline, ca
 
 - **Live scan** — hardware spectral scan on the tuned channel (`radio.spectral_scan_interval_seconds` > 0 and SX1261/HAL support present)
 - **Packet fallback** — rolling minimum of `RSSI − SNR` when scan is disabled or unavailable
-- Set `radio.spectral_scan_interval_seconds: 0` in **Configuration → Advanced** to disable hardware scan; the tab shows a clear message and uses packet fallback only
+- Set `radio.spectral_scan_interval_seconds: 0` in **Configuration → Radio** to disable hardware scan; the tab shows a clear message and uses packet fallback only
 
 ---
 
