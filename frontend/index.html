@@ -323,16 +323,12 @@
                             </li>
                             <li class="sidebar__subitem"><a href="#/configuration/mqtt" class="sidebar__link" data-route="configuration/mqtt"><span class="sidebar__label">MQTT</span></a></li>
                             <li class="sidebar__subitem"><a href="#/configuration/repeater-poll" class="sidebar__link" data-route="configuration/repeater-poll"><span class="sidebar__label">Repeater Poll</span></a></li>
+                            <li class="sidebar__subitem"><a href="#/configuration/metrics" class="sidebar__link" data-route="configuration/metrics"><span class="sidebar__label">Metrics</span></a></li>
                             <li class="sidebar__group-header" aria-hidden="true">
                                 <span class="sidebar__group-header-label">Hardware</span>
                             </li>
                             <li class="sidebar__subitem"><a href="#/configuration/gps" class="sidebar__link" data-route="configuration/gps"><span class="sidebar__label">GPS</span></a></li>
                             <li class="sidebar__subitem"><a href="#/configuration/peripherals" class="sidebar__link" data-route="configuration/peripherals"><span class="sidebar__label">Peripherals</span></a></li>
-                            <li class="sidebar__group-header" aria-hidden="true">
-                                <span class="sidebar__group-header-label">System</span>
-                            </li>
-                            <li class="sidebar__subitem"><a href="#/configuration/advanced" class="sidebar__link" data-route="configuration/advanced"><span class="sidebar__label">Advanced</span></a></li>
-                            <li class="sidebar__subitem"><a href="#/configuration/metrics" class="sidebar__link" data-route="configuration/metrics"><span class="sidebar__label">Metrics</span></a></li>
                         </ul>
                     </li>
 
@@ -352,6 +348,11 @@
                         <ul class="sidebar__sublist">
                             <li class="sidebar__subitem"><a href="#/settings/updates" class="sidebar__link" data-route="settings/updates"><span class="sidebar__label">Updates</span></a></li>
                             <li class="sidebar__subitem"><a href="#/settings/auth" class="sidebar__link" data-route="settings/auth"><span class="sidebar__label">Auth</span></a></li>
+                            <!-- Route/permission scope deliberately left as configuration/advanced --
+                                 only the sidebar position moved. Its two cards (Storage, Radio
+                                 advanced) are a temporary bundle; user plans to split them out to
+                                 their correct pages later, see project memory 2026-08-02. -->
+                            <li class="sidebar__subitem"><a href="#/configuration/advanced" class="sidebar__link" data-route="configuration/advanced"><span class="sidebar__label">Advanced</span></a></li>
                             <li class="sidebar__subitem" data-requires-section="settings.dangerous"><a href="#/settings/dangerous" class="sidebar__link" data-route="settings/dangerous"><span class="sidebar__label">System</span></a></li>
                         </ul>
                     </li>
