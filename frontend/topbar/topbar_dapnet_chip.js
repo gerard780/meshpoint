@@ -40,12 +40,13 @@ class TopbarDapnetChip {
         const callsign = (dev.callsign || '').trim();
         const callText = !reachable ? 'Reconnecting…' : (callsign || '----');
 
-        const root = document.createElement('span');
+        const root = document.createElement('a');
         root.className = 'topbar-serial topbar-dapnet';
+        root.href = '#/dapnet';
         root.setAttribute(
             'aria-label',
             `DAPNET ${callsign || 'companion'} `
-                + `${!reachable ? 'reconnecting' : (connected ? 'connected' : 'offline')}`,
+                + `${!reachable ? 'reconnecting' : (connected ? 'connected' : 'offline')} -- go to DAPNET page`,
         );
         root.title = !reachable
             ? 'Reconnecting to the dashboard…'

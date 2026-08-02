@@ -150,7 +150,21 @@ Full runbook: **[WisMesh Node guide](WISMESH-NODE.md)**. See also [Onboarding](O
 | Helium WHIP / Linxdot Indoor | Not validated | Same chip family as RAK V2 but the carrier varies; community testing welcome |
 | Bobcat Miner 300 (G285) | Not validated | G290/G295 community path documented; G285 untested |
 | Nebra Indoor (Rock Pi 4 + SX1301) | Not supported | Daughter board uses SX1301, not SX1302/SX1303; different HAL |
+| Meryiot (and other SX1308 gateway boards) | Not supported | SX1308 is the same older concentrator generation as SX1301; different HAL |
 | Single-channel SX1276/SX1262 boards | Not for concentrator role | These are single-channel radios. They can run as a [MeshCore USB companion](#meshcore-usb-companion-radios), not as the main concentrator. |
+
+**Why SX1301/SX1308 don't work:** Meshpoint's entire radio stack
+(`src/hal/sx1302_wrapper.py`, and the patched HAL in `extra/sx1302_hal`) is
+built against Semtech's newer "HAL v2" (`sx1302_hal`) used by SX1302/SX1303.
+SX1301 and SX1308 are an older concentrator generation that speaks a
+different, incompatible "HAL v1" (`lora_gateway`) — different config struct
+layouts, a different RF front-end (SX1257/SX1255 instead of SX1250, so TX
+gain/calibration doesn't translate), no SX1261 companion chip (no spectral
+scan for the Band spectrum / RF Environment features), and a different
+register map (the Meshtastic sync-word patches in `sx1302_wrapper.py` poke
+SX1302-specific registers that don't exist on SX1301/1308). Supporting it
+would mean building and validating a second HAL wrapper from Semtech's v1
+source against real hardware — not a config change or quick fix.
 
 ---
 

@@ -51,12 +51,13 @@ class TopbarSerialChip {
         // Same wording as the MeshCore chip's name slot in this state.
         const callText = !reachable ? 'Reconnecting…' : (ownId || '----');
 
-        const root = document.createElement('span');
+        const root = document.createElement('a');
         root.className = 'topbar-serial';
+        root.href = '#/meshtastic';
         root.setAttribute(
             'aria-label',
             `Meshtastic USB ${ownId || 'device'} `
-                + `${!reachable ? 'reconnecting' : (connected ? 'connected' : 'offline')}`,
+                + `${!reachable ? 'reconnecting' : (connected ? 'connected' : 'offline')} -- go to Meshtastic page`,
         );
         root.title = !reachable
             ? 'Reconnecting to the dashboard…'

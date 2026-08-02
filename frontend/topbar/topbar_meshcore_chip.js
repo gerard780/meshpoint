@@ -48,12 +48,13 @@ class TopbarMeshcoreChip {
         const radio = companion.radio || {};
         const label = this._companionLabel(companion.name);
 
-        const root = document.createElement('span');
+        const root = document.createElement('a');
         root.className = 'topbar-meshcore';
+        root.href = '#/meshcore';
         root.setAttribute(
             'aria-label',
             `MeshCore companion ${label ? `${label} ` : ''}`
-                + `${!reachable ? 'reconnecting' : (connected ? 'connected' : 'offline')}`,
+                + `${!reachable ? 'reconnecting' : (connected ? 'connected' : 'offline')} -- go to MeshCore page`,
         );
 
         const brand = document.createElement('span');
