@@ -6172,3 +6172,7 @@ Verified: `node --check` clean on both touched files; `tests/test_html_assets.py
 Two refinements flagged for whenever this gets built (not decided yet, just noted so they aren't forgotten): (1) a timeout back to idle if the button goes untouched for a few seconds while in the menu, so it can't get stuck showing a stale menu; (2) whether a new incoming message arriving while someone's mid-menu should interrupt immediately or wait until they exit the menu -- leaning toward "wait," so a message doesn't yank the menu away mid-selection, but genuinely still open.
 
 **Status: still pure brainstorming, nothing built.** Full picture now spans this entry + the previous "concentrator idle-capacity brainstorm + Pager project scoped" entry above -- read both together for the complete plan when this gets picked up for real.
+
+---
+
+**Settings -> Storage blank-page bug: closed out with live confirmation on the Pi, 2026-08-02.** User confirmed via a live screenshot of `sensecap.local:8080/#/settings/storage` on the deployed Pi (v0.7.9): the Storage page now populates correctly on a real fresh load -- Max Packets Retained (1000000), Max Telemetry Rows Retained (100000), Cleanup Interval (3600s) all showing real values with a working Save button. This closes the debugging thread from the `_bootConfigurationPanel` duplicate route-guard fix earlier in this session -- no longer just `node --check` + unit-test verified, now confirmed against real production traffic. Thread fully done.
