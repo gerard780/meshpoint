@@ -31,7 +31,8 @@ class ConfigurationPanel {
     async onSectionEnter(route) {
         // Storage lives under the Settings sidebar group/route, but its
         // mounting logic stays on this panel rather than a dedicated
-        // controller -- see storage_card.js.
+        // controller -- see storage_card.js. (app.js's _bootConfigurationPanel
+        // has a matching check before it even calls this method.)
         const isStorage = route === 'settings/storage';
         if (!isStorage && !route.startsWith('configuration/')) return;
         const section = isStorage ? 'storage' : route.slice('configuration/'.length);

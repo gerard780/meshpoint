@@ -377,7 +377,10 @@ function _bootConfigurationPanel(router) {
     const panel = new window.ConfigurationPanel();
     panel.bind();
     router.onRouteChange((route) => {
-        if (!route || !route.startsWith('configuration/')) return;
+        // Storage lives under the Settings sidebar group but is still
+        // mounted by this panel (see configuration_panel.js's own
+        // onSectionEnter, which has the matching settings/storage check).
+        if (!route || (route !== 'settings/storage' && !route.startsWith('configuration/'))) return;
         panel.onSectionEnter(route);
     });
 }

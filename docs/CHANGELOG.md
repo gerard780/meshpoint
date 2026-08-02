@@ -219,6 +219,7 @@ First tagged release of the javastraat/meshpoint fork. Adds LoRaWAN sniffing, mu
 - **Configuration → Radio card order fixed**: NodeInfo and Telemetry Broadcast edit forms now sit together, followed by both their status cards — previously edit/status pairs were interleaved per-feature instead of grouped by input-then-output.
 - **Settings → Advanced renamed to Settings → Storage**, matching what it actually holds now that Radio (advanced) moved out. In-app hints pointing at the old spectral-scan location were also fixed to say Configuration → Radio instead. The rename is complete end to end — URL route (`settings/storage`) and permission key (`settings.storage`, its own key rather than the generic Settings bucket, same pattern as `settings/dangerous`) now match the sidebar position, not just the visible label.
 - **Fixed malformed SVG path data on the Meshtastic sidebar badge, the Repeaters icon, and the Settings gear icon** — a missing separator between adjacent decimal numbers (e.g. `.57.81` instead of `.57,.81`) that some browsers logged as a console error while rendering.
+- **Fixed: Settings → Storage never actually loaded**, staying stuck on "Loading…" forever. A leftover route-prefix check in `app.js` (added before Storage moved under Settings) silently blocked the page's mount call before it ever ran.
 
 
 #### Import and maintenance scripts
