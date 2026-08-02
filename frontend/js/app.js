@@ -45,12 +45,12 @@ document.addEventListener('DOMContentLoaded', async () => {
             'configuration/identity', 'configuration/radio',
             'configuration/channels', 'configuration/transmit',
             'configuration/mqtt',
-            'configuration/gps', 'configuration/storage',
+            'configuration/gps',
             'configuration/peripherals',
             'configuration/meshcore', 'configuration/serial',
             'configuration/pocsag-serial', 'configuration/firmware',
             'configuration/repeater-poll', 'configuration/metrics',
-            'settings/updates', 'settings/auth', 'settings/dangerous',
+            'settings/updates', 'settings/auth', 'settings/dangerous', 'settings/storage',
         ],
         guard: _buildRouteGuard(identity),
         onDenied: _toastAdminRequired,
@@ -469,6 +469,7 @@ function _buildRouteGuard(identity) {
         }
         if (route === 'terminal') return 'terminal';
         if (route === 'settings/dangerous') return 'settings.dangerous';
+        if (route === 'settings/storage') return 'settings.storage';
         if (route.startsWith('settings/')) return 'settings';
         return null; // everything else is open to any signed-in role
     };

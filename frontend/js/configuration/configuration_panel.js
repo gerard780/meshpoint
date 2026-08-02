@@ -29,8 +29,12 @@ class ConfigurationPanel {
     }
 
     async onSectionEnter(route) {
-        if (!route.startsWith('configuration/')) return;
-        const section = route.slice('configuration/'.length);
+        // Storage lives under the Settings sidebar group/route, but its
+        // mounting logic stays on this panel rather than a dedicated
+        // controller -- see storage_card.js.
+        const isStorage = route === 'settings/storage';
+        if (!isStorage && !route.startsWith('configuration/')) return;
+        const section = isStorage ? 'storage' : route.slice('configuration/'.length);
         await this._loadConfig();
         this._mountSection(section);
         this._renderAll();
@@ -225,7 +229,7 @@ class ConfigurationPanel {
                 }
             }
         } else if (section === 'storage' && window.StorageConfigCard) {
-            const host = document.getElementById('cfg-storage-panel');
+            const host = document.getElementById('settings-storage-panel');
             if (host) {
                 host.innerHTML = '';
                 const card = new window.StorageConfigCard(api);

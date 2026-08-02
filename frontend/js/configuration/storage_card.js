@@ -1,12 +1,13 @@
 /**
  * Settings → Storage card.
  *
- * Storage retention only. Route/permission scope is `configuration/storage`
- * (kept under the `configuration` prefix rather than moving to `settings/`
- * -- only the sidebar position and label changed, see project memory
- * 2026-08-02). Radio spectral-scan tuning moved to Configuration → Radio
- * (RadioAdvancedConfigCard); relay enable/rate live on Transmit; MeshCore
- * USB on Configuration → MeshCore.
+ * Storage retention only. Route is `settings/storage`, permission key is
+ * `settings.storage` (its own key, same pattern as `settings/dangerous` ->
+ * `settings.dangerous`, rather than falling into the generic `settings`
+ * bucket) -- mounted by ConfigurationPanel regardless, see
+ * configuration_panel.js's onSectionEnter(). Radio spectral-scan tuning
+ * moved to Configuration → Radio (RadioAdvancedConfigCard); relay
+ * enable/rate live on Transmit; MeshCore USB on Configuration → MeshCore.
  */
 
 class StorageConfigCard {
