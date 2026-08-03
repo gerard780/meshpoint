@@ -1071,6 +1071,13 @@ def _inject_tx_gain_into_source(coord: PipelineCoordinator) -> None:
         return
 
     async def _start_with_tx_gain() -> None:
+        from src.capture.concentrator_source import (
+            PAGER_FSK_FREQUENCY_HZ,
+            PAGER_FSK_RF_CHAIN,
+            PAGER_FSK_SYNC_WORD,
+            PAGER_FSK_SYNC_WORD_SIZE,
+        )
+
         conc_source._wrapper.load()
         conc_source._wrapper.reset()
         conc_source._wrapper.configure(conc_source._channel_plan)
@@ -1079,6 +1086,14 @@ def _inject_tx_gain_into_source(coord: PipelineCoordinator) -> None:
             "TX gain LUT configured: %d entries on RF chain 0",
             len(RAK2287_TX_GAIN_LUT),
         )
+        if conc_source._pager_enabled:
+            conc_source._wrapper.configure_fsk_channel(
+                rf_chain=PAGER_FSK_RF_CHAIN,
+                rf_chain_freq_hz=conc_source._channel_plan.radio_1_freq_hz,
+                frequency_hz=PAGER_FSK_FREQUENCY_HZ,
+                sync_word=PAGER_FSK_SYNC_WORD,
+                sync_word_size=PAGER_FSK_SYNC_WORD_SIZE,
+            )
         conc_source._wrapper.start()
         conc_source._wrapper.set_syncword(conc_source._syncword)
         conc_source._wrapper.set_tx_syncword(conc_source._syncword)
