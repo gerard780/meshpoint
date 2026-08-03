@@ -64,10 +64,32 @@ _STATUS_NAMES = {
 }
 
 MOD_LORA = 0x10
+MOD_FSK = 0x20
 TX_MODE_IMMEDIATE = 0
 TX_STATUS = 1
 TX_STATUS_FREE = 2
 TX_STATUS_EMITTING = 4
+
+# ch9, the SX1302's dedicated FSK IF chain -- genuinely independent
+# hardware from ch8 (LoRa service, Meshtastic) and ch0-7 (LoRa multi-SF,
+# LoRaWAN), each with its own separate config context and sync word
+# (confirmed against extra/sx1302_hal's real HAL source: loragw_hal.c's
+# CONTEXT_FSK is a wholly separate struct from CONTEXT_LORA_SERVICE, and
+# the hardware capability table in loragw_sx1302.c lists IF_LORA_STD and
+# IF_FSK_STD as two of ten independent, simultaneously-active modems --
+# not a mode switch). Used for the emergency pager project's own
+# framing, deliberately not the POCSAG protocol.
+FSK_IF_CHAIN = 9
+# FSK datarate (bps) valid range per loragw_hal.h's DR_FSK_MIN/MAX.
+FSK_DATARATE_MIN = 500
+FSK_DATARATE_MAX = 250_000
+# FSK RX bandwidth reuses the same BW_125/250/500KHZ constants LoRa uses
+# (loragw_hal.h's own comment: "values available for the 'bandwidth'
+# parameters (LoRa & FSK)") -- BW_125KHZ is the narrowest defined option,
+# comfortably wide for a low-baud-rate custom protocol; may need tuning
+# once tested against real hardware.
+FSK_DEFAULT_BANDWIDTH = BW_125KHZ
+FSK_DEFAULT_DATARATE = 4_800
 
 
 @dataclass
@@ -83,6 +105,11 @@ class ConcentratorPacket:
     coderate: int
     crc_ok: bool
     timestamp_us: int
+    # "lora" or "fsk" -- lets a caller pulling packets from receive()
+    # (which serves both Meshtastic/LoRaWAN's LoRa channels and the
+    # pager's FSK channel from the same poll) tell them apart without
+    # guessing from spreading_factor/coderate being meaningless on FSK.
+    modulation: str = "lora"
 
 
 class SX1302Wrapper:
@@ -258,6 +285,12 @@ class SX1302Wrapper:
                     pkt.rssic, pkt.snr, pkt.size,
                 )
 
+            # pkt.datarate is the same underlying C field for both
+            # modulations (loragw_hal.h): 5-12 (a real spreading factor)
+            # for LoRa, or the raw FSK bitrate in bps for FSK -- passed
+            # through as-is either way; check .modulation to know which
+            # meaning applies rather than assuming spreading_factor is
+            # always a real SF.
             packets.append(
                 ConcentratorPacket(
                     payload=bytes(pkt.payload[: pkt.size]),
@@ -269,6 +302,7 @@ class SX1302Wrapper:
                     coderate=pkt.coderate,
                     crc_ok=(pkt.status == STAT_CRC_OK),
                     timestamp_us=pkt.count_us,
+                    modulation="fsk" if pkt.modulation == MOD_FSK else "lora",
                 )
             )
 
@@ -371,6 +405,80 @@ class SX1302Wrapper:
                 "TX sync word override 0x%02X active (SF7-SF12 transmissions)",
                 syncword,
             )
+
+    def configure_fsk_channel(
+        self,
+        rf_chain: int,
+        rf_chain_freq_hz: int,
+        frequency_hz: int,
+        sync_word: int,
+        sync_word_size: int = 2,
+        datarate: int = FSK_DEFAULT_DATARATE,
+        bandwidth: int = FSK_DEFAULT_BANDWIDTH,
+    ) -> None:
+        """Configure ch9, the dedicated FSK IF chain, for RX (call before
+        start(), same as the main LoRa channel plan via configure()).
+
+        Deliberately a standalone method rather than folded into
+        ConcentratorChannelPlan/_configure_if_channels() -- ch9 is wholly
+        independent hardware (own config context, own sync word; see the
+        FSK_IF_CHAIN comment above) serving a different project (the
+        emergency pager) with its own custom framing, not part of the
+        Meshtastic/LoRaWAN channel plan those methods manage.
+
+        Args:
+            rf_chain: which RF chain (0 or 1) ch9 attaches to. Must land
+                within that chain's own tuning window (its own multi-SF
+                channels' frequencies +/- ~490 kHz) -- ch9 does not get
+                its own separate RF front-end, only its own IF/demod.
+            rf_chain_freq_hz: that RF chain's own center/anchor
+                frequency (e.g. plan.radio_1_freq_hz), needed to compute
+                the IF offset the same way _configure_if_channels() does
+                for the main plan's channels.
+            frequency_hz: the pager's absolute target frequency, e.g.
+                869_462_500 (within the 869.4-869.65 MHz ETSI high-power
+                sub-band, already covered by this fork's RF1 anchor at
+                869.525 MHz -- no RF retuning needed for that specific
+                choice).
+            sync_word / sync_word_size: the pager's own FSK sync word,
+                distinct from LoRaWAN's 0x34 and Meshtastic's 0x2B --
+                this is what actually gives it real isolation, unlike
+                the ch5-7 dead end explored earlier (those share ch0-7's
+                one LoRaWAN sync-word register, no per-channel override
+                exists in this HAL).
+            datarate: FSK bitrate in bps (500-250,000 valid range).
+            bandwidth: RX bandwidth; reuses BW_125/250/500KHZ (loragw_hal.h:
+                "values available for the 'bandwidth' parameters (LoRa &
+                FSK)"), not a separate FSK-specific enum.
+        """
+        if self._lib is None:
+            self.load()
+        if not (FSK_DATARATE_MIN <= datarate <= FSK_DATARATE_MAX):
+            raise ValueError(
+                f"FSK datarate {datarate} out of range "
+                f"({FSK_DATARATE_MIN}-{FSK_DATARATE_MAX} bps)"
+            )
+
+        conf = LgwConfRxifS()
+        conf.enable = True
+        conf.rf_chain = rf_chain
+        conf.freq_hz = frequency_hz - rf_chain_freq_hz
+        conf.bandwidth = bandwidth
+        conf.datarate = datarate
+        conf.sync_word_size = sync_word_size
+        conf.sync_word = sync_word
+
+        result = self._lib.lgw_rxif_setconf(FSK_IF_CHAIN, ctypes.byref(conf))
+        if result != LGW_HAL_SUCCESS:
+            raise RuntimeError(
+                f"lgw_rxif_setconf({FSK_IF_CHAIN}) failed for FSK channel"
+            )
+        logger.info(
+            "FSK channel (ch%d) configured: %d Hz (IF %+d Hz from RF%d), "
+            "%d bps, sync 0x%0*X",
+            FSK_IF_CHAIN, frequency_hz, conf.freq_hz, rf_chain,
+            datarate, sync_word_size * 2, sync_word,
+        )
 
     # ── TX operations ───────────────────────────────────────────────
 
