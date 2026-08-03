@@ -172,6 +172,7 @@ class ConfigurationPanel {
                         <div data-firmware-meshtastic></div>
                         <div data-firmware-meshcore></div>
                         <div data-firmware-pocsag></div>
+                        <div data-firmware-pager></div>
                     </div>
                 `;
                 if (window.MeshtasticFirmwareConfigCard) {
@@ -188,6 +189,11 @@ class ConfigurationPanel {
                     const pocsag = new window.PocsagFirmwareConfigCard(api);
                     pocsag.mount(host.querySelector('[data-firmware-pocsag]'));
                     this._cards.set('firmware-pocsag', pocsag);
+                }
+                if (window.PagerFirmwareConfigCard) {
+                    const pager = new window.PagerFirmwareConfigCard(api);
+                    pager.mount(host.querySelector('[data-firmware-pager]'));
+                    this._cards.set('firmware-pager', pager);
                 }
             }
         } else if (section === 'transmit' && window.TransmitConfigCard) {

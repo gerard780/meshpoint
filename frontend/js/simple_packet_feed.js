@@ -68,8 +68,12 @@ class SimplePacketFeed {
 
         const freqMhz = sig.frequency_mhz || packet.frequency_mhz;
         const freq = freqMhz ? `${Number(freqMhz).toFixed(1)}` : '--';
+        // Same underlying field for both modulations (see sx1302_wrapper.py's
+        // own comment): a real spreading factor for LoRa, raw bps for the
+        // pager project's FSK channel -- "SFn" is only meaningful for the
+        // former, a pager row would otherwise show a nonsensical "SF4800".
         const sfVal = sig.spreading_factor || packet.spreading_factor;
-        const sf = sfVal ? `SF${sfVal}` : '--';
+        const sf = !sfVal ? '--' : (protocol === 'pager' ? `${sfVal}bps` : `SF${sfVal}`);
 
         tr.innerHTML = `
             <td>${time}</td>

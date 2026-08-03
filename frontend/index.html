@@ -154,6 +154,17 @@
                             <span class="sidebar__label">MeshCore</span>
                         </a>
                     </li>
+                    <li class="sidebar__item" data-requires-config="radio_pager.pager_enabled">
+                        <a href="#/pager" class="sidebar__link" data-route="pager">
+                            <span class="sidebar__icon">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+                                    <polyline points="22,6 12,13 2,6"/>
+                                </svg>
+                            </span>
+                            <span class="sidebar__label">Pager</span>
+                        </a>
+                    </li>
                     <li class="sidebar__item" data-requires-source="pocsag_serial">
                         <a href="#/dapnet" class="sidebar__link" data-route="dapnet">
                             <span class="sidebar__icon">
@@ -167,17 +178,6 @@
                                 </svg>
                             </span>
                             <span class="sidebar__label">DAPNET</span>
-                        </a>
-                    </li>
-                    <li class="sidebar__item" data-requires-config="radio_pager.pager_enabled">
-                        <a href="#/pager" class="sidebar__link" data-route="pager">
-                            <span class="sidebar__icon">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                                    <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
-                                    <polyline points="22,6 12,13 2,6"/>
-                                </svg>
-                            </span>
-                            <span class="sidebar__label">Pager</span>
                         </a>
                     </li>
                     <li class="sidebar__item">
@@ -1093,6 +1093,7 @@
     <script src="js/configuration/meshcore_firmware_card.js"></script>
     <script src="js/configuration/meshtastic_firmware_card.js"></script>
     <script src="js/configuration/pocsag_firmware_card.js"></script>
+    <script src="js/configuration/pager_firmware_card.js"></script>
     <script src="js/configuration/repeater_poll_card.js"></script>
     <script src="js/configuration/metrics_card.js"></script>
     <script src="js/configuration/transmit_card.js"></script>

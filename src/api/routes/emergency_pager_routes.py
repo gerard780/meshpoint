@@ -113,6 +113,15 @@ async def pager_messages(
             "rssi": row.get("rssi"),
             "snr": row.get("snr"),
             "frequency_mhz": row.get("frequency_mhz"),
+            # Included so the frontend's PacketDetailModal (row-click detail
+            # popup) has real data to show rather than needing to guess/
+            # synthesize From/To/capture_source client-side.
+            "protocol": "pager",
+            "source_id": row.get("source_id"),
+            "destination_id": row.get("destination_id"),
+            "packet_type": row.get("packet_type"),
+            "capture_source": row.get("capture_source"),
+            "decrypted": bool(row.get("decrypted")),
         }
         for row in rows
     ]

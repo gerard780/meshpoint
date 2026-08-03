@@ -164,6 +164,23 @@ class PagerDashboardPanel {
 
         document.getElementById('pgd-send-form')
             ?.addEventListener('submit', (e) => this._handleSend(e));
+
+        this._wireRowClicks('pgd-inbox-tbody', () => this._inbox);
+        this._wireRowClicks('pgd-outbox-tbody', () => this._outbox);
+    }
+
+    /** Opens PacketDetailModal for a clicked Inbox/Outbox row -- same
+     * pattern as dapnet_panel.js's own packet-table click handler. */
+    _wireRowClicks(tbodyId, getRows) {
+        const tbody = document.getElementById(tbodyId);
+        if (!tbody) return;
+        tbody.addEventListener('click', (e) => {
+            const tr = e.target.closest('tr[data-pkt]');
+            if (!tr || !window.PacketDetailModal) return;
+            const pkt = (getRows() || [])[Number(tr.dataset.pkt)];
+            if (!pkt) return;
+            window.PacketDetailModal.show(pkt, { selectedRow: tr });
+        });
     }
 
     _setTab(tab) {
@@ -240,8 +257,8 @@ class PagerDashboardPanel {
             return;
         }
         if (empty) empty.style.display = 'none';
-        tbody.innerHTML = this._inbox.map((m) => `
-            <tr class="lw-pkt-row">
+        tbody.innerHTML = this._inbox.map((m, i) => `
+            <tr class="lw-pkt-row" data-pkt="${i}">
                 <td class="lw-time">${this._fmtTime(m.timestamp)}</td>
                 <td class="lw-text">${this._esc(m.text || '')}</td>
                 <td>${m.rssi != null ? m.rssi.toFixed(1) : '--'}</td>
@@ -260,8 +277,8 @@ class PagerDashboardPanel {
             return;
         }
         if (empty) empty.style.display = 'none';
-        tbody.innerHTML = this._outbox.map((m) => `
-            <tr class="lw-pkt-row">
+        tbody.innerHTML = this._outbox.map((m, i) => `
+            <tr class="lw-pkt-row" data-pkt="${i}">
                 <td class="lw-time">${this._fmtTime(m.timestamp)}</td>
                 <td class="lw-text">${this._esc(m.text || '')}</td>
                 <td><span class="lw-badge">Sent</span></td>

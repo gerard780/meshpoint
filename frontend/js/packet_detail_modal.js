@@ -101,6 +101,15 @@ class PacketDetailModal {
                 },
             };
         }
+        // pager_dashboard_panel.js's GET /api/pager/messages rows carry
+        // `text` top-level too (same reasoning as DAPNET above) --
+        // reshape into the common decoded_payload.text shape.
+        if (packet && packet.protocol === 'pager' && !packet.decoded_payload) {
+            return {
+                ...packet,
+                decoded_payload: { text: packet.text },
+            };
+        }
         return packet;
     }
 
@@ -203,7 +212,10 @@ class PacketDetailModal {
         const cr = sig.coding_rate || packet.coding_rate;
 
         const modemParts = [];
-        if (sf != null) modemParts.push(`SF${sf}`);
+        // Same field, different meaning per modulation (see
+        // simple_packet_feed.js's own comment) -- a pager row's "sf" is
+        // really its raw FSK bitrate in bps, not a spreading factor.
+        if (sf != null) modemParts.push(protocol === 'pager' ? `${sf}bps` : `SF${sf}`);
         if (bw != null) modemParts.push(`BW${Number(bw)}`);
         // LoRaWAN packet rows from protocol endpoints do not currently
         // carry coding_rate, while live feed packets may. Hide CR for
