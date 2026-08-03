@@ -1790,6 +1790,7 @@ def _init_routes(
         concentrator_source=_find_concentrator_source(coord),
         config=config,
     )
+    pager_firmware_routes.init_routes(config=config)
     meshtastic_routes.init_routes(
         coord.packet_repo, coord.node_repo, device_name=_dev_name,
     )

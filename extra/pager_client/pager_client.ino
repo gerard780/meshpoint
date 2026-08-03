@@ -90,13 +90,30 @@
   "text":"..."} -- same convention pocsag_companion.ino's own serial
   protocol already uses, reused deliberately rather than a hand-rolled
   binary layout (self-describing, and ArduinoJson is already a
-  dependency here). A capcode is just a plain integer; this device
-  listens on one or more (MY_CAPCODES below -- e.g. its own personal
-  number plus a shared address like 911 for broadcasts everyone should
-  see), and only surfaces a received message whose "to" matches one of
-  them. Sending stamps MY_SEND_CAPCODE as "from" and a hardcoded
-  SEND_TO_CAPCODE as "to" -- like the radio parameters above, real
-  capcode values are hardcoded for now, not fetched from the dashboard.
+  dependency here). A capcode is just a plain integer.
+
+  This device answers to every address in MY_CAPCODES (its own personal
+  number, plus optionally one or more group/team addresses -- a single
+  pager can belong to more than one group at once), plus every shared
+  EMERGENCY_CAPCODES address (911 US / 112 EU -- broadcasts everyone
+  should see regardless of group membership) -- it only surfaces a
+  received message whose "to" matches one of those. Sending stamps
+  MY_CAPCODES[0] (the first entry -- the personal number, by convention,
+  not a group address) as "from" and SEND_TO_CAPCODE (this box's own
+  radio.pager_capcode -- the base station this pager reports back to)
+  as "to".
+
+  Unlike the radio parameters above (genuinely fixed per deployment),
+  MY_CAPCODES and SEND_TO_CAPCODE are DELIBERATELY NOT meant to be hand-
+  edited here -- each physical pager needs its own identity/group
+  membership, so these are placeholders rewritten at compile time by
+  Configuration -> Firmware's Pager client card (a "Capcodes to program"
+  field, comma-separated, feeds MY_CAPCODES; SEND_TO_CAPCODE comes from
+  this box's already-configured radio.pager_capcode automatically). See
+  src/api/routes/pager_firmware_routes.py's _rewrite_my_capcodes()/
+  _rewrite_send_to_capcode(). A manual compile without going through
+  that dashboard flow keeps whatever value was last injected (or the
+  placeholder below, on a fresh checkout).
 */
 
 #include <Arduino.h>
@@ -145,18 +162,22 @@ SX1262 radio = new Module(LORA_CS, LORA_DIO1, LORA_RST, LORA_BUSY);
 Adafruit_SSD1306 display(OLED_WIDTH, OLED_HEIGHT, &Wire, OLED_RST_PIN);
 
 // ---------- Capcodes (see header comment's "Addressing" section) ----------
-// Hardcoded for now, same reasoning as the radio parameters above.
-// Placeholder numbers -- replace with this device's real assigned
-// capcode and whatever it should actually send to before real use.
-// This device answers to either of these "to" addresses:
-const uint32_t MY_CAPCODES[] = { 911, 123456 };
+// Placeholders -- rewritten at compile time by Configuration -> Firmware's
+// Pager client card ("Capcodes to program", comma-separated), NOT meant
+// to be hand-edited (see header comment). More than one lets a single
+// unit belong to a personal number plus one or more group/team addresses
+// (e.g. a squad capcode) at once -- the FIRST entry is used as "from"
+// when this device sends.
+const uint32_t MY_CAPCODES[] = { 123456UL };
 const int NUM_MY_CAPCODES = sizeof(MY_CAPCODES) / sizeof(MY_CAPCODES[0]);
-// ...but sends AS its own personal number (not the shared 911 address),
-// and only ever TO this hardcoded recipient for now (no recipient
-// picker on a one-button device -- see the New Message tab's own "to"
-// field for how the dashboard side chooses a recipient instead).
-const uint32_t MY_SEND_CAPCODE = 123456;
-const uint32_t SEND_TO_CAPCODE = 654321;
+const uint32_t SEND_TO_CAPCODE = 654321UL;
+
+// Shared broadcast addresses every pager listens on regardless of its own
+// personal capcode -- 911 (US) and 112 (EU) emergency numbers. Genuinely
+// fixed (not per-unit), so these stay hand-edited here rather than
+// dashboard-injected, unlike MY_CAPCODE/SEND_TO_CAPCODE above.
+const uint32_t EMERGENCY_CAPCODES[] = { 911, 112 };
+const int NUM_EMERGENCY_CAPCODES = sizeof(EMERGENCY_CAPCODES) / sizeof(EMERGENCY_CAPCODES[0]);
 
 // ---------- Canned messages ----------
 // Placeholder wording -- easy to edit/extend, not a fixed protocol. Kept
@@ -308,6 +329,11 @@ void handleReceivedPacket() {
       if (to == MY_CAPCODES[i]) { forMe = true; break; }
     }
     if (!forMe) {
+      for (int i = 0; i < NUM_EMERGENCY_CAPCODES; i++) {
+        if (to == EMERGENCY_CAPCODES[i]) { forMe = true; break; }
+      }
+    }
+    if (!forMe) {
       Serial.printf("[RX] ignored (to=%lu, not one of ours)\n", (unsigned long)to);
       radio.startReceive();
       return;
@@ -335,7 +361,7 @@ void sendCannedMessage(int idx) {
   const char* msg = CANNED_MESSAGES[idx];
 
   JsonDocument doc;
-  doc["from"] = MY_SEND_CAPCODE;
+  doc["from"] = MY_CAPCODES[0]; // primary/personal number, not a group address
   doc["to"] = SEND_TO_CAPCODE;
   doc["text"] = msg;
   char buf[256];
@@ -343,7 +369,7 @@ void sendCannedMessage(int idx) {
 
   int state = radio.transmit((uint8_t*)buf, len);
   Serial.printf("[TX] from=%lu to=%lu \"%s\" -> %s\n",
-                (unsigned long)MY_SEND_CAPCODE, (unsigned long)SEND_TO_CAPCODE,
+                (unsigned long)MY_CAPCODES[0], (unsigned long)SEND_TO_CAPCODE,
                 msg, state == RADIOLIB_ERR_NONE ? "OK" : "FAIL");
   // transmit() leaves the radio in TX/idle state -- must explicitly go
   // back to RX or every message sent would also deafen this device to

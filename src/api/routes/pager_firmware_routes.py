@@ -13,6 +13,17 @@ much simpler sketch:
   Meshpoint at all, unlike a configured POCSAG/MeshCore/Meshtastic companion,
   so flashing here never needs to pause/resume a live capture source first.
 
+Also handles per-unit capcode injection: pager_client.ino's MY_CAPCODES[]
+(one or more capcodes this specific physical pager should answer to --
+its personal number, optionally plus one or more group/team addresses)
+and SEND_TO_CAPCODE (the base station it replies to) are placeholders in
+the checked-out sketch, rewritten on disk right before each compile --
+MY_CAPCODES from this request's ``my_capcodes`` list, SEND_TO_CAPCODE
+from this box's own already-configured ``radio.pager_capcode``. Same
+"rewrite a source-level placeholder before compiling" idea as
+pocsag_firmware_routes.py's board-select handling, just a numeric
+literal instead of a comment-toggle.
+
 ``_ndjson``/``_stream_subprocess`` are duplicated from pocsag_firmware_routes.py
 rather than shared -- matches the existing convention (dab_routes.py,
 meshcore_firmware_routes.py, and meshtastic_firmware_routes.py each keep
@@ -24,17 +35,19 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from pathlib import Path
 from typing import AsyncIterator, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from src.api.audit import AuditLogWriter
 from src.api.audit.dependencies import get_audit_writer
 from src.api.auth.dependencies import require_admin
 from src.api.auth.jwt_session import SessionClaims
+from src.config import AppConfig
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +58,51 @@ _ARDUINO_CLI_BIN = "arduino-cli"
 _ARDUINO_CLI_CONFIG = "/opt/arduino-cli/arduino-cli.yaml"
 _FQBN = "esp32:esp32:heltec_wifi_lora_32_V3"
 _BOARD_LABEL = "Heltec V3"
+
+_config: AppConfig | None = None
+
+_UINT32_MAX = 0xFFFFFFFF
+
+# Matches the whole `const uint32_t MY_CAPCODES[] = { ... };` initializer
+# line -- deliberately scoped to this one declaration so it can never
+# touch EMERGENCY_CAPCODES[] (a different, deliberately NOT-injected
+# array, see pager_client.ino's own comment) or anything else in the file.
+_MY_CAPCODES_RE = re.compile(
+    r"(const uint32_t MY_CAPCODES\[\] = )\{[^}]*\}(;)"
+)
+_SEND_TO_CAPCODE_RE = re.compile(
+    r"(const uint32_t SEND_TO_CAPCODE = )\d+(UL;)"
+)
+
+
+def init_routes(config: AppConfig) -> None:
+    global _config
+    _config = config
+
+
+def _sketch_ino_path() -> Path:
+    return _SKETCH_DIR / "pager_client.ino"
+
+
+def _rewrite_my_capcodes(text: str, capcodes: list[int]) -> str:
+    literal = "{ " + ", ".join(f"{c}UL" for c in capcodes) + " }"
+    new_text, count = _MY_CAPCODES_RE.subn(rf"\g<1>{literal}\g<2>", text)
+    if count != 1:
+        raise RuntimeError(
+            f"expected exactly one MY_CAPCODES[] definition in "
+            f"pager_client.ino, found {count}"
+        )
+    return new_text
+
+
+def _rewrite_send_to_capcode(text: str, value: int) -> str:
+    new_text, count = _SEND_TO_CAPCODE_RE.subn(rf"\g<1>{value}\g<2>", text)
+    if count != 1:
+        raise RuntimeError(
+            f"expected exactly one SEND_TO_CAPCODE definition in "
+            f"pager_client.ino, found {count}"
+        )
+    return new_text
 
 
 def _ndjson(payload: dict) -> bytes:
@@ -111,20 +169,52 @@ async def firmware_targets(_claims: SessionClaims = Depends(require_admin)) -> d
     return {"boards": [{"macro": "HELTEC_V3", "label": _BOARD_LABEL, "fqbn": _FQBN}]}
 
 
+class CompileRequest(BaseModel):
+    my_capcodes: list[int] = Field(..., min_length=1)
+
+
 @router.post("/compile/stream")
 async def compile_firmware_stream(
+    req: CompileRequest,
     claims: SessionClaims = Depends(require_admin),
     audit: AuditLogWriter = Depends(get_audit_writer),
 ) -> StreamingResponse:
-    """Compile pager_client.ino, streaming arduino-cli's own stdout/stderr
+    """Compile pager_client.ino for the capcode(s) this specific physical
+    unit should answer to, streaming arduino-cli's own stdout/stderr
     live. The compiled artifact lands in arduino-cli's own build cache
     (/opt/arduino-cli/cache), keyed by sketch path + fqbn -- the matching
-    flash/stream call below finds it there."""
+    flash/stream call below finds it there.
+
+    ``my_capcodes`` (this device's personal number, optionally plus one
+    or more group/team addresses) and this box's own configured
+    ``radio.pager_capcode`` (SEND_TO_CAPCODE -- the base station a reply
+    goes to) are rewritten into the sketch on disk first, mirroring
+    pocsag_firmware_routes.py's board-select rewrite. Leaves the
+    checked-out file in that state afterward, same as that precedent.
+    """
+    if _config is None:
+        raise HTTPException(503, "Config not loaded")
+    for code in req.my_capcodes:
+        if not (0 <= code <= _UINT32_MAX):
+            raise HTTPException(400, f"capcode {code} out of range (0-{_UINT32_MAX})")
+    send_to = _config.radio.pager_capcode
 
     async def body() -> AsyncIterator[bytes]:
         with audit.timed_action(
-            user=claims.subject, action="pager_firmware.compile", params={},
+            user=claims.subject, action="pager_firmware.compile",
+            params={"my_capcodes": req.my_capcodes, "send_to_capcode": send_to},
         ) as ctx:
+            ino_path = _sketch_ino_path()
+            text = ino_path.read_text()
+            text = _rewrite_my_capcodes(text, req.my_capcodes)
+            text = _rewrite_send_to_capcode(text, send_to)
+            ino_path.write_text(text)
+            yield _ndjson({
+                "type": "line", "stream": "stdout",
+                "text": f"Programming capcodes {req.my_capcodes}, "
+                        f"reporting to {send_to}…",
+            })
+
             cmd = [
                 _ARDUINO_CLI_BIN, "--config-file", _ARDUINO_CLI_CONFIG,
                 "compile", "-v", "--fqbn", _FQBN, str(_SKETCH_DIR),

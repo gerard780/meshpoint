@@ -35,6 +35,17 @@ class PagerFirmwareConfigCard {
                             companion.
                         </p>
                     </header>
+                    <label class="cfg-field cfg-firmware-field">
+                        <span class="cfg-field__label">Capcodes to program</span>
+                        <input class="cfg-field__input" type="text" data-firmware-capcodes
+                               placeholder="e.g. 123456, 654321">
+                        <p class="cfg-field__hint">
+                            Comma-separated. This unit will answer to all of these (its
+                            personal number, plus any group/team addresses) as well as
+                            911/112 emergency, in addition to always reporting to this
+                            box's own configured pager capcode.
+                        </p>
+                    </label>
                     <label class="cfg-field cfg-firmware-field cfg-firmware-board-field">
                         <span class="cfg-field__label">Device to flash</span>
                         <select class="cfg-field__input" data-firmware-device></select>
@@ -170,9 +181,25 @@ class PagerFirmwareConfigCard {
     }
 
     async _compileFirmware() {
+        const input = this._root.querySelector('[data-firmware-capcodes]');
+        const status = this._root.querySelector('[data-firmware-status]');
+        const raw = (input?.value || '').trim();
+
+        const myCapcodes = raw
+            .split(',')
+            .map((s) => s.trim())
+            .filter((s) => s.length > 0)
+            .map((s) => Number(s));
+
+        if (myCapcodes.length === 0 || myCapcodes.some((n) => !Number.isInteger(n) || n < 0)) {
+            status.dataset.kind = 'error';
+            status.textContent = 'Enter at least one valid capcode (comma-separated whole numbers).';
+            return;
+        }
+
         await this._runFirmwareStream(
             '/api/pager/firmware/compile/stream',
-            {},
+            { my_capcodes: myCapcodes },
             'Compiling for Heltec V3…',
             'Compiled',
         );
