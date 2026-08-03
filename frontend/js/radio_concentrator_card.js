@@ -30,10 +30,12 @@ class RadioConcentratorCard {
         this._root.style.display = '';
 
         const rows = channels.map((ch) => {
-            const sf = ch.spreading_factor
-                ? `SF${ch.spreading_factor}`
-                : 'SF7–12';
-            const proto = ch.protocol === 'meshtastic' ? 'Meshtastic' : 'LoRaWAN';
+            const sf = ch.protocol === 'pager'
+                ? `${(ch.datarate_bps / 1000).toFixed(1)}k FSK`
+                : (ch.spreading_factor ? `SF${ch.spreading_factor}` : 'SF7–12');
+            const proto = ch.protocol === 'meshtastic' ? 'Meshtastic'
+                : ch.protocol === 'pager' ? 'Pager'
+                : 'LoRaWAN';
             const stateClass = ch.enabled
                 ? 'ch-table__pill ch-table__pill--on'
                 : 'ch-table__pill ch-table__pill--off';

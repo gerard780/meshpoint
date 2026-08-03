@@ -139,6 +139,29 @@ def _concentrator_status(config: AppConfig) -> dict:
             "enabled": single.enabled,
         })
 
+    # ch9: the emergency pager project's dedicated FSK channel -- genuinely
+    # independent hardware from ch0-8 above, not part of the plan those
+    # come from. Always listed (like the disabled ch5-7 rows) so the row
+    # exists as soon as pager_enabled is turned on, not just after a
+    # restart with the frontend also changed. Frequency/sync word are
+    # fixed constants (see concentrator_source.py), not configurable.
+    from src.capture.concentrator_source import (
+        PAGER_FSK_FREQUENCY_HZ,
+        PAGER_FSK_RF_CHAIN,
+        PAGER_FSK_SYNC_WORD,
+    )
+    channels.append({
+        "ch": 9,
+        "frequency_mhz": round(PAGER_FSK_FREQUENCY_HZ / 1e6, 4),
+        "bandwidth_khz": 125.0,
+        "spreading_factor": None,
+        "datarate_bps": 4800,
+        "syncword": f"0x{PAGER_FSK_SYNC_WORD:06X}",
+        "protocol": "pager",
+        "rf_chain": PAGER_FSK_RF_CHAIN,
+        "enabled": radio.pager_enabled,
+    })
+
     return {
         "active": active,
         "radio_0_mhz": round(plan.radio_0_freq_hz / 1e6, 4),
