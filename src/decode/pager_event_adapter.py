@@ -7,7 +7,7 @@ reused deliberately rather than a hand-rolled binary layout, since it's
 self-describing/extensible and ArduinoJson is already a pager_client.ino
 dependency): one JSON object per frame, ``{"from": <capcode>, "to":
 <capcode>, "text": "<message>"}``. ``from``/``to`` are POCSAG-style
-capcodes (plain integers, e.g. this fork's own 2041152, or a shared
+capcodes (plain integers -- a device's own personal number, or a shared
 address like 911 multiple pagers listen on for broadcasts) -- see
 project memory for the addressing design discussion.
 """

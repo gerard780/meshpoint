@@ -146,15 +146,17 @@ Adafruit_SSD1306 display(OLED_WIDTH, OLED_HEIGHT, &Wire, OLED_RST_PIN);
 
 // ---------- Capcodes (see header comment's "Addressing" section) ----------
 // Hardcoded for now, same reasoning as the radio parameters above.
+// Placeholder numbers -- replace with this device's real assigned
+// capcode and whatever it should actually send to before real use.
 // This device answers to either of these "to" addresses:
-const uint32_t MY_CAPCODES[] = { 911, 2041153 };
+const uint32_t MY_CAPCODES[] = { 911, 123456 };
 const int NUM_MY_CAPCODES = sizeof(MY_CAPCODES) / sizeof(MY_CAPCODES[0]);
 // ...but sends AS its own personal number (not the shared 911 address),
 // and only ever TO this hardcoded recipient for now (no recipient
 // picker on a one-button device -- see the New Message tab's own "to"
 // field for how the dashboard side chooses a recipient instead).
-const uint32_t MY_SEND_CAPCODE = 2041153;
-const uint32_t SEND_TO_CAPCODE = 2041152;
+const uint32_t MY_SEND_CAPCODE = 123456;
+const uint32_t SEND_TO_CAPCODE = 654321;
 
 // ---------- Canned messages ----------
 // Placeholder wording -- easy to edit/extend, not a fixed protocol. Kept

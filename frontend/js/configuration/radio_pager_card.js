@@ -22,7 +22,8 @@ class RadioPagerConfigCard {
                     <h3 class="cfg-card__title">Radio (pager)</h3>
                     <p class="cfg-card__hint">
                         Emergency pager project, ch9 (FSK) -- internal/experimental,
-                        no pager firmware exists yet. Frequency must stay inside the
+                        firmware exists (extra/pager_client) but hasn't been flashed or
+                        tested on real hardware yet. Frequency must stay inside the
                         ETSI EU868 "sub-band P" high-power window (869.40-869.65 MHz)
                         and close enough to RF1's anchor for this hardware to actually
                         tune to it (validated on save).
@@ -36,7 +37,7 @@ class RadioPagerConfigCard {
                     <label class="cfg-field">
                         <span class="cfg-field__label">My pager capcode</span>
                         <input class="cfg-field__input" type="number" min="0"
-                               placeholder="e.g. 2041152" data-radio-pager-capcode>
+                               placeholder="e.g. 123456" data-radio-pager-capcode>
                         <span class="cfg-field__hint">
                             This device's own POCSAG-style address -- the "from" on every
                             message it sends, and required before it will transmit at all.
