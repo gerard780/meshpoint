@@ -149,7 +149,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     _bootConfigurationPanel(router);
     _bootDangerousPanel(router);
     _bootLoRaWANPanel(router);
-    _bootDapnetPanel(router);
+    _bootDapnetPanel(router, identity);
     _bootListenerPanel(router);
     _bootRepeatersPanel(router);
     _bootTopologyPanel(router);
@@ -308,9 +308,9 @@ function _bootLoRaWANPanel(router) {
     });
 }
 
-function _bootDapnetPanel(router) {
+function _bootDapnetPanel(router, identity) {
     if (!window.DapnetPanel) return;
-    const panel = new window.DapnetPanel();
+    const panel = new window.DapnetPanel(identity);
     router.onRouteChange((route) => {
         if (route === 'dapnet') panel.show();
         else panel.hide();

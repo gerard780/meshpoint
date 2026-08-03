@@ -23,16 +23,24 @@
 const DP_TAB_STORE_KEY = 'meshpoint.dpTab';
 
 class DapnetPanel {
-    constructor() {
+    constructor(identity) {
         this._refreshTimer = null;
         this._mounted = false;
         this._allCapcodes = [];
         this._capcodeSearchQuery = '';
         this._packets = [];
         this._liveOnlyIds = new Set();
+        // Fails open like the router's own guard (app.js's _buildRouteGuard)
+        // -- no identity/role info at all (no-auth dev setup) means show
+        // it; only an explicit "viewer" role hides it. The real security
+        // boundary is server-side (POST /api/config/dapnet/send already
+        // requires admin) -- this is purely so a viewer doesn't see a
+        // control they can't actually use.
+        this._isAdmin = identity?.role !== 'viewer';
         let storedTab = null;
         try { storedTab = localStorage.getItem(DP_TAB_STORE_KEY); } catch (_) {}
-        this._tab = (storedTab === 'capcodes' || storedTab === 'send') ? storedTab : 'packets';
+        this._tab = (storedTab === 'capcodes' || (storedTab === 'send' && this._isAdmin))
+            ? storedTab : 'packets';
         this._sendDevices = [];
         this._onWsPacket = this._onWsPacket.bind(this);
     }
@@ -125,7 +133,7 @@ class DapnetPanel {
                             <button class="lw-tab" type="button" role="tab"
                                     data-dp-tab="capcodes">Capcodes</button>
                             <button class="lw-tab" type="button" role="tab"
-                                    data-dp-tab="send">Send</button>
+                                    data-dp-tab="send" ${this._isAdmin ? '' : 'hidden'}>Send</button>
                         </div>
                         <span class="lw-panel__limit" data-dp-suffix="packets">(last 100)</span>
                         <div class="lw-search-wrap" data-dp-suffix="capcodes" hidden>
@@ -361,6 +369,7 @@ class DapnetPanel {
     }
 
     _setTab(tab) {
+        if (tab === 'send' && !this._isAdmin) return;
         if (tab === this._tab) return;
         this._tab = tab;
         try { localStorage.setItem(DP_TAB_STORE_KEY, tab); } catch (_) {}
