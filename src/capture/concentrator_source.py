@@ -112,6 +112,7 @@ class ConcentratorCaptureSource(CaptureSource):
         return self._wrapper.crc_bad_count, self._wrapper.no_crc_count
 
     async def start(self) -> None:
+        logger.info("Concentrator start() entered (pager_enabled=%s)", self._pager_enabled)
         self._wrapper.load()
 
         late_reset = os.environ.get("CONCENTRATOR_LATE_RESET", "0") == "1"
