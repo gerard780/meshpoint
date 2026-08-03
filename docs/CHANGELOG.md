@@ -312,6 +312,7 @@ Our own `src/version.py` jumped straight from 0.7.7 to 0.7.9 and never cut a v0.
 - **Dashboard JS/CSS cache-busting after restart.** Static asset URLs now carry a per-restart cache-busting token, so applying an update no longer leaves open browser tabs on stale cached JS/CSS until a hard reload.
 - **Telemetry history is now auto-pruned**, closing the one database table that could grow without bound. A real deployment was found to grow its database by over 20 MB in just three days before this was fixed.
 - **Server-side telemetry chart downsampling.** Repeater Trends and node-drawer telemetry charts downsample into time buckets, bounded regardless of how much history exists — the newest buckets win once history exceeds the chart's limit.
+- **Fixed: the Messages page could take upwards of 17 seconds to load.** A join used to work out which capture source last heard each contact had no index on `packets.packet_id`, forcing a full table scan for every message — confirmed via query plan, now fixed with a proper index. Also switched the database to WAL journaling, so a Messages-page read no longer has to queue behind live packet-capture writes or the hourly retention cleanup on the app's single shared connection. Database size itself (a few tens of MB) was never the bottleneck — no engine change needed.
 
 #### Auth and viewers
 

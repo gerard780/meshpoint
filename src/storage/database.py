@@ -67,6 +67,12 @@ CREATE INDEX IF NOT EXISTS idx_packets_timestamp ON packets(timestamp);
 CREATE INDEX IF NOT EXISTS idx_packets_source ON packets(source_id);
 CREATE INDEX IF NOT EXISTS idx_packets_protocol ON packets(protocol);
 CREATE INDEX IF NOT EXISTS idx_packets_type ON packets(packet_type);
+-- Matches the join condition in node_repository.py's
+-- get_capture_sources_for_broadcasts() (p.packet_id = m.packet_id AND
+-- p.protocol = m.protocol) -- without this, that join does a full
+-- table scan of packets per matched message row (confirmed via
+-- EXPLAIN QUERY PLAN), the real cause of slow Messages-page loads.
+CREATE INDEX IF NOT EXISTS idx_packets_packet_id ON packets(packet_id, protocol);
 CREATE INDEX IF NOT EXISTS idx_telemetry_node ON telemetry(node_id);
 CREATE INDEX IF NOT EXISTS idx_telemetry_timestamp ON telemetry(timestamp);
 
@@ -105,6 +111,19 @@ class DatabaseManager:
         Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
         self._connection = await aiosqlite.connect(self._db_path)
         self._connection.row_factory = aiosqlite.Row
+        # WAL lets readers (e.g. the Messages page) proceed without
+        # queuing behind a writer (live packet capture, or the hourly
+        # bulk retention DELETE in packet_repository.py's cleanup_old())
+        # on this app's one shared connection -- the stock rollback
+        # journal mode blocks readers during any write. journal_mode is
+        # a durable property of the database file itself (set once,
+        # persists across restarts); synchronous is per-connection, so
+        # it's set every time. NORMAL is the standard safe pairing with
+        # WAL (a commit is only at risk of rollback, never corruption,
+        # on a hard power loss) -- acceptable here since this is a
+        # capture/monitoring log, not a ledger.
+        await self._connection.execute("PRAGMA journal_mode=WAL")
+        await self._connection.execute("PRAGMA synchronous=NORMAL")
         await self._connection.executescript(SCHEMA_SQL)
         await self._run_migrations()
         await self._connection.commit()
