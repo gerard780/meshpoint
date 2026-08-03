@@ -33,6 +33,26 @@ _MESHTASTIC_EU868_FREQS_HZ: frozenset[int] = frozenset({
     869_525_000,
 })
 
+# Emergency pager project: ch9's own frequency and sync word, fixed
+# constants rather than config since there's no real protocol/firmware
+# yet -- see memory/project_m1_meshpoint.md for the decision writeup.
+# 869.4625 MHz sits inside the ETSI EU868 "sub-band P" high-power window
+# (869.40-869.65 MHz) and 62.5 kHz clear of 869.525 MHz (this concentrator's
+# own Meshtastic channel, and the frequency real-world TTN gateways use for
+# RX2 downlinks) -- deliberately not stacked on that exact frequency.
+# 0x946437 is a 3-byte sync word, longer than ch0-7/ch8's 1-byte LoRa sync
+# words, since FSK sync detection is raw bit-pattern correlation and
+# benefits more from extra length against ambient sub-band traffic.
+# Reads as "PAGER" in hex leetspeak; also checked against the alternatives
+# for real RF quality (longest identical-bit run, no repeating
+# sub-pattern) before picking it, not chosen for the joke alone --
+# candidates like 0xAAAA.. (alternates just like a radio preamble) or
+# 0xC0FFEE (an 11-bit run of 1s) would have real false-lock risk.
+PAGER_FSK_FREQUENCY_HZ = 869_462_500
+PAGER_FSK_SYNC_WORD = 0x946437
+PAGER_FSK_SYNC_WORD_SIZE = 3
+PAGER_FSK_RF_CHAIN = 1
+
 
 class ConcentratorCaptureSource(CaptureSource):
     """Captures LoRa packets via the RAK2287 SX1302 concentrator."""
@@ -46,6 +66,7 @@ class ConcentratorCaptureSource(CaptureSource):
         syncword: int = 0x2B,
         radio_config: Optional[RadioConfig] = None,
         sx1261_spi_path: str = "",
+        pager_enabled: bool = False,
     ):
         self._wrapper = SX1302Wrapper(
             lib_path=lib_path,
@@ -57,6 +78,7 @@ class ConcentratorCaptureSource(CaptureSource):
         )
         self._poll_interval = poll_interval_ms / 1000.0
         self._syncword = syncword
+        self._pager_enabled = pager_enabled
         self._running = False
         self._restart_lock = asyncio.Lock()
 
@@ -98,6 +120,15 @@ class ConcentratorCaptureSource(CaptureSource):
             self._wrapper.reset()
 
         self._wrapper.configure(self._channel_plan)
+
+        if self._pager_enabled:
+            self._wrapper.configure_fsk_channel(
+                rf_chain=PAGER_FSK_RF_CHAIN,
+                rf_chain_freq_hz=self._channel_plan.radio_1_freq_hz,
+                frequency_hz=PAGER_FSK_FREQUENCY_HZ,
+                sync_word=PAGER_FSK_SYNC_WORD,
+                sync_word_size=PAGER_FSK_SYNC_WORD_SIZE,
+            )
 
         if late_reset:
             # Perform reset as late as possible, right before lgw_start().
@@ -148,6 +179,21 @@ class ConcentratorCaptureSource(CaptureSource):
                     bandwidth_khz=BW_MAP.get(pkt.bandwidth, 125.0),
                     timestamp=datetime.now(timezone.utc),
                 )
+
+                if pkt.modulation == "fsk":
+                    # ch9 pager traffic -- routed by capture_source prefix
+                    # straight to _adapt_pager in coordinator.py, bypassing
+                    # PacketRouter.decode()'s Meshtastic/LoRaWAN/MeshCore
+                    # trial-decode fallback entirely (foreign FSK framing
+                    # would never match any of those anyway).
+                    yield RawCapture(
+                        payload=pkt.payload,
+                        signal=signal,
+                        capture_source="pager",
+                        timestamp=datetime.now(timezone.utc),
+                        protocol_hint=Protocol.PAGER,
+                    )
+                    continue
 
                 protocol_hint = (
                     Protocol.MESHTASTIC

@@ -70,6 +70,7 @@ def _add_concentrator_source(coordinator: PipelineCoordinator, config) -> None:
                 syncword=config.radio.sync_word,
                 radio_config=config.radio,
                 sx1261_spi_path=config.radio.sx1261_spi_path,
+                pager_enabled=config.radio.pager_enabled,
             )
         )
     except Exception:

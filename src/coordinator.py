@@ -378,6 +378,8 @@ class PipelineCoordinator:
             packet = self._adapt_meshcore_usb(raw)
         elif raw.capture_source.startswith("dapnet"):
             packet = self._adapt_dapnet(raw)
+        elif raw.capture_source.startswith("pager"):
+            packet = self._adapt_pager(raw)
         else:
             packet = self._router.decode(
                 raw.payload,
@@ -417,6 +419,11 @@ class PipelineCoordinator:
     @staticmethod
     def _adapt_dapnet(raw: RawCapture) -> Optional[Packet]:
         from src.decode.dapnet_event_adapter import adapt_event
+        return adapt_event(raw.payload, signal=raw.signal)
+
+    @staticmethod
+    def _adapt_pager(raw: RawCapture) -> Optional[Packet]:
+        from src.decode.pager_event_adapter import adapt_event
         return adapt_event(raw.payload, signal=raw.signal)
 
     def _dapnet_capcode_tier(self, packet: Packet) -> Optional[str]:

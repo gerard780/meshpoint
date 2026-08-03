@@ -45,6 +45,10 @@ radio:
   spectral_scan_interval_seconds: 60   # noise floor sampler cadence (0 disables)
   sx1261_spi_path: ""          # SX1261 SPI device for spectral scan (empty = disabled)
   spectrum_sweep_interval_seconds: 300 # band-sweep cadence for the spectrum card (0 = on-demand only)
+  pager_enabled: false         # emergency pager project (EU868 only): enables the concentrator's
+                                # dedicated FSK channel (ch9) at a fixed 869.4625 MHz/sync word.
+                                # No real pager protocol/firmware exists yet -- received frames are
+                                # stored raw, undecoded. Not reachable from the dashboard yet.
 ```
 
 The region sets the base frequency, spreading factor, and bandwidth automatically. You only need `region` in most cases. Override `frequency_mhz`, `spreading_factor`, or `bandwidth_khz` individually to tune for non-default presets (MediumFast, ShortFast, etc.) or custom frequency slots.
@@ -1231,6 +1235,7 @@ radio:                 # LoRa physical layer
   spectral_scan_interval_seconds: 60   # noise floor sampler; 0 disables
   sx1261_spi_path: ""                  # SX1261 SPI device for hardware spectral scan (empty = packet fallback)
   spectrum_sweep_interval_seconds: 300 # band-sweep cadence for the spectrum card; 0 = on-demand only
+  pager_enabled: false                 # emergency pager project (EU868 only); off by default
 
 meshtastic:            # Meshtastic protocol settings
   primary_channel_name: "LongFast"

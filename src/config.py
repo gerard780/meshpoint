@@ -72,6 +72,14 @@ class RadioConfig:
     # only set on carriers that expose SX1261 on a dedicated CE line
     # (Semtech reference kit, custom boards). See CONFIGURATION.md.
     sx1261_spi_path: str = ""
+    # Emergency pager project: enables the concentrator's dedicated FSK
+    # channel (ch9), independent hardware from every LoRa channel above.
+    # Frequency (869.4625 MHz) and sync word are fixed constants in
+    # concentrator_source.py, not configurable here -- there's no real
+    # pager protocol/firmware yet, so this only proves reception works.
+    # Default off: nothing should start listening on a new channel
+    # without an explicit opt-in.
+    pager_enabled: bool = False
 
 
 @dataclass

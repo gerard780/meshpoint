@@ -13,6 +13,7 @@ class Protocol(str, Enum):
     MESHCORE = "meshcore"
     LORAWAN = "lorawan"
     DAPNET = "dapnet"
+    PAGER = "pager"
     UNKNOWN = "unknown"
 
 
@@ -40,6 +41,13 @@ class PacketType(str, Enum):
     DAPNET_NUMERIC = "dapnet_numeric"
     DAPNET_TONE = "dapnet_tone"
     DAPNET_ACTIVATION = "dapnet_activation"
+    # Raw, undecoded bytes from the emergency pager project's own FSK
+    # channel (ch9) -- the over-the-air framing isn't designed yet (no
+    # Heltec V3 firmware exists to produce it), so a page currently gets
+    # stored as opaque payload rather than a real decoded shape. Exists
+    # to prove the concentrator is actually receiving something on this
+    # channel before a real protocol/decoder is built.
+    PAGER_RAW = "pager_raw"
     UNKNOWN = "unknown"
 
 
