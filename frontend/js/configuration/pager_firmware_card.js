@@ -35,7 +35,7 @@ class PagerFirmwareConfigCard {
                             companion.
                         </p>
                     </header>
-                    <label class="cfg-field cfg-firmware-field">
+                    <label class="cfg-field">
                         <span class="cfg-field__label">Capcodes to program</span>
                         <input class="cfg-field__input" type="text" data-firmware-capcodes
                                placeholder="e.g. 123456, 654321">
