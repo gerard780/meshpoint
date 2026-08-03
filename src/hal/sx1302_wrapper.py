@@ -529,9 +529,17 @@ class SX1302Wrapper:
         if result != LGW_HAL_SUCCESS:
             logger.error("lgw_send failed (code %d)", result)
         else:
+            # datarate is the same underlying C field for both modulations
+            # (see receive()'s own comment) -- a real spreading factor for
+            # LoRa, raw bps for FSK. "SF%d" is only meaningful for the
+            # former; label it plainly for FSK instead of a fake "SFn".
+            rate_label = (
+                f"SF{tx_pkt.datarate}" if tx_pkt.modulation == MOD_LORA
+                else f"{tx_pkt.datarate}bps"
+            )
             logger.info(
-                "TX queued: %d Hz, SF%d, %d bytes",
-                tx_pkt.freq_hz, tx_pkt.datarate, tx_pkt.size,
+                "TX queued: %d Hz, %s, %d bytes",
+                tx_pkt.freq_hz, rate_label, tx_pkt.size,
             )
         return result
 
