@@ -277,7 +277,8 @@ class DapnetPanel {
             const r = await fetch('/api/config', { credentials: 'same-origin' });
             if (!r.ok) return;
             const cfg = await r.json();
-            const configured = Array.isArray(cfg.pocsag_serial) ? cfg.pocsag_serial : [];
+            const cap = cfg.capture || {};
+            const configured = Array.isArray(cap.pocsag_serial) ? cap.pocsag_serial : [];
             const liveByName = {};
             (Array.isArray(cfg.dapnet_status) ? cfg.dapnet_status : []).forEach((s) => {
                 liveByName[s.name] = s;
