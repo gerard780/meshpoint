@@ -72,6 +72,7 @@ class ConfigurationPanel {
                     <div class="cfg-section">
                         <div data-cfg-radio></div>
                         <div data-cfg-radio-advanced></div>
+                        <div data-cfg-radio-pager></div>
                         <div data-cfg-nodeinfo-edit></div>
                         <div data-cfg-telemetry-edit></div>
                         <div data-cfg-nodeinfo-status></div>
@@ -85,6 +86,11 @@ class ConfigurationPanel {
                     const radioAdv = new window.RadioAdvancedConfigCard(api);
                     radioAdv.mount(host.querySelector('[data-cfg-radio-advanced]'));
                     this._cards.set('radio-advanced', radioAdv);
+                }
+                if (window.RadioPagerConfigCard) {
+                    const radioPager = new window.RadioPagerConfigCard(api);
+                    radioPager.mount(host.querySelector('[data-cfg-radio-pager]'));
+                    this._cards.set('radio-pager', radioPager);
                 }
                 if (window.NodeInfoConfigCard) {
                     const edit = new window.NodeInfoConfigCard(api);

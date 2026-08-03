@@ -104,6 +104,33 @@ class RadioAdvancedUpdate(BaseModel):
     sx1261_spi_path: Optional[str] = None
 
 
+# Generous but safety-bounding: comfortably covers the whole ETSI sub-band
+# P window (only +-125 kHz from RF1's 869.525 MHz anchor in the EU868
+# plan) while still catching a frequency meant for a different RF chain
+# or region -- the SX1302's real per-chain IF range is on this order
+# (the existing ch0-7 multi-SF plan already spans +-400 kHz from RF0's
+# anchor without issue).
+_PAGER_MAX_IF_OFFSET_HZ = 1_000_000
+
+
+class RadioPagerUpdate(BaseModel):
+    """Deliberately does NOT expose pager_rf_chain. The bounded frequency
+    range below only makes physical sense on RF1 in this deployment (RF0
+    is anchored at 868.3 MHz, nowhere near 869.4-869.65 MHz) -- letting a
+    user pick RF0 here would just produce a huge, likely-rejected IF
+    offset with no valid reason to ever do it. Still adjustable directly
+    in local.yaml for a genuine re-plan, just not surfaced as a UI trap.
+    """
+    pager_enabled: Optional[bool] = None
+    # ETSI EU868 "sub-band P" high-power window -- the whole reason this
+    # channel can use 10% duty / 500mW instead of the standard 1%/25mW.
+    # Bounded here so a typo can't silently move the pager outside the
+    # regulatory window it was specifically chosen to sit in.
+    pager_frequency_mhz: Optional[float] = Field(None, ge=869.40, le=869.65)
+    pager_sync_word: Optional[int] = Field(None, ge=0, le=0xFFFFFFFFFFFFFFFF)
+    pager_sync_word_size: Optional[int] = Field(None, ge=1, le=8)
+
+
 class DapnetUpdate(BaseModel):
     blacklist_capcodes: list[int] = Field(..., max_length=200)
     ignore_capcodes: list[int] = Field(..., max_length=200)
@@ -503,6 +530,91 @@ async def update_relay(
             raise HTTPException(403, str(exc)) from exc
 
     return {"saved": True, "restart_required": restart_needed, "updates": updates}
+
+
+@router.put("/radio/pager")
+async def update_radio_pager(
+    req: RadioPagerUpdate,
+    _claims: SessionClaims = Depends(require_admin),
+    audit: AuditLogWriter = Depends(get_audit_writer),
+):
+    """Emergency pager project: concentrator ch9 (FSK) settings.
+
+    Still internal/experimental -- no real pager protocol/firmware exists
+    yet, this only lets the RX side be tuned without editing local.yaml
+    by hand. Always requires a restart: none of this is hot-reloadable,
+    same as radio/advanced's spectral_scan_interval_seconds/sx1261_spi_path.
+    """
+    if _config is None:
+        raise HTTPException(503, "Config not loaded")
+
+    radio = _config.radio
+    sync_word = req.pager_sync_word if req.pager_sync_word is not None else radio.pager_sync_word
+    sync_word_size = (
+        req.pager_sync_word_size if req.pager_sync_word_size is not None
+        else radio.pager_sync_word_size
+    )
+    if sync_word >= (1 << (8 * sync_word_size)):
+        raise HTTPException(
+            400,
+            f"pager_sync_word 0x{sync_word:X} doesn't fit in "
+            f"pager_sync_word_size={sync_word_size} byte(s)",
+        )
+
+    if req.pager_frequency_mhz is not None:
+        from src.hal.concentrator_config import ConcentratorChannelPlan
+
+        try:
+            plan = ConcentratorChannelPlan.from_radio_config(
+                region=radio.region,
+                frequency_mhz=radio.frequency_mhz,
+                spreading_factor=radio.spreading_factor,
+                bandwidth_khz=radio.bandwidth_khz,
+            )
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(
+                400, f"Cannot validate against the current channel plan: {exc}"
+            ) from exc
+        anchor_hz = (
+            plan.radio_1_freq_hz if radio.pager_rf_chain == 1 else plan.radio_0_freq_hz
+        )
+        offset_hz = round(req.pager_frequency_mhz * 1_000_000) - anchor_hz
+        if abs(offset_hz) > _PAGER_MAX_IF_OFFSET_HZ:
+            raise HTTPException(
+                400,
+                f"pager_frequency_mhz {req.pager_frequency_mhz} is "
+                f"{offset_hz / 1e6:+.4f} MHz from RF{radio.pager_rf_chain}'s anchor "
+                f"({anchor_hz / 1e6} MHz) for the currently configured region "
+                f"({radio.region}) -- outside the hardware's tunable IF range on "
+                "this chain.",
+            )
+
+    updates: dict = {}
+    if req.pager_enabled is not None:
+        radio.pager_enabled = req.pager_enabled
+        updates["pager_enabled"] = req.pager_enabled
+    if req.pager_frequency_mhz is not None:
+        radio.pager_frequency_mhz = req.pager_frequency_mhz
+        updates["pager_frequency_mhz"] = req.pager_frequency_mhz
+    if req.pager_sync_word is not None:
+        radio.pager_sync_word = req.pager_sync_word
+        updates["pager_sync_word"] = req.pager_sync_word
+    if req.pager_sync_word_size is not None:
+        radio.pager_sync_word_size = req.pager_sync_word_size
+        updates["pager_sync_word_size"] = req.pager_sync_word_size
+
+    if not updates:
+        return {"saved": False, "restart_required": False}
+
+    with audit.timed_action(
+        user=_claims.subject, action="config.radio_pager_update", params=updates
+    ):
+        try:
+            save_section_to_yaml("radio", updates)
+        except PermissionError as exc:
+            raise HTTPException(403, str(exc)) from exc
+
+    return {"saved": True, "restart_required": True, "updates": updates}
 
 
 @router.put("/radio/advanced")

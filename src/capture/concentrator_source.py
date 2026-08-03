@@ -34,8 +34,11 @@ _MESHTASTIC_EU868_FREQS_HZ: frozenset[int] = frozenset({
 })
 
 # Emergency pager project: ch9's own frequency and sync word, fixed
-# constants rather than config since there's no real protocol/firmware
-# yet -- see memory/project_m1_meshpoint.md for the decision writeup.
+# Now configurable via RadioConfig.pager_frequency_mhz/pager_sync_word/
+# pager_sync_word_size/pager_rf_chain (src/config.py) -- these are just
+# the fallback defaults used when no radio_config is supplied (e.g.
+# direct construction in tests). See memory/project_m1_meshpoint.md for
+# the decision writeup on why these specific values were picked:
 # 869.4625 MHz sits inside the ETSI EU868 "sub-band P" high-power window
 # (869.40-869.65 MHz) and 62.5 kHz clear of 869.525 MHz (this concentrator's
 # own Meshtastic channel, and the frequency real-world TTN gateways use for
@@ -79,6 +82,16 @@ class ConcentratorCaptureSource(CaptureSource):
         self._poll_interval = poll_interval_ms / 1000.0
         self._syncword = syncword
         self._pager_enabled = pager_enabled
+        if radio_config is not None:
+            self._pager_frequency_hz = round(radio_config.pager_frequency_mhz * 1_000_000)
+            self._pager_sync_word = radio_config.pager_sync_word
+            self._pager_sync_word_size = radio_config.pager_sync_word_size
+            self._pager_rf_chain = radio_config.pager_rf_chain
+        else:
+            self._pager_frequency_hz = PAGER_FSK_FREQUENCY_HZ
+            self._pager_sync_word = PAGER_FSK_SYNC_WORD
+            self._pager_sync_word_size = PAGER_FSK_SYNC_WORD_SIZE
+            self._pager_rf_chain = PAGER_FSK_RF_CHAIN
         self._running = False
         self._restart_lock = asyncio.Lock()
 
@@ -111,6 +124,20 @@ class ConcentratorCaptureSource(CaptureSource):
         """(crc_bad_total, no_crc_total) since concentrator start."""
         return self._wrapper.crc_bad_count, self._wrapper.no_crc_count
 
+    @property
+    def pager_rf_anchor_hz(self) -> int:
+        """RF chain anchor frequency for whichever chain the pager is on.
+
+        configure_fsk_channel() needs this to compute its IF offset --
+        exposed here (rather than duplicated) since server.py's TX-gain
+        startup patch needs the exact same value.
+        """
+        return (
+            self._channel_plan.radio_1_freq_hz
+            if self._pager_rf_chain == 1
+            else self._channel_plan.radio_0_freq_hz
+        )
+
     async def start(self) -> None:
         self._wrapper.load()
 
@@ -123,11 +150,11 @@ class ConcentratorCaptureSource(CaptureSource):
 
         if self._pager_enabled:
             self._wrapper.configure_fsk_channel(
-                rf_chain=PAGER_FSK_RF_CHAIN,
-                rf_chain_freq_hz=self._channel_plan.radio_1_freq_hz,
-                frequency_hz=PAGER_FSK_FREQUENCY_HZ,
-                sync_word=PAGER_FSK_SYNC_WORD,
-                sync_word_size=PAGER_FSK_SYNC_WORD_SIZE,
+                rf_chain=self._pager_rf_chain,
+                rf_chain_freq_hz=self.pager_rf_anchor_hz,
+                frequency_hz=self._pager_frequency_hz,
+                sync_word=self._pager_sync_word,
+                sync_word_size=self._pager_sync_word_size,
             )
 
         if late_reset:

@@ -95,6 +95,13 @@ def enrich_config_payload(cfg: AppConfig, base: dict) -> dict:
         "spectral_scan_interval_seconds": radio.spectral_scan_interval_seconds,
         "sx1261_spi_path": radio.sx1261_spi_path or "",
     }
+    base["radio_pager"] = {
+        "pager_enabled": radio.pager_enabled,
+        "pager_frequency_mhz": radio.pager_frequency_mhz,
+        "pager_sync_word_hex": f"{radio.pager_sync_word:0{radio.pager_sync_word_size * 2}X}",
+        "pager_sync_word_size": radio.pager_sync_word_size,
+        "pager_rf_chain": radio.pager_rf_chain,
+    }
     base["location"] = {
         "source": location.source,
         "gpsd_host": location.gpsd_host,

@@ -74,12 +74,26 @@ class RadioConfig:
     sx1261_spi_path: str = ""
     # Emergency pager project: enables the concentrator's dedicated FSK
     # channel (ch9), independent hardware from every LoRa channel above.
-    # Frequency (869.4625 MHz) and sync word are fixed constants in
-    # concentrator_source.py, not configurable here -- there's no real
-    # pager protocol/firmware yet, so this only proves reception works.
-    # Default off: nothing should start listening on a new channel
-    # without an explicit opt-in.
+    # There's no real pager protocol/firmware yet, so this only proves
+    # reception works. Default off: nothing should start listening on a
+    # new channel without an explicit opt-in.
     pager_enabled: bool = False
+    # Defaults match the values chosen for the ETSI EU868 "sub-band P"
+    # high-power window (869.40-869.65 MHz) -- see concentrator_source.py
+    # and project memory for how these were picked. pager_frequency_mhz
+    # and pager_sync_word(_size) are user-editable from Configuration ->
+    # Radio (PUT /api/config/radio/pager), which validates the frequency
+    # against RF1's real anchor before saving.
+    pager_frequency_mhz: float = 869.4625
+    pager_sync_word: int = 0x946437
+    pager_sync_word_size: int = 3
+    # Deliberately NOT exposed in that same UI/route: the validated
+    # frequency range only makes physical sense on whichever RF chain
+    # this is set to. Changing it away from the chain whose anchor
+    # frequency is actually close to pager_frequency_mhz will make
+    # configure_fsk_channel()'s IF offset too large for the hardware to
+    # accept -- a YAML-only escape hatch for a genuine channel re-plan.
+    pager_rf_chain: int = 1
 
 
 @dataclass
