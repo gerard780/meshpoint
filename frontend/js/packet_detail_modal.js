@@ -101,13 +101,20 @@ class PacketDetailModal {
                 },
             };
         }
-        // pager_dashboard_panel.js's GET /api/pager/messages rows carry
-        // `text` top-level too (same reasoning as DAPNET above) --
-        // reshape into the common decoded_payload.text shape.
+        // GET /api/pager/messages rows carry from_capcode/to_capcode/text
+        // top-level too (same reasoning as DAPNET above) -- reshape into
+        // the common decoded_payload shape. The real over-the-air JSON
+        // (and source_id/destination_id, already shown correctly in the
+        // Mesh section above) always has from/to; this was previously
+        // dropping them from the Payload section's own JSON dump, a
+        // display-only gap, not a sign anything was actually missing
+        // from what got sent/stored.
         if (packet && packet.protocol === 'pager' && !packet.decoded_payload) {
             return {
                 ...packet,
-                decoded_payload: { text: packet.text },
+                decoded_payload: {
+                    from: packet.from_capcode, to: packet.to_capcode, text: packet.text,
+                },
             };
         }
         return packet;
