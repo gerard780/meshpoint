@@ -46,9 +46,10 @@ radio:
   sx1261_spi_path: ""          # SX1261 SPI device for spectral scan (empty = disabled)
   spectrum_sweep_interval_seconds: 300 # band-sweep cadence for the spectrum card (0 = on-demand only)
   pager_enabled: false         # emergency pager project (EU868 only): enables the concentrator's
-                                # dedicated FSK channel (ch9). No real pager protocol/firmware
-                                # exists yet -- received frames are stored raw, undecoded.
-                                # Editable from Configuration -> Radio (Pager) or here directly.
+                                # dedicated FSK channel (ch9). No real Heltec V3 firmware deployed
+                                # yet -- received frames are JSON envelopes, {"from":<capcode>,
+                                # "to":<capcode>,"text":"..."}. Editable from Configuration ->
+                                # Radio (Pager) or here directly.
   pager_frequency_mhz: 869.4625  # must stay in the ETSI EU868 "sub-band P" window
                                   # (869.40-869.65 MHz) and close to RF1's real anchor frequency
   pager_sync_word: 0x946437      # up to pager_sync_word_size bytes
@@ -56,6 +57,9 @@ radio:
   pager_rf_chain: 1              # NOT exposed in the UI -- see src/config.py's comment
                                   # before changing; wrong chain + the above frequency
                                   # range produces an IF offset the hardware will reject
+  pager_capcode: 0               # this device's own POCSAG-style capcode -- the "from" on
+                                  # every message it sends, and required (nonzero) before
+                                  # it will transmit at all. 0 = unset.
 ```
 
 The region sets the base frequency, spreading factor, and bandwidth automatically. You only need `region` in most cases. Override `frequency_mhz`, `spreading_factor`, or `bandwidth_khz` individually to tune for non-default presets (MediumFast, ShortFast, etc.) or custom frequency slots.
@@ -1247,6 +1251,7 @@ radio:                 # LoRa physical layer
   pager_sync_word: 0x946437
   pager_sync_word_size: 3
   pager_rf_chain: 1                    # not exposed in the UI, see src/config.py
+  pager_capcode: 0                     # this device's own POCSAG-style capcode; 0 = unset
 
 meshtastic:            # Meshtastic protocol settings
   primary_channel_name: "LongFast"

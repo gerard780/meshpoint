@@ -101,6 +101,7 @@ def enrich_config_payload(cfg: AppConfig, base: dict) -> dict:
         "pager_sync_word_hex": f"{radio.pager_sync_word:0{radio.pager_sync_word_size * 2}X}",
         "pager_sync_word_size": radio.pager_sync_word_size,
         "pager_rf_chain": radio.pager_rf_chain,
+        "pager_capcode": radio.pager_capcode or None,
     }
     base["location"] = {
         "source": location.source,

@@ -44,6 +44,7 @@ def _fake_config(*, relay_enabled=False, max_relay_per_minute=20):
     cfg.radio.pager_sync_word = 0x946437
     cfg.radio.pager_sync_word_size = 3
     cfg.radio.pager_rf_chain = 1
+    cfg.radio.pager_capcode = 0
     cfg.transmit.enabled = True
     cfg.transmit.node_id = 0xDEADBEEF
     cfg.transmit.tx_power_dbm = 27

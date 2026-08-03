@@ -129,6 +129,10 @@ class RadioPagerUpdate(BaseModel):
     pager_frequency_mhz: Optional[float] = Field(None, ge=869.40, le=869.65)
     pager_sync_word: Optional[int] = Field(None, ge=0, le=0xFFFFFFFFFFFFFFFF)
     pager_sync_word_size: Optional[int] = Field(None, ge=1, le=8)
+    # This device's own POCSAG-style capcode -- pure software (read fresh
+    # on every send/receive, no HAL reconfiguration involved), unlike the
+    # four fields above which all need a restart to reach the hardware.
+    pager_capcode: Optional[int] = Field(None, ge=0, le=0xFFFFFFFF)
 
 
 class DapnetUpdate(BaseModel):
@@ -602,9 +606,22 @@ async def update_radio_pager(
     if req.pager_sync_word_size is not None:
         radio.pager_sync_word_size = req.pager_sync_word_size
         updates["pager_sync_word_size"] = req.pager_sync_word_size
+    if req.pager_capcode is not None:
+        radio.pager_capcode = req.pager_capcode
+        updates["pager_capcode"] = req.pager_capcode
 
     if not updates:
         return {"saved": False, "restart_required": False}
+
+    # pager_capcode alone never needs a restart (see its own field
+    # comment above) -- only these four actually reconfigure the HAL.
+    restart_required = any(
+        key in updates
+        for key in (
+            "pager_enabled", "pager_frequency_mhz",
+            "pager_sync_word", "pager_sync_word_size",
+        )
+    )
 
     with audit.timed_action(
         user=_claims.subject, action="config.radio_pager_update", params=updates
@@ -614,7 +631,7 @@ async def update_radio_pager(
         except PermissionError as exc:
             raise HTTPException(403, str(exc)) from exc
 
-    return {"saved": True, "restart_required": True, "updates": updates}
+    return {"saved": True, "restart_required": restart_required, "updates": updates}
 
 
 @router.put("/radio/advanced")

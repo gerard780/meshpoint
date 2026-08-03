@@ -413,6 +413,21 @@ class PipelineCoordinator:
                 self._notify_callbacks(packet)
                 return
 
+        if packet.protocol == Protocol.PAGER:
+            our_capcode = self._config.radio.pager_capcode
+            heard_from = packet.decoded_payload.get("from") if packet.decoded_payload else None
+            if our_capcode and heard_from == our_capcode:
+                # The concentrator's own TX leaking directly into its own
+                # RX (confirmed live: near-field self-coupling, RSSI far
+                # too strong to be a real remote device) -- neither
+                # persisted nor shown, same "ignore" treatment as
+                # DAPNET's own housekeeping-noise tier above. Only
+                # possible to detect now that a real "from" capcode
+                # exists in the envelope; `pager_capcode` unset (0)
+                # disables this check entirely rather than falsely
+                # matching every message's un-set `from`.
+                return
+
         await self._store_packet(packet)
         self._notify_callbacks(packet)
         await self._relay.process_packet(packet)

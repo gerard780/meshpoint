@@ -34,6 +34,17 @@ class RadioPagerConfigCard {
                         <span class="cfg-field__label">Enable pager channel (ch9)</span>
                     </label>
                     <label class="cfg-field">
+                        <span class="cfg-field__label">My pager capcode</span>
+                        <input class="cfg-field__input" type="number" min="0"
+                               placeholder="e.g. 2041152" data-radio-pager-capcode>
+                        <span class="cfg-field__hint">
+                            This device's own POCSAG-style address -- the "from" on every
+                            message it sends, and required before it will transmit at all.
+                            Also lets it recognize (and hide) its own transmission leaking
+                            back into its own receiver.
+                        </span>
+                    </label>
+                    <label class="cfg-field">
                         <span class="cfg-field__label">Frequency (MHz)</span>
                         <input class="cfg-field__input" type="number" min="869.40" max="869.65"
                                step="0.0001" data-radio-pager-freq>
@@ -64,6 +75,7 @@ class RadioPagerConfigCard {
         const pager = config.radio_pager || {};
         const enabled = this._root.querySelector('[data-radio-pager-enabled]');
         if (enabled) enabled.checked = !!pager.pager_enabled;
+        this._setVal('[data-radio-pager-capcode]', pager.pager_capcode);
         this._setVal('[data-radio-pager-freq]', pager.pager_frequency_mhz);
         this._setVal('[data-radio-pager-syncword]', pager.pager_sync_word_hex);
         this._setVal('[data-radio-pager-syncword-size]', pager.pager_sync_word_size);
@@ -86,8 +98,10 @@ class RadioPagerConfigCard {
         }
         status.dataset.kind = 'pending';
         status.textContent = 'Saving…';
+        const capcodeRaw = this._root.querySelector('[data-radio-pager-capcode]').value;
         const result = await this._api.put('/api/config/radio/pager', {
             pager_enabled: this._root.querySelector('[data-radio-pager-enabled]').checked,
+            pager_capcode: capcodeRaw ? Number(capcodeRaw) : 0,
             pager_frequency_mhz: Number(
                 this._root.querySelector('[data-radio-pager-freq]').value,
             ),

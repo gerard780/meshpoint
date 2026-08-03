@@ -94,6 +94,15 @@ class RadioConfig:
     # configure_fsk_channel()'s IF offset too large for the hardware to
     # accept -- a YAML-only escape hatch for a genuine channel re-plan.
     pager_rf_chain: int = 1
+    # This device's own POCSAG-style capcode -- the "from" on every
+    # message Meshpoint sends on the pager channel, and the value
+    # compared against an incoming message's "from" to detect and hide
+    # the concentrator's own TX leaking straight back into its own RX
+    # (confirmed live: near-field self-coupling, RSSI far too strong to
+    # be a real remote device). 0 = unset; the send route refuses to
+    # transmit without a real one configured, same reasoning as
+    # pocsag_companion.ino requiring a callsign before it will key up.
+    pager_capcode: int = 0
 
 
 @dataclass

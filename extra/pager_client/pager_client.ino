@@ -72,7 +72,8 @@
   "Pager brainstorm continued: channel-isolation approach picked, button UX
   sketched") for the original ch5-7 LoRa plan -- carries over unchanged since
   it's about the button/OLED interaction, not the channel/modulation:
-    Idle (default): OLED shows the last received message and its RSSI.
+    Idle (default): OLED shows the last received message, who it's from,
+      and its RSSI.
     Long-hold from idle: enters the reply menu, starting on the first
       canned-message option.
     In menu, short press: cycles to the next canned option (wraps around).
@@ -83,6 +84,19 @@
     A message arriving while in the menu is stored but does NOT interrupt
       the menu display (the "leaning toward wait" refinement flagged
       earlier) -- it'll show once back at idle.
+
+  ---- Addressing (POCSAG-style capcodes) ----
+  Every frame is a JSON envelope, {"from":<capcode>,"to":<capcode>,
+  "text":"..."} -- same convention pocsag_companion.ino's own serial
+  protocol already uses, reused deliberately rather than a hand-rolled
+  binary layout (self-describing, and ArduinoJson is already a
+  dependency here). A capcode is just a plain integer; this device
+  listens on one or more (MY_CAPCODES below -- e.g. its own personal
+  number plus a shared address like 911 for broadcasts everyone should
+  see), and only surfaces a received message whose "to" matches one of
+  them. Sending stamps MY_SEND_CAPCODE as "from" and a hardcoded
+  SEND_TO_CAPCODE as "to" -- like the radio parameters above, real
+  capcode values are hardcoded for now, not fetched from the dashboard.
 */
 
 #include <Arduino.h>
@@ -93,6 +107,8 @@
 #include <Adafruit_SSD1306.h>
 
 #include <RadioLib.h>
+#include <ArduinoJson.h> // v7.4.3 -- JsonDocument/deserializeJson v7 API,
+                          // same version pocsag_companion.ino uses
 
 // ---------- Radio parameters (see header comment for why each value) ----------
 #define PAGER_FREQ_MHZ        869.4625f
@@ -128,10 +144,22 @@ uint8_t PAGER_SYNC_WORD[3] = { 0x94, 0x64, 0x37 };
 SX1262 radio = new Module(LORA_CS, LORA_DIO1, LORA_RST, LORA_BUSY);
 Adafruit_SSD1306 display(OLED_WIDTH, OLED_HEIGHT, &Wire, OLED_RST_PIN);
 
+// ---------- Capcodes (see header comment's "Addressing" section) ----------
+// Hardcoded for now, same reasoning as the radio parameters above.
+// This device answers to either of these "to" addresses:
+const uint32_t MY_CAPCODES[] = { 911, 2041153 };
+const int NUM_MY_CAPCODES = sizeof(MY_CAPCODES) / sizeof(MY_CAPCODES[0]);
+// ...but sends AS its own personal number (not the shared 911 address),
+// and only ever TO this hardcoded recipient for now (no recipient
+// picker on a one-button device -- see the New Message tab's own "to"
+// field for how the dashboard side chooses a recipient instead).
+const uint32_t MY_SEND_CAPCODE = 2041153;
+const uint32_t SEND_TO_CAPCODE = 2041152;
+
 // ---------- Canned messages ----------
 // Placeholder wording -- easy to edit/extend, not a fixed protocol. Kept
-// short: this is plain UTF-8 text with no envelope (see project memory),
-// and the concentrator's own HAL caps a single FSK frame at 255 bytes.
+// short: the JSON envelope adds overhead on top of this text, and the
+// concentrator's own HAL caps a single FSK frame at 255 bytes total.
 const char* CANNED_MESSAGES[] = {
   "OK",
   "On my way",
@@ -160,6 +188,7 @@ unsigned long menuActivityMs = 0;
 // ---------- Last received message ----------
 bool hasReceivedMessage = false;
 String lastMessageText;
+uint32_t lastMessageFrom = 0;
 float lastMessageRssi = 0;
 
 // ---------- RX interrupt flag ----------
@@ -257,11 +286,37 @@ void handleReceivedPacket() {
   uint8_t buf[256];
   int state = radio.readData(buf, len);
   if (state == RADIOLIB_ERR_NONE) {
-    buf[len] = '\0';
-    lastMessageText = String((char*)buf);
+    JsonDocument doc;
+    DeserializationError err = deserializeJson(doc, buf, len);
+    if (err) {
+      // Not a valid envelope -- foreign noise on the channel, or (before
+      // this capcode work) an old plain-text test frame. Same "fails to
+      // parse, gets dropped" reasoning as the dashboard's own adapter.
+      Serial.printf("[!] RX JSON parse failed: %s\n", err.c_str());
+      radio.startReceive();
+      return;
+    }
+
+    uint32_t to = doc["to"] | 0;
+    uint32_t from = doc["from"] | 0;
+    const char* text = doc["text"] | "";
+
+    bool forMe = false;
+    for (int i = 0; i < NUM_MY_CAPCODES; i++) {
+      if (to == MY_CAPCODES[i]) { forMe = true; break; }
+    }
+    if (!forMe) {
+      Serial.printf("[RX] ignored (to=%lu, not one of ours)\n", (unsigned long)to);
+      radio.startReceive();
+      return;
+    }
+
+    lastMessageText = String(text);
+    lastMessageFrom = from;
     lastMessageRssi = radio.getRSSI();
     hasReceivedMessage = true;
-    Serial.printf("[RX] \"%s\" rssi=%.1f\n", lastMessageText.c_str(), lastMessageRssi);
+    Serial.printf("[RX] from=%lu to=%lu \"%s\" rssi=%.1f\n",
+                  (unsigned long)from, (unsigned long)to, text, lastMessageRssi);
 
     // "Leaning toward wait" -- don't yank the menu away if the operator is
     // mid-selection; the new message still shows the moment they return to
@@ -276,8 +331,18 @@ void handleReceivedPacket() {
 
 void sendCannedMessage(int idx) {
   const char* msg = CANNED_MESSAGES[idx];
-  int state = radio.transmit((uint8_t*)msg, strlen(msg));
-  Serial.printf("[TX] \"%s\" -> %s\n", msg, state == RADIOLIB_ERR_NONE ? "OK" : "FAIL");
+
+  JsonDocument doc;
+  doc["from"] = MY_SEND_CAPCODE;
+  doc["to"] = SEND_TO_CAPCODE;
+  doc["text"] = msg;
+  char buf[256];
+  size_t len = serializeJson(doc, buf, sizeof(buf));
+
+  int state = radio.transmit((uint8_t*)buf, len);
+  Serial.printf("[TX] from=%lu to=%lu \"%s\" -> %s\n",
+                (unsigned long)MY_SEND_CAPCODE, (unsigned long)SEND_TO_CAPCODE,
+                msg, state == RADIOLIB_ERR_NONE ? "OK" : "FAIL");
   // transmit() leaves the radio in TX/idle state -- must explicitly go
   // back to RX or every message sent would also deafen this device to
   // anything arriving afterward.
@@ -351,6 +416,7 @@ void drawIdle() {
   if (!hasReceivedMessage) {
     display.println("No messages yet");
   } else {
+    display.printf("From: %lu\n", (unsigned long)lastMessageFrom);
     display.println(lastMessageText);
     display.setCursor(0, 56);
     display.printf("RSSI %.0f dBm", lastMessageRssi);

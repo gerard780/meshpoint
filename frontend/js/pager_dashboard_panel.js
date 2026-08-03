@@ -14,11 +14,13 @@
  * receive path (no over-the-air loopback exists), so the send route
  * stores its own Outbox row directly.
  *
- * There is no real over-the-air protocol yet -- every message shown
- * here (sent or received) is plain UTF-8 text with no envelope.
- * "Sent" only ever means the concentrator hardware accepted and queued
- * the transmission; there is no ACK, so it never means anything was
- * actually received by another device.
+ * Every message is a JSON envelope, {"from":<capcode>,"to":<capcode>,
+ * "text":"..."} (see pager_event_adapter.py) -- from/to are plain
+ * POCSAG-style capcodes, e.g. this fork's own real DAPNET capcode as
+ * "from", and a specific pager's number or a shared address like 911
+ * as "to". "Sent" only ever means the concentrator hardware accepted
+ * and queued the transmission; there is no ACK yet, so it never means
+ * anything was actually received by another device.
  */
 
 const PGD_TAB_STORE_KEY = 'meshpoint.pagerDashTab';
@@ -89,6 +91,8 @@ class PagerDashboardPanel {
                         <table class="lw-table lw-table--dapnet-packets">
                             <colgroup>
                                 <col class="col-time">
+                                <col class="col-id">
+                                <col class="col-id">
                                 <col class="col-text">
                                 <col class="col-type">
                                 <col class="col-type">
@@ -96,6 +100,8 @@ class PagerDashboardPanel {
                             <thead>
                                 <tr>
                                     <th>Time</th>
+                                    <th>From</th>
+                                    <th>To</th>
                                     <th>Text</th>
                                     <th>RSSI</th>
                                     <th>SNR</th>
@@ -113,12 +119,16 @@ class PagerDashboardPanel {
                         <table class="lw-table lw-table--dapnet-packets">
                             <colgroup>
                                 <col class="col-time">
+                                <col class="col-id">
+                                <col class="col-id">
                                 <col class="col-text">
                                 <col class="col-type">
                             </colgroup>
                             <thead>
                                 <tr>
                                     <th>Time</th>
+                                    <th>From</th>
+                                    <th>To</th>
                                     <th>Text</th>
                                     <th>Status</th>
                                 </tr>
@@ -133,6 +143,11 @@ class PagerDashboardPanel {
                     <div data-pgd-view="send" hidden>
                         <div class="panel__body">
                             <form class="cfg-form" id="pgd-send-form" style="max-width:480px">
+                                <label class="cfg-field">
+                                    <span class="cfg-field__label">To (capcode)</span>
+                                    <input class="cfg-field__input" type="number" min="0"
+                                           id="pgd-send-to" placeholder="e.g. 911 or a pager's own number" required>
+                                </label>
                                 <label class="cfg-field">
                                     <span class="cfg-field__label">Message</span>
                                     <input class="cfg-field__input" type="text"
@@ -223,8 +238,12 @@ class PagerDashboardPanel {
             } else if (!s.pager_enabled) {
                 hint.textContent = 'Pager channel (ch9) is currently disabled -- '
                     + 'enable it from Configuration → Radio (Pager).';
+            } else if (!s.pager_capcode) {
+                hint.textContent = `Pager channel (ch9) active at ${s.pager_frequency_mhz} MHz -- `
+                    + 'set your own capcode in Configuration → Radio (Pager) before sending.';
             } else {
-                hint.textContent = `Pager channel (ch9) active at ${s.pager_frequency_mhz} MHz.`;
+                hint.textContent = `Pager channel (ch9) active at ${s.pager_frequency_mhz} MHz `
+                    + `as capcode ${s.pager_capcode}.`;
             }
         } catch (_) {}
     }
@@ -260,6 +279,8 @@ class PagerDashboardPanel {
         tbody.innerHTML = this._inbox.map((m, i) => `
             <tr class="lw-pkt-row" data-pkt="${i}">
                 <td class="lw-time">${this._fmtTime(m.timestamp)}</td>
+                <td class="lw-id">${this._esc(m.from_capcode ?? '--')}</td>
+                <td class="lw-id">${this._esc(m.to_capcode ?? '--')}</td>
                 <td class="lw-text">${this._esc(m.text || '')}</td>
                 <td>${m.rssi != null ? m.rssi.toFixed(1) : '--'}</td>
                 <td>${m.snr != null ? m.snr.toFixed(1) : '--'}</td>
@@ -280,6 +301,8 @@ class PagerDashboardPanel {
         tbody.innerHTML = this._outbox.map((m, i) => `
             <tr class="lw-pkt-row" data-pkt="${i}">
                 <td class="lw-time">${this._fmtTime(m.timestamp)}</td>
+                <td class="lw-id">${this._esc(m.from_capcode ?? '--')}</td>
+                <td class="lw-id">${this._esc(m.to_capcode ?? '--')}</td>
                 <td class="lw-text">${this._esc(m.text || '')}</td>
                 <td><span class="lw-badge">Sent</span></td>
             </tr>
@@ -290,9 +313,11 @@ class PagerDashboardPanel {
         event.preventDefault();
         const status = document.getElementById('pgd-send-status');
         const btn = document.getElementById('pgd-send-btn');
+        const toEl = document.getElementById('pgd-send-to');
         const textEl = document.getElementById('pgd-send-text');
         const text = (textEl?.value || '').trim();
-        if (!text) return;
+        const toRaw = (toEl?.value || '').trim();
+        if (!text || !toRaw) return;
 
         btn.disabled = true;
         status.dataset.kind = 'pending';
@@ -302,7 +327,7 @@ class PagerDashboardPanel {
                 method: 'POST',
                 credentials: 'same-origin',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ text }),
+                body: JSON.stringify({ to_capcode: Number(toRaw), text }),
             });
             const result = await r.json().catch(() => ({}));
             if (r.ok) {
