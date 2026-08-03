@@ -97,9 +97,17 @@ class RadioPagerConfigCard {
             status.textContent = 'Sync word must be a valid hex value.';
             return;
         }
+        const capcodeRaw = this._root.querySelector('[data-radio-pager-capcode]').value.trim();
+        if (capcodeRaw) {
+            const capcodeNum = Number(capcodeRaw);
+            if (!Number.isInteger(capcodeNum) || capcodeNum < 0 || capcodeNum > 0xFFFFFFFF) {
+                status.dataset.kind = 'error';
+                status.textContent = 'Capcode must be a whole number from 0 to 4294967295.';
+                return;
+            }
+        }
         status.dataset.kind = 'pending';
         status.textContent = 'Saving…';
-        const capcodeRaw = this._root.querySelector('[data-radio-pager-capcode]').value;
         const result = await this._api.put('/api/config/radio/pager', {
             pager_enabled: this._root.querySelector('[data-radio-pager-enabled]').checked,
             pager_capcode: capcodeRaw ? Number(capcodeRaw) : 0,

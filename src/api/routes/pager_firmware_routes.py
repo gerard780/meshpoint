@@ -198,6 +198,13 @@ async def compile_firmware_stream(
         if not (0 <= code <= _UINT32_MAX):
             raise HTTPException(400, f"capcode {code} out of range (0-{_UINT32_MAX})")
     send_to = _config.radio.pager_capcode
+    if not send_to:
+        raise HTTPException(
+            400,
+            "Set this box's own pager capcode (Configuration → Radio → Pager) "
+            "before compiling pager firmware -- otherwise the flashed unit would "
+            "report to capcode 0, which nothing listens on.",
+        )
 
     async def body() -> AsyncIterator[bytes]:
         with audit.timed_action(
