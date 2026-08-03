@@ -90,6 +90,11 @@ FSK_DATARATE_MAX = 250_000
 # once tested against real hardware.
 FSK_DEFAULT_BANDWIDTH = BW_125KHZ
 FSK_DEFAULT_DATARATE = 4_800
+# Frequency deviation (kHz) for FSK TX only -- loragw_hal.c's own send()
+# validation rejects anything outside 1-200 kHz. Not yet tuned against
+# real hardware/firmware (there is none yet); 25 kHz is a conservative
+# starting point common for a few-kbps GFSK link, not a measured value.
+FSK_DEFAULT_FDEV_KHZ = 25
 
 
 @dataclass
@@ -529,6 +534,71 @@ class SX1302Wrapper:
                 tx_pkt.freq_hz, tx_pkt.datarate, tx_pkt.size,
             )
         return result
+
+    def send_fsk_packet(
+        self,
+        payload: bytes,
+        frequency_hz: int,
+        rf_power_dbm: int,
+        datarate: int = FSK_DEFAULT_DATARATE,
+        f_dev_khz: int = FSK_DEFAULT_FDEV_KHZ,
+        preamble: int = 0,
+        no_crc: bool = False,
+    ) -> int:
+        """Build and send one FSK packet on ch9 (the pager project's channel).
+
+        Always transmits on rf_chain=0, NOT whatever RF chain ch9 is
+        configured to receive on (pager_rf_chain, typically 1) -- TX is
+        only physically enabled on RF chain 0 on this hardware
+        (_configure_rf_chains() sets tx_enable=(rf_chain==0); the native
+        Meshtastic TX path hardcodes the same rf_chain=0 in
+        tx_service.py's _build_hal_packet() even though Meshtastic's own
+        channel is RF1's anchor). RF0's synthesizer can be tuned to any
+        frequency in range regardless of which "RF chain" a receiver
+        associates it with for demodulation -- the rf_chain field on a TX
+        packet selects the physical PA path, not a frequency restriction.
+
+        Requires configure_fsk_channel() to have already been called
+        (i.e. pager_enabled at startup) -- the real HAL's lgw_send()
+        reuses that same CONTEXT_FSK config (including its sync word) to
+        build the FSK frame; there is no separate TX sync word parameter
+        here, unlike LoRa's set_tx_syncword().
+
+        Raises ValueError for an out-of-range datarate/f_dev/payload
+        size (checked here so the caller gets a clear message instead of
+        a bare lgw_send() failure). Returns LGW_HAL_SUCCESS (0) on
+        success, negative on error (see send()).
+        """
+        if not (FSK_DATARATE_MIN <= datarate <= FSK_DATARATE_MAX):
+            raise ValueError(
+                f"FSK datarate {datarate} out of range "
+                f"({FSK_DATARATE_MIN}-{FSK_DATARATE_MAX} bps)"
+            )
+        if not (1 <= f_dev_khz <= 200):
+            raise ValueError(f"FSK f_dev_khz {f_dev_khz} out of range (1-200 kHz)")
+        if len(payload) > 255:
+            raise ValueError(f"FSK payload too long ({len(payload)} bytes, max 255)")
+
+        tx_pkt = LgwPktTxS()
+        tx_pkt.freq_hz = frequency_hz
+        tx_pkt.tx_mode = TX_MODE_IMMEDIATE
+        tx_pkt.count_us = 0
+        tx_pkt.rf_chain = 0
+        tx_pkt.rf_power = rf_power_dbm
+        tx_pkt.modulation = MOD_FSK
+        tx_pkt.freq_offset = 0
+        # bandwidth is documented "LoRa only" for TX (loragw_hal.h) -- left
+        # at its zero default, ignored by the HAL's FSK send validation.
+        tx_pkt.datarate = datarate
+        tx_pkt.f_dev = f_dev_khz
+        tx_pkt.preamble = preamble
+        tx_pkt.no_crc = no_crc
+        tx_pkt.no_header = False  # variable-length (a length byte precedes payload)
+        tx_pkt.size = len(payload)
+        for i, b in enumerate(payload):
+            tx_pkt.payload[i] = b
+
+        return self.send(tx_pkt)
 
     def get_tx_status(self, rf_chain: int = 0) -> int:
         """Check TX status: TX_STATUS_FREE=2, TX_STATUS_EMITTING=4."""
