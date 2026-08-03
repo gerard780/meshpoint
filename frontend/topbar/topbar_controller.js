@@ -27,6 +27,9 @@ class TopbarController {
         this._dapnet = new TopbarDapnetChip(
             rootEl.querySelector('#topbar-dapnet-group'),
         );
+        this._pager = new TopbarPagerChip(
+            rootEl.querySelector('#topbar-pager-group'),
+        );
         this._actions = new TopbarActions(
             rootEl.querySelector('.topbar-actions'),
         );
@@ -94,6 +97,7 @@ class TopbarController {
             this._meshcore.setMeshcore(cfg.meshcore || null);
             this._serial.setSerial(cfg.serial || []);
             this._dapnet.setDapnet(cfg.dapnet_status || []);
+            this._pager.setPager(cfg.radio_pager || null);
             document.dispatchEvent(
                 new CustomEvent('meshpoint:configUpdated', { detail: cfg }),
             );

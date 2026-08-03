@@ -169,6 +169,17 @@
                             <span class="sidebar__label">DAPNET</span>
                         </a>
                     </li>
+                    <li class="sidebar__item" data-requires-config="radio_pager.pager_enabled">
+                        <a href="#/pager" class="sidebar__link" data-route="pager">
+                            <span class="sidebar__icon">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
+                                    <polyline points="22,6 12,13 2,6"/>
+                                </svg>
+                            </span>
+                            <span class="sidebar__label">Pager</span>
+                        </a>
+                    </li>
                     <li class="sidebar__item">
                         <a href="#/messages" class="sidebar__link" data-route="messages">
                             <span class="sidebar__icon">
@@ -442,6 +453,7 @@
                 <div class="topbar__group topbar__group--serial" id="topbar-serial-group" hidden></div>
                 <div class="topbar__group topbar__group--meshcore" id="topbar-meshcore-group" hidden></div>
                 <div class="topbar__group topbar__group--serial" id="topbar-dapnet-group" hidden></div>
+                <div class="topbar__group topbar__group--serial" id="topbar-pager-group" hidden></div>
                 <div class="topbar__spacer" aria-hidden="true"></div>
                 <div class="topbar-actions" role="toolbar" aria-label="Quick actions"></div>
             </header>
@@ -618,6 +630,10 @@
 
             <section class="section" data-section="dapnet" style="display:none">
                 <div id="dapnet-panel"></div>
+            </section>
+
+            <section class="section" data-section="pager" style="display:none">
+                <div id="pager-dashboard-panel"></div>
             </section>
 
             <section class="section" data-section="listener" style="display:none">
@@ -1115,6 +1131,7 @@
     <script src="topbar/topbar_meshcore_chip.js"></script>
     <script src="topbar/topbar_serial_chip.js"></script>
     <script src="topbar/topbar_dapnet_chip.js"></script>
+    <script src="topbar/topbar_pager_chip.js"></script>
     <script src="topbar/topbar_actions.js"></script>
     <script src="topbar/topbar_controller.js"></script>
     <script src="js/build_stamp.js"></script>
@@ -1131,6 +1148,7 @@
     <script src="js/theme_controller.js"></script>
     <script src="js/lorawan_panel.js"></script>
     <script src="js/dapnet_panel.js"></script>
+    <script src="js/pager_dashboard_panel.js"></script>
     <script src="js/pager_panel.js"></script>
     <script src="js/adsb_panel.js"></script>
     <script src="js/adsb_map_modal.js"></script>

@@ -41,7 +41,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const router = new Router({
         defaultRoute: 'dashboard',
         allowedRoutes: [
-            'dashboard', 'meshtastic', 'meshcore', 'lorawan', 'dapnet', 'listener', 'stats', 'rf', 'repeaters', 'topology', 'messages', 'radio', 'terminal',
+            'dashboard', 'meshtastic', 'meshcore', 'lorawan', 'dapnet', 'pager', 'listener', 'stats', 'rf', 'repeaters', 'topology', 'messages', 'radio', 'terminal',
             'configuration/identity', 'configuration/radio',
             'configuration/channels', 'configuration/transmit',
             'configuration/mqtt',
@@ -150,6 +150,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     _bootDangerousPanel(router);
     _bootLoRaWANPanel(router);
     _bootDapnetPanel(router, identity);
+    _bootPagerPanel(router, identity);
     _bootListenerPanel(router);
     _bootRepeatersPanel(router);
     _bootTopologyPanel(router);
@@ -313,6 +314,15 @@ function _bootDapnetPanel(router, identity) {
     const panel = new window.DapnetPanel(identity);
     router.onRouteChange((route) => {
         if (route === 'dapnet') panel.show();
+        else panel.hide();
+    });
+}
+
+function _bootPagerPanel(router, identity) {
+    if (!window.PagerDashboardPanel) return;
+    const panel = new window.PagerDashboardPanel(identity);
+    router.onRouteChange((route) => {
+        if (route === 'pager') panel.show();
         else panel.hide();
     });
 }

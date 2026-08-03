@@ -381,6 +381,20 @@ class SidebarController {
                 const visible = needs.some((need) => sources.has(need));
                 el.style.display = visible ? '' : 'none';
             });
+            // Same idea as data-requires-source, but for a plain boolean
+            // config flag rather than capture-source list membership
+            // (e.g. the pager project's radio.pager_enabled, which isn't
+            // a capture source at all -- it's a channel on the existing
+            // concentrator source). Dotted path resolved against the
+            // same GET /api/config payload already fetched above.
+            document.querySelectorAll('[data-requires-config]').forEach((el) => {
+                const path = el.dataset.requiresConfig.split('.');
+                let value = cfg;
+                for (const key of path) {
+                    value = value == null ? undefined : value[key];
+                }
+                el.style.display = value ? '' : 'none';
+            });
         } catch (_) {
             // best-effort, see method doc above
         }
