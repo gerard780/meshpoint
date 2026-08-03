@@ -559,7 +559,32 @@
 
 .sidebar__subitem .sidebar__link {
     padding-left: 2.5rem;
-    font-size: 0.78rem;
+    font-size: 0.8rem;
+    position: relative;
+}
+
+/* A small dot standing in for an icon -- sub-items are too numerous and
+ * too abstract (Transmit, Metrics, Identity...) to each get a real
+ * meaningful icon the way the top-level protocol pages do, but the wide
+ * indent before the text otherwise reads as empty, especially on a
+ * narrow screen. Roughly aligned with where a top-level icon's own
+ * center sits (.sidebar__link's 0.85rem padding + half an 18px icon). */
+.sidebar__subitem .sidebar__link::before {
+    content: "";
+    position: absolute;
+    left: 1.42rem;
+    top: 50%;
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--sidebar-text-muted);
+    transform: translateY(-50%);
+    transition: background var(--motion-fast) var(--ease-out-expo);
+}
+
+.sidebar__subitem .sidebar__link:hover::before,
+.sidebar__subitem .sidebar__link[aria-current="page"]::before {
+    background: var(--sidebar-accent);
 }
 
 /* Nested group header (e.g. "Companions") inside a sublist — same
