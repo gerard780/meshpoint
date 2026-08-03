@@ -11,12 +11,19 @@ over-the-air protocol yet. Received and sent frames are both treated as
 plain UTF-8 text with no envelope (see pager_event_adapter.py), stored
 in the shared ``packets`` table like DAPNET's pages (no ``messages``
 row -- same reasoning as DAPNET: this isn't a mesh conversation, just a
-one-way-at-a-time broadcast log). Inbox/Outbox are split by
-``capture_source`` ("pager" for received, "pager_tx" for sent) since,
-unlike DAPNET's serial companion, sending here does not echo the sent
-frame back into the normal receive path -- there is no over-the-air
-loopback, so a sent message would simply never appear anywhere unless
-this route inserts its own row for it.
+one-way-at-a-time broadcast log).
+
+``capture_source`` for every pager packet (sent or received) is
+"concentrator", same as Meshtastic/LoRaWAN -- ch9 is a different IF
+chain/channel on the SAME concentrator hardware, not a different
+device, so tagging it differently would mislead the dashboard's
+"Source" display (a real bug, caught live: it briefly said "pager"/
+"pager_tx" here before this was fixed). Inbox/Outbox are instead split
+by ``source_id`` (``_PAGER_SOURCE_ID`` for sent, anything else for
+received) since, unlike DAPNET's serial companion, sending here does
+not echo the sent frame back into the normal receive path -- there is
+no over-the-air loopback, so a sent message would simply never appear
+anywhere unless this route inserts its own row for it.
 """
 
 from __future__ import annotations
@@ -43,7 +50,10 @@ _packet_repo: PacketRepository | None = None
 _concentrator_source = None
 _config: AppConfig | None = None
 
-_CAPTURE_SOURCE_BY_DIRECTION = {"in": "pager", "out": "pager_tx"}
+# This device's own source_id on an outbound (sent) pager Packet --
+# the real distinction between Inbox and Outbox, since capture_source
+# is now "concentrator" for both (see module docstring).
+_PAGER_SOURCE_ID = "meshpoint"
 
 
 def init_routes(
@@ -90,18 +100,21 @@ async def pager_messages(
     if _packet_repo is None:
         raise HTTPException(503, "Routes not initialised")
 
-    capture_source = _CAPTURE_SOURCE_BY_DIRECTION[direction]
+    # Operator choice (=/!=) comes from the validated `direction` path param
+    # (Query's own pattern already restricts it to "in"/"out"), never from
+    # raw user input -- only the source_id VALUE is parameterized below.
+    op = "=" if direction == "out" else "!="
     rows = await _packet_repo._db.fetch_all(
-        """
+        f"""
         SELECT packet_id, source_id, destination_id, packet_type,
                capture_source, timestamp, decoded_payload, decrypted,
                rssi, snr, frequency_mhz
         FROM packets
-        WHERE protocol = 'pager' AND capture_source = ?
+        WHERE protocol = 'pager' AND source_id {op} ?
         ORDER BY timestamp DESC
         LIMIT ?
         """,
-        (capture_source, limit),
+        (_PAGER_SOURCE_ID, limit),
     )
 
     return [
@@ -171,13 +184,13 @@ async def send_pager_message(
     await _packet_repo.insert(
         Packet(
             packet_id=uuid.uuid4().hex[:16],
-            source_id="meshpoint",
+            source_id=_PAGER_SOURCE_ID,
             destination_id="broadcast",
             protocol=Protocol.PAGER,
             packet_type=PacketType.PAGER_RAW,
             decoded_payload={"text": text, "status": "sent"},
             decrypted=True,
-            capture_source="pager_tx",
+            capture_source="concentrator",
             timestamp=datetime.now(timezone.utc),
         )
     )

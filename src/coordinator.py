@@ -378,7 +378,15 @@ class PipelineCoordinator:
             packet = self._adapt_meshcore_usb(raw)
         elif raw.capture_source.startswith("dapnet"):
             packet = self._adapt_dapnet(raw)
-        elif raw.capture_source.startswith("pager"):
+        elif raw.protocol_hint == Protocol.PAGER:
+            # Routed by protocol_hint, not capture_source -- unlike
+            # meshcore_usb/dapnet (genuinely separate USB hardware), the
+            # pager shares the SAME concentrator object as Meshtastic/
+            # LoRaWAN (just a different IF chain/channel), so its
+            # capture_source stays "concentrator" like theirs -- it
+            # would be misleading in the UI otherwise, since a user
+            # would reasonably read a different capture_source as a
+            # different physical device.
             packet = self._adapt_pager(raw)
         else:
             packet = self._router.decode(

@@ -208,15 +208,20 @@ class ConcentratorCaptureSource(CaptureSource):
                 )
 
                 if pkt.modulation == "fsk":
-                    # ch9 pager traffic -- routed by capture_source prefix
-                    # straight to _adapt_pager in coordinator.py, bypassing
-                    # PacketRouter.decode()'s Meshtastic/LoRaWAN/MeshCore
-                    # trial-decode fallback entirely (foreign FSK framing
-                    # would never match any of those anyway).
+                    # ch9 pager traffic -- routed by protocol_hint (not
+                    # capture_source) straight to _adapt_pager in
+                    # coordinator.py, bypassing PacketRouter.decode()'s
+                    # Meshtastic/LoRaWAN/MeshCore trial-decode fallback
+                    # entirely (foreign FSK framing would never match any
+                    # of those anyway). capture_source stays "concentrator"
+                    # like every other packet from this same hardware --
+                    # ch9 is a different IF chain/channel, not different
+                    # hardware, so tagging it differently here would
+                    # mislead the dashboard's "Source" display.
                     yield RawCapture(
                         payload=pkt.payload,
                         signal=signal,
-                        capture_source="pager",
+                        capture_source="concentrator",
                         timestamp=datetime.now(timezone.utc),
                         protocol_hint=Protocol.PAGER,
                     )
