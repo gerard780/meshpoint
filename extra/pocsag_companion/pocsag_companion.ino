@@ -1150,7 +1150,21 @@ void handleSerialJsonLine(const String &line) {
     return;
   }
 
-  sendPocsagAlpha(capcode, text);
+  String result = sendPocsagAlpha(capcode, text);
+  // Dedicated, unambiguous reply for a serial-triggered send -- distinct
+  // from the "echo as an alpha page" JSON a *successful* send already
+  // emits inside sendPocsagAlpha() (deliberately shaped like a received
+  // page, so Meshpoint's packet feed shows it for free). That echo alone
+  // isn't enough for Meshpoint's Send tab to know success/failure though:
+  // a real incoming page could coincidentally arrive with type "alpha" at
+  // the same moment, and there was never any reply at all for "blocked"/
+  // "failed". This type is never ambiguous with a received page.
+  JsonDocument outResult;
+  outResult["type"] = "send_result";
+  outResult["ok"] = (result == "ok");
+  if (result != "ok") outResult["reason"] = result;
+  serializeJson(outResult, Serial);
+  Serial.println();
 }
 
 int txCount = 0;
@@ -1165,14 +1179,18 @@ bool lastTxOk = false;
 // /api/send does its own pre-check too for a faster web UI error, but
 // this is the one that actually can't be bypassed, since every send path
 // in the file funnels through here.
-void sendPocsagAlpha(uint32_t capcode, const String &text) {
+// Returns "ok", "blocked", or "failed" -- the serial JSON handler uses this
+// to emit a definitive {"type":"send_result",...} reply (see below); the
+// web dashboard's checkWebSendPending() ignores it, since /api/send has its
+// own separate JSON response already (see the request-flow comment there).
+String sendPocsagAlpha(uint32_t capcode, const String &text) {
   String cs = getCallsign();
   if (!isValidCallsign(cs)) {
     Serial.println("========================================");
     Serial.println("[serial] SEND BLOCKED -- no valid callsign configured (set one in the web dashboard's Callsign card first)");
     Serial.println("========================================");
     pushWebLog(capcode, RADIOLIB_PAGER_FUNC_BITS_ALPHA, "alpha", text, "blocked");
-    return;
+    return "blocked";
   }
 
   // Station self-identification -- see the file header's licensing
@@ -1219,6 +1237,7 @@ void sendPocsagAlpha(uint32_t capcode, const String &text) {
   Serial.println("========================================");
 
   showSentScreen(capcode, padded, state);
+  return lastTxOk ? "ok" : "failed";
 }
 
 

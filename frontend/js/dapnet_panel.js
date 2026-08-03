@@ -32,7 +32,8 @@ class DapnetPanel {
         this._liveOnlyIds = new Set();
         let storedTab = null;
         try { storedTab = localStorage.getItem(DP_TAB_STORE_KEY); } catch (_) {}
-        this._tab = storedTab === 'capcodes' ? 'capcodes' : 'packets';
+        this._tab = (storedTab === 'capcodes' || storedTab === 'send') ? storedTab : 'packets';
+        this._sendDevices = [];
         this._onWsPacket = this._onWsPacket.bind(this);
     }
 
@@ -123,6 +124,8 @@ class DapnetPanel {
                                     data-dp-tab="packets">Recent pages</button>
                             <button class="lw-tab" type="button" role="tab"
                                     data-dp-tab="capcodes">Capcodes</button>
+                            <button class="lw-tab" type="button" role="tab"
+                                    data-dp-tab="send">Send</button>
                         </div>
                         <span class="lw-panel__limit" data-dp-suffix="packets">(last 100)</span>
                         <div class="lw-search-wrap" data-dp-suffix="capcodes" hidden>
@@ -185,6 +188,31 @@ class DapnetPanel {
                         </p>
                         </div>
                     </div>
+                    <div data-dp-view="send" hidden>
+                        <div class="panel__body">
+                            <form class="cfg-form" id="dp-send-form" style="max-width:480px">
+                                <label class="cfg-field" data-dp-send-device-wrap hidden>
+                                    <span class="cfg-field__label">Companion</span>
+                                    <select class="cfg-field__input" id="dp-send-device"></select>
+                                </label>
+                                <label class="cfg-field">
+                                    <span class="cfg-field__label">Capcode (optional)</span>
+                                    <input class="cfg-field__input" type="number" min="1"
+                                           id="dp-send-capcode" placeholder="Companion default">
+                                </label>
+                                <label class="cfg-field">
+                                    <span class="cfg-field__label">Message</span>
+                                    <input class="cfg-field__input" type="text"
+                                           id="dp-send-text" placeholder="Message text" required>
+                                </label>
+                                <div class="cfg-card__actions">
+                                    <button class="terminal-button terminal-button--primary"
+                                            type="submit" id="dp-send-btn">Send page</button>
+                                </div>
+                                <p class="cfg-status" id="dp-send-status" aria-live="polite"></p>
+                            </form>
+                        </div>
+                    </div>
                 </div>
             </section>
         `;
@@ -239,6 +267,81 @@ class DapnetPanel {
                 this._openCapcodeHistory(tr.dataset.capcode);
             });
         }
+
+        document.getElementById('dp-send-form')
+            ?.addEventListener('submit', (e) => this._handleSend(e));
+    }
+
+    async _loadSendDevices() {
+        try {
+            const r = await fetch('/api/config', { credentials: 'same-origin' });
+            if (!r.ok) return;
+            const cfg = await r.json();
+            const configured = Array.isArray(cfg.pocsag_serial) ? cfg.pocsag_serial : [];
+            const liveByName = {};
+            (Array.isArray(cfg.dapnet_status) ? cfg.dapnet_status : []).forEach((s) => {
+                liveByName[s.name] = s;
+            });
+            this._sendDevices = configured.map((d) => {
+                const name = d.label ? `dapnet_${d.label}` : 'dapnet';
+                return { label: d.label || '', connected: !!liveByName[name]?.connected };
+            });
+            this._renderSendDevices();
+        } catch (_) {}
+    }
+
+    _renderSendDevices() {
+        const wrap = document.querySelector('[data-dp-send-device-wrap]');
+        const select = document.getElementById('dp-send-device');
+        if (!wrap || !select) return;
+        // Only worth choosing between when there's more than one -- with
+        // 0 or 1 configured, whichever exists (or none) is implied.
+        wrap.hidden = this._sendDevices.length < 2;
+        select.innerHTML = this._sendDevices.map((d) => `
+            <option value="${this._esc(d.label)}">
+                ${this._esc(d.label || 'Default')}${d.connected ? '' : ' (offline)'}
+            </option>
+        `).join('');
+    }
+
+    async _handleSend(event) {
+        event.preventDefault();
+        const status = document.getElementById('dp-send-status');
+        const btn = document.getElementById('dp-send-btn');
+        const textEl = document.getElementById('dp-send-text');
+        const capcodeEl = document.getElementById('dp-send-capcode');
+        const deviceEl = document.getElementById('dp-send-device');
+        const text = (textEl?.value || '').trim();
+        if (!text) return;
+
+        const body = { label: deviceEl?.value || '', text };
+        if (capcodeEl?.value) body.capcode = Number(capcodeEl.value);
+
+        btn.disabled = true;
+        status.dataset.kind = 'pending';
+        status.textContent = 'Sending…';
+        try {
+            const r = await fetch('/api/config/dapnet/send', {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            });
+            const result = await r.json().catch(() => ({}));
+            if (r.ok) {
+                status.dataset.kind = 'success';
+                status.textContent = 'Sent.';
+                textEl.value = '';
+            } else {
+                status.dataset.kind = 'error';
+                status.textContent = result.detail || 'Send failed.';
+            }
+        } catch (_) {
+            status.dataset.kind = 'error';
+            status.textContent = 'Send failed.';
+        } finally {
+            btn.disabled = false;
+        }
     }
 
     async _openCapcodeHistory(capcode) {
@@ -284,6 +387,7 @@ class DapnetPanel {
             this._loadStats(),
             this._loadCapcodes(),
             this._loadPackets(),
+            this._loadSendDevices(),
         ]);
     }
 

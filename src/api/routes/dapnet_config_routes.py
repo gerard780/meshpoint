@@ -240,3 +240,62 @@ async def reboot_dapnet_companion(
         raise HTTPException(400, result.get("error") or "Rejected by companion")
 
     return {"saved": True}
+
+
+class DapnetSendRequest(BaseModel):
+    label: str = ""
+    capcode: int | None = None
+    text: str
+
+
+@router.post("/send")
+async def send_dapnet_page(
+    req: DapnetSendRequest,
+    _claims: SessionClaims = Depends(require_admin),
+) -> dict:
+    """Send a POCSAG alpha page through one connected companion's live
+    serial connection.
+
+    ``capcode`` omitted (or null) lets the companion use its own
+    configured default (``SERIAL_DEFAULT_CAPCODE`` in the .ino) rather
+    than Meshpoint guessing one. The companion prefixes every sent
+    message with its operator callsign before transmitting (required by
+    the licensing terms in the .ino's header) and echoes a successful
+    send into the normal packet feed exactly like a received page (same
+    reasoning as receiving your own transmission over the air), so it
+    shows up in Recent Pages/Capcodes for free -- this route's own
+    ``{"type":"send_result",...}`` reply (added specifically for this
+    feature, distinct from that echo) is only for reporting success/
+    failure back to the caller, not for storing anything itself.
+
+    A longer timeout than the other commands here (10s, not 5s) --
+    unlike a settings write, this one waits for an actual over-the-air
+    POCSAG transmission (half-duplex RX/TX switch + real TX time) to
+    complete before the companion replies.
+    """
+    text = req.text.strip()
+    if not text:
+        raise HTTPException(400, "Message text required")
+
+    source = _resolve_dapnet_source(req.label)
+    if source is None or not source.connected:
+        raise HTTPException(503, "POCSAG companion not connected")
+
+    command: dict = {"text": text}
+    if req.capcode is not None:
+        command["capcode"] = req.capcode
+
+    result = await source.send_command(
+        command, expect_type="send_result", timeout=10.0,
+    )
+    if result is None:
+        raise HTTPException(503, "No reply from companion (timed out)")
+    if not result.get("ok"):
+        reason = result.get("reason", "failed")
+        if reason == "blocked":
+            raise HTTPException(
+                400, "No callsign configured on the companion -- set one first",
+            )
+        raise HTTPException(502, "Companion failed to transmit the page")
+
+    return {"sent": True}
