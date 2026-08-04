@@ -321,13 +321,61 @@ const int NUM_EMERGENCY_CAPCODES = sizeof(EMERGENCY_CAPCODES) / sizeof(EMERGENCY
 // Placeholder wording -- easy to edit/extend, not a fixed protocol. Kept
 // short: the JSON envelope adds overhead on top of this text, and the
 // concentrator's own HAL caps a single FSK frame at 255 bytes total.
+// const char* CANNED_MESSAGES[] = {
+//   "OK",
+//   "On my way",
+//   "Call me",
+//   "All clear",
+//   "Emergency - need help",
+// };
+
 const char* CANNED_MESSAGES[] = {
+  // Casual
   "OK",
+  "Yes",
+  "No",
+  "Thanks",
   "On my way",
+  "Running late",
+  "Arrived",
   "Call me",
+  "Where are you?",
+  "Send location",
+  "I'm home",
+  "Meet here",
+  "See you soon",
+  "Good morning",
+  "Good night",
+
+  // Status
+  "Stand by",
+  "Busy",
+  "Available",
+  "Battery low",
+  "Charging",
+  "Leaving now",
+  "Back soon",
+  "Off duty",
+
+  // Emergency
+  "Need help",
+  "Emergency!",
+  "SOS",
+  "I'm injured",
+  "Need ambulance",
+  "Need police",
+  "Need fire dept",
+  "Need backup",
+  "Evacuate now",
+  "Shelter in place",
+  "Safe",
   "All clear",
-  "Emergency - need help",
+  "Trapped",
+  "Need food",
+  "Need water",
+  "Need fuel"
 };
+
 const int NUM_CANNED = sizeof(CANNED_MESSAGES) / sizeof(CANNED_MESSAGES[0]);
 
 // ---------- Button state machine ----------
