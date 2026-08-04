@@ -613,7 +613,26 @@ void handleReceivedPacket() {
 
     uint32_t to = doc["to"] | 0;
     uint32_t from = doc["from"] | 0;
+
+    // A reply to something WE sent, not a real message of its own. This
+    // device doesn't yet track/expect acks for its own outgoing sends
+    // (only the dashboard's Outbox does -- see the "Addressing" header
+    // comment), so there's nothing to do with it yet beyond not treating
+    // it as a bogus message with empty text.
+    const char* ackId = doc["ack_id"] | (const char*)nullptr;
+    if (ackId != nullptr) {
+      Serial.printf("[RX] ack_id=%s (ignored, nothing pending on this end)\n", ackId);
+      radio.startReceive();
+      return;
+    }
+
     const char* text = doc["text"] | "";
+    // Present on messages that want a reply (currently: the dashboard's
+    // own sends -- see emergency_pager_routes.py's send route); absent
+    // on anything from firmware that predates this feature. Only ever
+    // read here, after `doc` is confirmed still in scope for sendAck()
+    // below -- doc owns the string this points into.
+    const char* msgId = doc["id"] | (const char*)nullptr;
 
     bool forMe = false;
     for (int i = 0; i < NUM_MY_CAPCODES; i++) {
@@ -645,6 +664,14 @@ void handleReceivedPacket() {
     // mid-selection; the new message still shows the moment they return to
     // idle (either via timeout or by sending/cancelling).
     if (uiState == STATE_IDLE) drawIdle();
+
+    // Only ever acks a message that actually passed the forMe check above
+    // (never one silently dropped as not-for-us) -- no distinction made
+    // here between a personal match and a shared/emergency one, so a
+    // broadcast to 911 gets acked by every pager that heard it, each
+    // update to the same Outbox row's status idempotent and harmless
+    // (there's no per-pager "who acked" tracking, just one status string).
+    if (msgId != nullptr) sendAck(from, msgId);
   } else {
     Serial.printf("[!] readData failed: %d\n", state);
   }
@@ -679,6 +706,26 @@ void sendMessage(const String &text) {
 
 void sendCannedMessage(int idx) {
   sendMessage(String(CANNED_MESSAGES[idx]));
+}
+
+// Replies to a received message that asked for one (its own "id" field
+// present, see the "Addressing" header comment) -- a small envelope with
+// no "text", just confirming receipt. Called from handleReceivedPacket(),
+// same thread sendMessage() already assumes (loop()'s, the only one that
+// may ever touch `radio`).
+void sendAck(uint32_t to, const char *ackId) {
+  JsonDocument doc;
+  doc["from"] = MY_CAPCODES[0];
+  doc["to"] = to;
+  doc["ack_id"] = ackId;
+  char buf[128];
+  size_t len = serializeJson(doc, buf, sizeof(buf));
+
+  int state = radio.transmit((uint8_t*)buf, len);
+  Serial.printf("[TX] ack from=%lu to=%lu ack_id=%s -> %s\n",
+                (unsigned long)MY_CAPCODES[0], (unsigned long)to, ackId,
+                state == RADIOLIB_ERR_NONE ? "OK" : "FAIL");
+  radio.startReceive();
 }
 
 // ---------- Button: debounce + short/long press detection ----------

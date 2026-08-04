@@ -6,16 +6,21 @@ unrelated, pre-existing feature that happens to share the word "pager".
 This file is the concentrator's own dedicated FSK channel (ch9),
 prefixed /api/pager (singular, distinct from that plural /api/pagers).
 
-Still internal/experimental -- there is no real Heltec V3 firmware
-running the matching protocol yet. Every frame (sent or received) is a
-JSON envelope, ``{"from": <capcode>, "to": <capcode>, "text": "..."}``
-(see pager_event_adapter.py) -- same convention as extra/pocsag_companion's
-own serial protocol, reused deliberately. ``from``/``to`` are plain
-POCSAG-style capcodes (e.g. this fork's own real DAPNET capcode, or a
-shared address like 911 multiple pagers listen on for broadcasts).
-Stored in the shared ``packets`` table like DAPNET's pages (no
-``messages`` row -- this isn't a mesh conversation, just a one-way-at-a-
-time broadcast log).
+Still internal/experimental, but confirmed working end-to-end on real
+hardware (extra/pager_client.ino, a Heltec V3) as of 2026-08. Every frame
+is a JSON envelope -- a real message, ``{"from": <capcode>, "to":
+<capcode>, "text": "...", "id": "<16-hex-char id>"}``, or that message's
+ACK reply, ``{"from": <capcode>, "to": <capcode>, "ack_id": "<the id
+being acked>"}`` (no "text") -- see pager_event_adapter.py, same JSON
+convention as extra/pocsag_companion's own serial protocol, reused
+deliberately. ``from``/``to`` are plain POCSAG-style capcodes (e.g. this
+fork's own real DAPNET capcode, or a shared address like 911 multiple
+pagers listen on for broadcasts). Stored in the shared ``packets`` table
+like DAPNET's pages (no ``messages`` row -- this isn't a mesh
+conversation, just a one-way-at-a-time broadcast log) -- an ACK never
+gets its own row though, it only ever updates the ``status`` field
+inside the original Outbox row's ``decoded_payload`` (see coordinator.py
+and PacketRepository.update_pager_status()).
 
 ``capture_source`` for every pager packet (sent or received) is
 "concentrator", same as Meshtastic/LoRaWAN -- ch9 is a different IF
@@ -132,6 +137,11 @@ async def pager_messages(
             "from_capcode": row.get("source_id"),
             "to_capcode": row.get("destination_id"),
             "text": payload.get("text", ""),
+            # "sent" until a real ACK from the pager flips it to "acked"
+            # (PacketRepository.update_pager_status(), via coordinator.py's
+            # ack-matching branch) -- only ever meaningful for Outbox rows,
+            # but included either way rather than direction-gating it.
+            "status": payload.get("status"),
             "timestamp": row["timestamp"],
             "rssi": row.get("rssi"),
             "snr": row.get("snr"),
@@ -163,11 +173,14 @@ async def send_pager_message(
 
     Unlike DAPNET's serial companion, this is a direct, synchronous HAL
     call (``send_fsk_packet``) with no device round-trip -- a successful
-    response here means the concentrator hardware accepted and queued
-    the transmission, NOT that any device received it. There is no ACK
-    scheme yet (a real one may be possible once real pager firmware
-    exists), so the stored Outbox row's ``status`` is just ``"sent"``
-    for now -- a placeholder for a future ``"acked"`` once that's real.
+    response here only ever means the concentrator hardware accepted and
+    queued the transmission, NOT that any device received it. The stored
+    Outbox row's ``status`` starts as ``"sent"`` and flips to ``"acked"``
+    if/when the pager firmware replies with an ACK envelope carrying this
+    message's own ``id`` (see pager_event_adapter.py's "ack_id" handling
+    and coordinator.py's ack-matching branch, PacketRepository.
+    update_pager_status()) -- a real, if best-effort, delivery
+    confirmation, not just a placeholder for one anymore.
 
     Refuses to transmit without a configured ``radio.pager_capcode`` --
     same "identify yourself before you key up" reasoning as
@@ -191,8 +204,13 @@ async def send_pager_message(
         )
 
     our_capcode = _config.radio.pager_capcode
+    # Same id ends up as this Outbox row's own packet_id below -- lets a
+    # later ACK from the pager (see pager_event_adapter.py's own "ack_id"
+    # handling and coordinator.py's ack-matching branch) find this exact
+    # row with a plain packet_id lookup, no separate mapping needed.
+    msg_id = uuid.uuid4().hex[:16]
     envelope = json.dumps({
-        "from": our_capcode, "to": req.to_capcode, "text": text,
+        "from": our_capcode, "to": req.to_capcode, "text": text, "id": msg_id,
     })
     payload = envelope.encode("utf-8")
     try:
@@ -209,14 +227,14 @@ async def send_pager_message(
 
     await _packet_repo.insert(
         Packet(
-            packet_id=uuid.uuid4().hex[:16],
+            packet_id=msg_id,
             source_id=str(our_capcode),
             destination_id=str(req.to_capcode),
             protocol=Protocol.PAGER,
             packet_type=PacketType.PAGER_RAW,
             decoded_payload={
                 "from": our_capcode, "to": req.to_capcode,
-                "text": text, "status": "sent",
+                "text": text, "id": msg_id, "status": "sent",
             },
             decrypted=True,
             capture_source="concentrator",

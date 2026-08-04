@@ -304,9 +304,19 @@ class PagerDashboardPanel {
                 <td class="lw-id">${this._esc(m.from_capcode ?? '--')}</td>
                 <td class="lw-id">${this._esc(m.to_capcode ?? '--')}</td>
                 <td class="lw-text">${this._esc(m.text || '')}</td>
-                <td><span class="lw-badge">Sent</span></td>
+                <td>${this._statusBadge(m.status)}</td>
             </tr>
         `).join('');
+    }
+
+    // "acked" (real ACK reply from the pager, see coordinator.py's
+    // ack-matching branch) gets the same green "confirmed" styling
+    // LoRaWAN's own Join badge already uses -- "sent" (still just
+    // means the concentrator accepted the transmission, not that
+    // anything received it) stays the neutral default badge color.
+    _statusBadge(status) {
+        if (status === 'acked') return '<span class="lw-badge lw-badge--join">Acked</span>';
+        return '<span class="lw-badge">Sent</span>';
     }
 
     async _handleSend(event) {

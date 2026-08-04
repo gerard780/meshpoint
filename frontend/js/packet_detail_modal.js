@@ -114,6 +114,7 @@ class PacketDetailModal {
                 ...packet,
                 decoded_payload: {
                     from: packet.from_capcode, to: packet.to_capcode, text: packet.text,
+                    id: packet.packet_id, status: packet.status,
                 },
             };
         }

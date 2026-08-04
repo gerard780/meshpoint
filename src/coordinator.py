@@ -415,7 +415,8 @@ class PipelineCoordinator:
 
         if packet.protocol == Protocol.PAGER:
             our_capcode = self._config.radio.pager_capcode
-            heard_from = packet.decoded_payload.get("from") if packet.decoded_payload else None
+            pager_payload = packet.decoded_payload or {}
+            heard_from = pager_payload.get("from")
             if our_capcode and heard_from == our_capcode:
                 # The concentrator's own TX leaking directly into its own
                 # RX (confirmed live: near-field self-coupling, RSSI far
@@ -426,6 +427,20 @@ class PipelineCoordinator:
                 # exists in the envelope; `pager_capcode` unset (0)
                 # disables this check entirely rather than falsely
                 # matching every message's un-set `from`.
+                return
+
+            if "ack_id" in pager_payload:
+                # A pager's reply to a message we sent, not a real
+                # message of its own -- flips the matching Outbox row's
+                # status from "sent" to "acked" (matched by packet_id;
+                # pager_event_adapter.py sets an ACK Packet's packet_id
+                # to the id being acknowledged, the original message's
+                # own packet_id, verbatim) and stops here. Same
+                # "protocol control frame, not a message" treatment as
+                # the self-echo case above -- no new row, no notify.
+                await self.packet_repo.update_pager_status(
+                    pager_payload["ack_id"], "acked"
+                )
                 return
 
         await self._store_packet(packet)

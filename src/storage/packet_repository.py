@@ -121,6 +121,31 @@ class PacketRepository:
         )
         return row["source_id"] if row else ""
 
+    async def update_pager_status(self, packet_id: str, status: str) -> bool:
+        """Updates the ``status`` field inside an existing pager Outbox
+        row's ``decoded_payload`` JSON blob (e.g. "sent" -> "acked" once
+        a real ACK arrives from the pager) -- there's no dedicated status
+        column, decoded_payload is the only place this lives. Returns
+        False if no row with this packet_id exists (e.g. the ACK arrived
+        for a message this box never sent, or arrived after cleanup_old()
+        already pruned the original row)."""
+        row = await self._db.fetch_one(
+            "SELECT decoded_payload FROM packets WHERE packet_id = ? LIMIT 1",
+            (packet_id,),
+        )
+        if row is None:
+            return False
+        try:
+            payload = json.loads(row["decoded_payload"]) if row["decoded_payload"] else {}
+        except (ValueError, TypeError):
+            payload = {}
+        payload["status"] = status
+        await self._db.execute(
+            "UPDATE packets SET decoded_payload = ? WHERE packet_id = ?",
+            (json.dumps(payload), packet_id),
+        )
+        return True
+
     async def get_by_source(
         self, source_id: str, limit: int = 100
     ) -> list[Packet]:
