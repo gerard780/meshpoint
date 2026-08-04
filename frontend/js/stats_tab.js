@@ -64,6 +64,12 @@ const CHART_COLORS = [
     '#eab308', '#6366f1', '#84cc16', '#e11d48',
 ];
 
+/** Return obj when it has at least one key; otherwise null (falsy for ||). */
+function nonemptyMap(obj) {
+    if (!obj || typeof obj !== 'object') return null;
+    return Object.keys(obj).length > 0 ? obj : null;
+}
+
 class StatsTab {
     constructor(containerId) {
         this._container = document.getElementById(containerId);
@@ -302,15 +308,25 @@ class StatsTab {
         this._setText('ss-avg-snr', signal.avg_snr != null ? `${signal.avg_snr} dB` : '--');
 
         this._updateRange(live, data.farthest_mesh);
-        this._updateProtocol(live.protocols || traffic.protocol_distribution || {});
-        this._updateTypes(live.packet_types || traffic.type_distribution || {});
+        // Prefer lifetime SQLite distributions. live.* is the heartbeat
+        // window and resets every ~5 min; empty {} is truthy so it used
+        // to block the traffic fallback and leave Protocol Split / Packet
+        // Types empty (or showing only a handful of recent packets).
+        const protocols = nonemptyMap(traffic.protocol_distribution)
+            || nonemptyMap(live.protocols)
+            || {};
+        const packetTypes = nonemptyMap(traffic.type_distribution)
+            || nonemptyMap(live.packet_types)
+            || {};
+        this._updateProtocol(protocols);
+        this._updateTypes(packetTypes);
         this._updateRssiHist(data.rssi_distribution || {});
         this._updateQuality(signal);
         this._updateDirectRelayed(directRelayed, traffic);
         this._updateActiveNodes(network);
         this._updateRoles(network.roles || {});
         this._updateHwModels(network.hw_models || {});
-        this._updateProtoBars(live.protocols || traffic.protocol_distribution || {});
+        this._updateProtoBars(protocols);
         this._updateTimeline(data.traffic_timeline || {});
         this._updateRelay(data.relay || {});
         this._updateRejectReasons(data.relay || {});
@@ -538,7 +554,10 @@ class StatsTab {
         const centerPlugin = centerText != null ? {
             id: `center-${canvasId}`,
             afterDraw(chart) {
+                const text = chart.options.meshpointCenterText;
+                if (text == null) return;
                 const { ctx, chartArea } = chart;
+                if (!chartArea) return;
                 const cx = (chartArea.left + chartArea.right) / 2;
                 const cy = (chartArea.top + chartArea.bottom) / 2;
                 ctx.save();
@@ -546,7 +565,7 @@ class StatsTab {
                 ctx.fillStyle = '#f1f5f9';
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'middle';
-                ctx.fillText(String(centerText), cx, cy);
+                ctx.fillText(String(text), cx, cy);
                 ctx.restore();
             },
         } : null;
@@ -562,6 +581,7 @@ class StatsTab {
             }],
         }, {
             cutout: '65%',
+            meshpointCenterText: centerText,
             plugins: {
                 legend: {
                     position: 'bottom',
@@ -603,7 +623,11 @@ class StatsTab {
 
         if (this._charts[canvasId]) {
             const chart = this._charts[canvasId];
-            chart.data = data;
+            chart.data.labels = data.labels;
+            chart.data.datasets = data.datasets;
+            if (extraOpts && Object.prototype.hasOwnProperty.call(extraOpts, 'meshpointCenterText')) {
+                chart.options.meshpointCenterText = extraOpts.meshpointCenterText;
+            }
             chart.update('none');
             return;
         }
