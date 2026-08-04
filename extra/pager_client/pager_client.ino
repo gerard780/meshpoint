@@ -111,22 +111,43 @@
     Button: GPIO0 (USER_SW / PRG), active LOW with internal pull-up.
 
   ---- Button UX (single-button state machine) ----
-  Sketched during this session's pager brainstorm (see project memory,
-  "Pager brainstorm continued: channel-isolation approach picked, button UX
-  sketched") for the original ch5-7 LoRa plan -- carries over unchanged since
-  it's about the button/OLED interaction, not the channel/modulation:
+  Started as a two-state Idle/reply-menu design during this session's
+  original pager brainstorm (see project memory), later grown into a real
+  multi-screen menu tree (Inbox/Outbox/Send/Settings) modeled loosely on
+  github.com/upiir/arduino_oled_menu's scroll-list visual (previous/
+  current/next rows + a scrollbar) -- that repo's actual button-handling
+  code wasn't reusable (it assumes 3 physical buttons and a different
+  OLED library, U8glib, not this file's Adafruit_GFX), so only the visual
+  IDEA carried over, reimplemented natively. Still exactly two gestures,
+  same as always -- short press and long-hold, nothing added:
     Idle (default): OLED shows the last received message, who it's from,
       and its RSSI.
-    Long-hold from idle: enters the reply menu, starting on the first
-      canned-message option.
-    In menu, short press: cycles to the next canned option (wraps around).
-    In menu, long-hold: sends the currently highlighted option, returns to idle.
-    In menu, no activity for MENU_TIMEOUT_MS: times out back to idle
-      unsent (the "don't get stuck in a stale menu" refinement flagged
-      earlier, now implemented).
-    A message arriving while in the menu is stored but does NOT interrupt
-      the menu display (the "leaning toward wait" refinement flagged
-      earlier) -- it'll show once back at idle.
+    Long-hold from idle: opens the top-level menu (Inbox / Outbox / Send
+      / Settings), starting on the first item.
+    In the top menu, short press: cycles to the next item (wraps around).
+    In the top menu, long-hold: enters the highlighted item's own screen
+      -- Send drops into the (unchanged) canned-message picker; Inbox/
+      Outbox open a scrollable list of received/sent messages pulled
+      straight from the web dashboard's own webLog[] ring buffer (no
+      separate on-device message history needed); Settings shows a
+      read-only status readout (capcode, who it reports to, WiFi state,
+      RX count) -- real settings still live on the web dashboard.
+    In Send, short press cycles the canned option, long-hold sends it and
+      returns to idle -- entirely unchanged from before, just reached via
+      the top menu now instead of directly from idle.
+    In Inbox/Outbox, short press cycles the list, long-hold opens that
+      entry's full word-wrapped text (drawMsgDetail()).
+    ANY non-idle screen (not just the old single menu state) times out
+      back to idle after MENU_TIMEOUT_MS of no activity -- the "don't get
+      stuck in a stale menu" refinement flagged early on, now applying
+      uniformly across the whole menu tree. Doubles as the only "back"
+      gesture, since there's no dedicated back button -- long-hold on a
+      dead-end screen (detail/settings) also returns straight to idle.
+    A message arriving while off in any menu screen is stored but does
+      NOT interrupt the current display (the "leaning toward wait"
+      refinement flagged earlier) -- the topbar's envelope icon (see
+      "Screen design" below) is the one place it becomes visible before
+      returning to idle.
     Short press from idle also wakes the screen if it had auto-blanked
       (see "Display power" below) -- still no menu action, long-hold
       remains the only way in.
@@ -137,38 +158,51 @@
   after displayTimeoutMs of no new screen content -- runtime-settable from
   the web dashboard's "Screen Timeout" card (0 = never blank), persisted in
   NVS so it survives a reboot. A short press from idle wakes it back up
-  (see "Button UX" above); every drawIdle()/drawMenu() call also wakes it
-  as a side effect of any real content update. No physical button toggles
+  (see "Button UX" above); every screen-drawing function (drawIdle(),
+  drawTopMenu(), drawSendMenu(), drawScrollList(), drawMsgDetail(),
+  drawSettings()) also wakes it as a side effect of any real content
+  update. No physical button toggles
   it off manually the way pocsag_companion.ino's BOOT button does -- this
   device's single button is already fully committed to the reply-menu
   state machine, so display power is timeout-only plus wake-on-activity.
 
-  ---- Screen design (UNCONFIRMED ON REAL HARDWARE -- see status below) ----
-  Idle/menu screens share a top status bar (drawTopBar()): title text on
+  ---- Screen design ----
+  Idle and every menu screen (top menu, Send, Inbox/Outbox lists, message
+  detail, Settings) share a top status bar (drawTopBar()): title text on
   the left, a small vector WiFi icon and a new-message envelope icon fixed
   at the right edge (both hand-drawn from Adafruit_GFX primitives -- arcs/
   lines/rects -- not a bitmap asset). The envelope only appears while
   hasUnseenMessage is true, which is really only ever true for more than
-  an instant in one case: a message arriving while in the send-menu
-  (which deliberately doesn't interrupt, see "Button UX" above) -- idle
-  itself clears the flag the moment it draws, since arriving there always
-  means the message is already fully shown. Idle also word-wraps the
-  message text at space boundaries (printWrapped()) instead of relying on
-  Adafruit_GFX's own auto-wrap, which breaks at the screen edge mid-
-  character (e.g. "emergency" splitting into "emergenc"/"y" -- seen live
-  in an early real-hardware photo before this existed), and shows a
-  relative "Xm ago" timestamp instead of a wall clock (a real clock would
-  need NTP, deliberately not run on this device otherwise -- see the
-  WiFi/mDNS/OTA section above). A boot screen (drawBootScreen(), shown
-  once in setup() before RX/TX/WiFi come up) shows "LoRaPager" in large
-  text plus this unit's own capcode and frequency.
+  an instant while off in the menu tree somewhere (which deliberately
+  doesn't interrupt for an incoming message, see "Button UX" above) --
+  idle itself clears the flag the moment it draws, since arriving there
+  always means the message is already fully shown. Idle and message
+  detail both word-wrap text at space boundaries (printWrapped()) instead
+  of relying on Adafruit_GFX's own auto-wrap, which breaks at the screen
+  edge mid-character (e.g. "emergency" splitting into "emergenc"/"y" --
+  seen live in an early real-hardware photo before this existed), and
+  idle shows a relative "Xm ago" timestamp instead of a wall clock (a
+  real clock would need NTP, deliberately not run on this device
+  otherwise -- see the WiFi/mDNS/OTA section above). A boot screen
+  (drawBootScreen(), shown once in setup() before RX/TX/WiFi come up)
+  shows "LoRaPager" in large text plus this unit's own capcode and
+  frequency. The menu tree itself (top menu, Inbox/Outbox scroll lists)
+  uses a shared 3-row previous/current/next layout with a right-edge
+  scrollbar, modeled on github.com/upiir/arduino_oled_menu's visual
+  design (see "Button UX" above for why only the visual idea carried
+  over, not the actual code).
 
-  All of this is compile-verified only -- the icon pixel math (drawn from
-  the real Adafruit_GFX_Library's own drawCircleHelper()/drawRoundRect()
-  source to get the quadrant bitmask right, not guessed) has never been
-  seen on an actual OLED. First real flash should confirm the icons render
-  where intended and don't clip/overlap the title or "ago" text before
-  trusting this description over what the screen actually shows.
+  STATUS: the idle/boot-screen icon work (topbar icons, word-wrap, boot
+  screen) is unconfirmed on real hardware as of this comment -- the icon
+  pixel math was drawn from the real Adafruit_GFX_Library's own
+  drawCircleHelper()/drawRoundRect() source to get the quadrant bitmask
+  right, not guessed, but has never actually been seen lit up on an OLED.
+  The menu tree (top menu, Inbox/Outbox/detail/settings) is newer still
+  and equally unconfirmed. First real flash should check both: that the
+  icons render where intended without clipping the title/"ago" text, and
+  that the menu screens' own row spacing/scrollbar don't overlap anything
+  -- trust what the real screen shows over this description if they
+  disagree.
 
   ---- Addressing (POCSAG-style capcodes) ----
   Every frame is a JSON envelope, {"from":<capcode>,"to":<capcode>,
@@ -297,9 +331,40 @@ const char* CANNED_MESSAGES[] = {
 const int NUM_CANNED = sizeof(CANNED_MESSAGES) / sizeof(CANNED_MESSAGES[0]);
 
 // ---------- Button state machine ----------
-enum PagerUiState { STATE_IDLE, STATE_MENU };
+//
+// Same two gestures as before (short press = cycle, long-hold = select/
+// act), just dispatched across more screens now. Long-hold from idle
+// opens the top-level menu (Inbox/Outbox/Send/Settings) instead of
+// jumping straight into the canned-message picker the way it used to --
+// Send is now one of the four items you navigate to, not the only
+// destination. Any non-idle screen still times out back to idle after
+// MENU_TIMEOUT_MS of no activity (unchanged mechanism, just now applies
+// uniformly instead of only from the one old menu state) -- doubles as
+// the only "back" gesture, since there's no dedicated back button.
+enum PagerUiState {
+  STATE_IDLE,
+  STATE_TOP_MENU,    // Inbox / Outbox / Send / Settings
+  STATE_SEND_MENU,   // the canned-message picker (was the only menu before)
+  STATE_INBOX_LIST,  // scrollable list, received messages from webLog[]
+  STATE_OUTBOX_LIST, // scrollable list, sent messages from webLog[]
+  STATE_MSG_DETAIL,  // full text of one selected inbox/outbox entry
+  STATE_SETTINGS,    // read-only status screen
+};
 PagerUiState uiState = STATE_IDLE;
 int cannedIndex = 0;
+
+const char* TOP_MENU_ITEMS[] = { "Inbox", "Outbox", "Send", "Settings" };
+const int NUM_TOP_MENU_ITEMS = sizeof(TOP_MENU_ITEMS) / sizeof(TOP_MENU_ITEMS[0]);
+int topMenuIndex = 0;
+
+// Inbox/Outbox list state -- a snapshot of matching webLog[] indices taken
+// once when entering the list (buildListSnapshot()), not re-filtered on
+// every redraw. Newest-first, capped well under WEB_LOG_SIZE since the
+// screen can only usefully show a handful of entries anyway.
+#define LIST_SNAPSHOT_MAX 20
+int listSnapshot[LIST_SNAPSHOT_MAX];
+int listSnapshotCount = 0;
+int listIndex = 0;
 
 const unsigned long LONG_PRESS_MS   = 700;
 const unsigned long MENU_TIMEOUT_MS = 8000;
@@ -319,10 +384,11 @@ unsigned long menuActivityMs = 0;
 // in a pocket. Auto-blanks via the panel's own real DISPLAYOFF command (not
 // just clearing pixels, so it actually saves power) after displayTimeoutMs
 // with no new screen content, and a short button press (see onShortPress())
-// wakes it back up rather than being a no-op from idle. Every drawIdle()/
-// drawMenu() call routes through wakeDisplay() first, so any real screen
-// update both wakes the panel if it was off and resets the idle timer --
-// callers don't need to think about display power at all.
+// wakes it back up rather than being a no-op from idle. Every one of
+// this file's screen-drawing functions routes through wakeDisplay()
+// first, so any real screen update both wakes the panel if it was off
+// and resets the idle timer -- callers don't need to think about
+// display power at all.
 
 bool displayOn = true;
 unsigned long lastDisplayActivity = 0;
@@ -350,10 +416,11 @@ int rxCount = 0; // messages actually addressed to us (MY_CAPCODES/EMERGENCY_CAP
 // Set whenever a message arrives, cleared the moment drawIdle() actually
 // shows it -- since handleReceivedPacket() already redraws idle
 // immediately when a message arrives while STATE_IDLE, this is really
-// only ever true for more than an instant in ONE case: a message arriving
-// while STATE_MENU, which deliberately does NOT interrupt the menu (see
-// header comment) -- the topbar's envelope icon is the one place that
-// pending message becomes visible before returning to idle.
+// only ever true for more than an instant while off in any of the menu
+// screens (STATE_TOP_MENU and deeper), which deliberately do NOT get
+// interrupted (see header comment) -- the topbar's envelope icon, shown
+// on every screen via drawTopBar(), is the one place a pending message
+// becomes visible before returning to idle.
 bool hasUnseenMessage = false;
 
 // ---------- RX interrupt flag ----------
@@ -570,7 +637,7 @@ void loop() {
     handleReceivedPacket();
   }
 
-  if (uiState == STATE_MENU && millis() - menuActivityMs > MENU_TIMEOUT_MS) {
+  if (uiState != STATE_IDLE && millis() - menuActivityMs > MENU_TIMEOUT_MS) {
     uiState = STATE_IDLE;
     drawIdle();
   }
@@ -761,31 +828,113 @@ void checkButton() {
   }
 }
 
+// Short press: cycle within whatever list/menu is currently on screen.
+// From idle, still no menu action (long-hold is the only way in) -- just
+// wakes the screen if it had auto-blanked, or resets the idle timer if
+// it was already on (drawIdle() routes through wakeDisplay() internally,
+// so this one call handles both cases, same as before).
 void onShortPress() {
-  if (uiState == STATE_MENU) {
-    cannedIndex = (cannedIndex + 1) % NUM_CANNED;
-    menuActivityMs = millis();
-    drawMenu();
-  } else {
-    // Short press from idle: still no menu action (long-hold is the only
-    // way into the menu) -- but this now wakes the screen if it had
-    // auto-blanked, or just resets the idle timer if it was already on.
-    // drawIdle() routes through wakeDisplay() internally, so this one call
-    // handles both cases.
-    drawIdle();
+  switch (uiState) {
+    case STATE_TOP_MENU:
+      topMenuIndex = (topMenuIndex + 1) % NUM_TOP_MENU_ITEMS;
+      menuActivityMs = millis();
+      drawTopMenu();
+      break;
+    case STATE_SEND_MENU:
+      cannedIndex = (cannedIndex + 1) % NUM_CANNED;
+      menuActivityMs = millis();
+      drawSendMenu();
+      break;
+    case STATE_INBOX_LIST:
+      if (listSnapshotCount > 0) listIndex = (listIndex + 1) % listSnapshotCount;
+      menuActivityMs = millis();
+      drawScrollList("INBOX");
+      break;
+    case STATE_OUTBOX_LIST:
+      if (listSnapshotCount > 0) listIndex = (listIndex + 1) % listSnapshotCount;
+      menuActivityMs = millis();
+      drawScrollList("OUTBOX");
+      break;
+    case STATE_MSG_DETAIL:
+    case STATE_SETTINGS:
+      menuActivityMs = millis(); // nothing to cycle, just stay awake/reset the timeout
+      break;
+    default: // STATE_IDLE
+      drawIdle();
+      break;
   }
 }
 
+// Long-hold: from idle, opens the top-level menu (Inbox/Outbox/Send/
+// Settings) -- Send is now one destination among four, not the only one,
+// same LONG_PRESS_MS gesture as before. From the top menu, enters
+// whichever item is highlighted. From inside Send, still sends the
+// highlighted canned message and returns to idle, completely unchanged
+// from before. From an Inbox/Outbox list, opens that entry's full detail.
+// From detail/settings (dead ends, nothing further to select), returns
+// to idle -- there's no dedicated "back" gesture, long-hold or the
+// MENU_TIMEOUT_MS fallback are the only ways out of a dead-end screen.
 void onLongPress() {
-  if (uiState == STATE_IDLE) {
-    uiState = STATE_MENU;
-    cannedIndex = 0;
-    menuActivityMs = millis();
-    drawMenu();
-  } else {
-    sendCannedMessage(cannedIndex);
-    uiState = STATE_IDLE;
-    drawIdle();
+  switch (uiState) {
+    case STATE_IDLE:
+      uiState = STATE_TOP_MENU;
+      topMenuIndex = 0;
+      menuActivityMs = millis();
+      drawTopMenu();
+      break;
+    case STATE_TOP_MENU:
+      enterTopMenuSelection();
+      break;
+    case STATE_SEND_MENU:
+      sendCannedMessage(cannedIndex);
+      uiState = STATE_IDLE;
+      drawIdle();
+      break;
+    case STATE_INBOX_LIST:
+    case STATE_OUTBOX_LIST:
+      if (listSnapshotCount > 0) {
+        uiState = STATE_MSG_DETAIL;
+        menuActivityMs = millis();
+        drawMsgDetail();
+      } else {
+        uiState = STATE_IDLE;
+        drawIdle();
+      }
+      break;
+    case STATE_MSG_DETAIL:
+    case STATE_SETTINGS:
+      uiState = STATE_IDLE;
+      drawIdle();
+      break;
+  }
+}
+
+// Dispatches the highlighted top-menu item to its own screen -- one place
+// so onLongPress() itself stays a flat, readable switch.
+void enterTopMenuSelection() {
+  menuActivityMs = millis();
+  switch (topMenuIndex) {
+    case 0: // Inbox
+      buildListSnapshot("rx");
+      listIndex = 0;
+      uiState = STATE_INBOX_LIST;
+      drawScrollList("INBOX");
+      break;
+    case 1: // Outbox
+      buildListSnapshot("tx");
+      listIndex = 0;
+      uiState = STATE_OUTBOX_LIST;
+      drawScrollList("OUTBOX");
+      break;
+    case 2: // Send
+      cannedIndex = 0;
+      uiState = STATE_SEND_MENU;
+      drawSendMenu();
+      break;
+    default: // Settings
+      uiState = STATE_SETTINGS;
+      drawSettings();
+      break;
   }
 }
 
@@ -897,7 +1046,7 @@ void drawIdle() {
   display.display();
 }
 
-void drawMenu() {
+void drawSendMenu() {
   wakeDisplay();
   display.clearDisplay();
   drawTopBar("SEND (hold=send)");
@@ -906,6 +1055,142 @@ void drawMenu() {
   display.println(CANNED_MESSAGES[cannedIndex]);
   display.setCursor(0, 56);
   display.printf("%d/%d", cannedIndex + 1, NUM_CANNED);
+  display.display();
+}
+
+// ---------- Top-level menu (Inbox / Outbox / Send / Settings) ----------
+//
+// Same 3-visible-row scroll pattern the Inbox/Outbox lists below use
+// (previous/current/next, current row prefixed "> "), reused here for a
+// consistent look across every menu screen -- no bold font or icons
+// (Adafruit_GFX's built-in font has no bold weight without embedding a
+// separate font asset, and there's no OLED simulator to tune icon
+// pixel-art against, so a plain "> " marker is the safer, guaranteed-
+// legible choice over guessing at something fancier).
+void drawTopMenu() {
+  wakeDisplay();
+  display.clearDisplay();
+  drawTopBar("MENU");
+
+  for (int row = -1; row <= 1; row++) {
+    int idx = topMenuIndex + row;
+    if (idx < 0 || idx >= NUM_TOP_MENU_ITEMS) continue;
+    display.setCursor(0, 13 + (row + 1) * 14);
+    display.print(row == 0 ? "> " : "  ");
+    display.println(TOP_MENU_ITEMS[idx]);
+  }
+  display.display();
+}
+
+// ---------- Inbox / Outbox (scrollable lists backed by webLog[]) ----------
+//
+// Reuses the same ring buffer the web dashboard's own /api/log endpoint
+// already reads (see the WiFi/web dashboard state section) -- no
+// separate on-device message history needed, Inbox is just webLog[]
+// filtered to dir=="rx" and Outbox to dir=="tx". A snapshot of matching
+// indices is taken once when entering the list (not re-filtered on every
+// redraw) since the button's short-press cycling only needs to walk a
+// small, stable list while the screen is open; mutex-guarded the same
+// way pushWebLog()/the /api/log handler already are, since webLog[] is
+// written from loop() and read from the web task too.
+
+void buildListSnapshot(const char *dir) {
+  listSnapshotCount = 0;
+  xSemaphoreTake(stateMutex, portMAX_DELAY);
+  int start = (webLogHead - webLogCount + WEB_LOG_SIZE) % WEB_LOG_SIZE;
+  // Newest first: walk from the most recently written slot backwards.
+  for (int i = webLogCount - 1; i >= 0 && listSnapshotCount < LIST_SNAPSHOT_MAX; i--) {
+    int idx = (start + i) % WEB_LOG_SIZE;
+    if (webLog[idx].dir == dir) {
+      listSnapshot[listSnapshotCount++] = idx;
+    }
+  }
+  xSemaphoreGive(stateMutex);
+}
+
+// Truncates `text` to fit in `maxChars`, no word-awareness needed here --
+// this is a one-line list preview, the full text is only ever shown on
+// the detail screen (drawMsgDetail(), which does use the real word-wrap).
+String truncateForList(const String &text, int maxChars) {
+  if ((int)text.length() <= maxChars) return text;
+  return text.substring(0, maxChars);
+}
+
+void drawScrollList(const char *title) {
+  wakeDisplay();
+  display.clearDisplay();
+  drawTopBar(title);
+
+  if (listSnapshotCount == 0) {
+    display.setCursor(0, 20);
+    display.println("(empty)");
+    display.display();
+    return;
+  }
+
+  for (int row = -1; row <= 1; row++) {
+    int idx = listIndex + row;
+    if (idx < 0 || idx >= listSnapshotCount) continue;
+    LogEntry &e = webLog[listSnapshot[idx]];
+    display.setCursor(0, 13 + (row + 1) * 14);
+    display.print(row == 0 ? "> " : "  ");
+    // "<capcode>:<preview>" -- 21 chars/line total, capcode can run up to
+    // 10 digits (uint32_t max) so the preview budget is computed from
+    // its real printed width rather than assumed fixed.
+    String prefix = String((unsigned long)e.capcode) + ":";
+    display.print(prefix);
+    display.println(truncateForList(e.text, 21 - 2 - (int)prefix.length()));
+  }
+
+  // Thin scrollbar on the right edge, same idea as the reference menu
+  // this was modeled after -- track the full list height, handle sized/
+  // positioned by how far into the list the current selection is.
+  int trackTop = 13, trackH = 48;
+  display.drawFastVLine(OLED_WIDTH - 2, trackTop, trackH, SSD1306_WHITE);
+  int barH = max(4, trackH / listSnapshotCount);
+  int barY = trackTop + (listSnapshotCount > 1
+      ? (int)((float)(trackH - barH) * listIndex / (listSnapshotCount - 1))
+      : 0);
+  display.fillRect(OLED_WIDTH - 3, barY, 3, barH, SSD1306_WHITE);
+
+  display.display();
+}
+
+// Full text of one selected Inbox/Outbox entry -- word-wrapped properly
+// (unlike the list's own truncated one-liner), same relativeTimeAgo()
+// footer the idle screen already uses.
+void drawMsgDetail() {
+  wakeDisplay();
+  display.clearDisplay();
+  LogEntry &e = webLog[listSnapshot[listIndex]];
+  String title = (e.dir == "rx" ? "FROM " : "TO ") + String((unsigned long)e.capcode);
+  drawTopBar(title);
+
+  printWrapped(e.text, 0, 13, 21, 4, 10);
+  display.setCursor(0, 56);
+  display.print(relativeTimeAgo(e.ts));
+  display.display();
+}
+
+// ---------- Settings (read-only status) ----------
+//
+// Deliberately just a status readout, not an actual settings editor --
+// real settings already live on the web dashboard (Screen Timeout, WiFi
+// credentials, etc.); this is a quick "what's this unit's own identity
+// and state" glance without needing to reach for a browser.
+void drawSettings() {
+  wakeDisplay();
+  display.clearDisplay();
+  drawTopBar("SETTINGS");
+
+  display.setCursor(0, 13);
+  display.printf("Capcode: %lu", (unsigned long)MY_CAPCODES[0]);
+  display.setCursor(0, 23);
+  display.printf("Reports to: %lu", (unsigned long)SEND_TO_CAPCODE);
+  display.setCursor(0, 33);
+  display.print(wifiConnected ? "WiFi: connected" : "WiFi: off");
+  display.setCursor(0, 43);
+  display.printf("RX total: %d", rxCount);
   display.display();
 }
 
