@@ -16,6 +16,7 @@ class RadioSpectrumCard {
         lorawan: '#3b82f6',
         meshtastic: '#10b981',
         meshcore: '#f59e0b',
+        pager: '#ef4444',
     };
 
     constructor(api) {
@@ -55,6 +56,7 @@ class RadioSpectrumCard {
                 <span><i style="background:${RadioSpectrumCard.MARKER_COLORS.lorawan}"></i>LoRaWAN ch</span>
                 <span><i style="background:${RadioSpectrumCard.MARKER_COLORS.meshtastic}"></i>Meshtastic</span>
                 <span><i style="background:${RadioSpectrumCard.MARKER_COLORS.meshcore}"></i>MeshCore</span>
+                <span><i style="background:${RadioSpectrumCard.MARKER_COLORS.pager}"></i>Pager</span>
             </div>
         `;
         this._canvas = rootEl.querySelector('[data-sp-canvas]');
@@ -80,10 +82,14 @@ class RadioSpectrumCard {
         const conc = (config && config.concentrator) || {};
         (conc.channels || []).forEach((ch) => {
             if (!ch.enabled) return;
+            let label;
+            if (ch.protocol === 'meshtastic') label = 'MT';
+            else if (ch.protocol === 'pager') label = 'PG';
+            else label = `L${ch.ch}`;
             markers.push({
                 mhz: ch.frequency_mhz,
                 protocol: ch.protocol,
-                label: ch.protocol === 'meshtastic' ? 'MT' : `L${ch.ch}`,
+                label,
             });
         });
         const mc = config && config.meshcore && config.meshcore.radio;
