@@ -184,6 +184,15 @@
  * looked like a stray dot next to the badge instead of a real "…". */
 .lw-table--dapnet-packets col.col-type { width: 100px; }
 .lw-table--dapnet-packets col.col-dev  { width: 90px; }
+/* Pager's Inbox/Outbox tables (pager_dashboard_panel.js) reuse this same
+ * table class for their From/To capcode columns, unlike DAPNET's own
+ * packets table which only ever used col-dev for a single capcode column
+ * -- col-id had no width rule scoped to THIS table class (only to
+ * .lw-table--dapnet-capcodes below, a different table), so under
+ * table-layout: fixed the two undefined-width From/To columns threw off
+ * the whole row's column math and squeezed the fixed-width Time column
+ * down far enough to truncate ("Aug 3, 1…" instead of "Aug 3, 18:51"). */
+.lw-table--dapnet-packets col.col-id   { width: 90px; }
 
 .lw-table--dapnet-capcodes col.col-time   { width: 90px; }
 .lw-table--dapnet-capcodes col.col-id     { width: 90px; }
