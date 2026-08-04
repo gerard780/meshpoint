@@ -143,6 +143,33 @@
   device's single button is already fully committed to the reply-menu
   state machine, so display power is timeout-only plus wake-on-activity.
 
+  ---- Screen design (UNCONFIRMED ON REAL HARDWARE -- see status below) ----
+  Idle/menu screens share a top status bar (drawTopBar()): title text on
+  the left, a small vector WiFi icon and a new-message envelope icon fixed
+  at the right edge (both hand-drawn from Adafruit_GFX primitives -- arcs/
+  lines/rects -- not a bitmap asset). The envelope only appears while
+  hasUnseenMessage is true, which is really only ever true for more than
+  an instant in one case: a message arriving while in the send-menu
+  (which deliberately doesn't interrupt, see "Button UX" above) -- idle
+  itself clears the flag the moment it draws, since arriving there always
+  means the message is already fully shown. Idle also word-wraps the
+  message text at space boundaries (printWrapped()) instead of relying on
+  Adafruit_GFX's own auto-wrap, which breaks at the screen edge mid-
+  character (e.g. "emergency" splitting into "emergenc"/"y" -- seen live
+  in an early real-hardware photo before this existed), and shows a
+  relative "Xm ago" timestamp instead of a wall clock (a real clock would
+  need NTP, deliberately not run on this device otherwise -- see the
+  WiFi/mDNS/OTA section above). A boot screen (drawBootScreen(), shown
+  once in setup() before RX/TX/WiFi come up) shows "LoRaPager" in large
+  text plus this unit's own capcode and frequency.
+
+  All of this is compile-verified only -- the icon pixel math (drawn from
+  the real Adafruit_GFX_Library's own drawCircleHelper()/drawRoundRect()
+  source to get the quadrant bitmask right, not guessed) has never been
+  seen on an actual OLED. First real flash should confirm the icons render
+  where intended and don't clip/overlap the title or "ago" text before
+  trusting this description over what the screen actually shows.
+
   ---- Addressing (POCSAG-style capcodes) ----
   Every frame is a JSON envelope, {"from":<capcode>,"to":<capcode>,
   "text":"..."} -- same convention pocsag_companion.ino's own serial
@@ -317,8 +344,17 @@ bool hasReceivedMessage = false;
 String lastMessageText;
 uint32_t lastMessageFrom = 0;
 float lastMessageRssi = 0;
+unsigned long lastMessageMs = 0; // millis() at receipt, for the idle screen's "Xm ago" footer
 int rxCount = 0; // messages actually addressed to us (MY_CAPCODES/EMERGENCY_CAPCODES) --
                   // not every frame heard on the channel, same "forMe" gate as the OLED path
+// Set whenever a message arrives, cleared the moment drawIdle() actually
+// shows it -- since handleReceivedPacket() already redraws idle
+// immediately when a message arrives while STATE_IDLE, this is really
+// only ever true for more than an instant in ONE case: a message arriving
+// while STATE_MENU, which deliberately does NOT interrupt the menu (see
+// header comment) -- the topbar's envelope icon is the one place that
+// pending message becomes visible before returning to idle.
+bool hasUnseenMessage = false;
 
 // ---------- RX interrupt flag ----------
 volatile bool rxFlag = false;
@@ -462,12 +498,7 @@ void setup() {
     Serial.println("[!] OLED init failed");
   }
   display.setRotation(0);
-  display.clearDisplay();
-  display.setTextColor(SSD1306_WHITE);
-  display.setTextSize(1);
-  display.setCursor(0, 0);
-  display.println("Pager starting...");
-  display.display();
+  drawBootScreen();
 
   pinMode(BUTTON_GPIO, INPUT_PULLUP);
 
@@ -602,7 +633,9 @@ void handleReceivedPacket() {
     lastMessageText = String(text);
     lastMessageFrom = from;
     lastMessageRssi = radio.getRSSI();
+    lastMessageMs = millis();
     hasReceivedMessage = true;
+    hasUnseenMessage = true;
     rxCount++;
     Serial.printf("[RX] from=%lu to=%lu \"%s\" rssi=%.1f\n",
                   (unsigned long)from, (unsigned long)to, text, lastMessageRssi);
@@ -710,21 +743,109 @@ void onLongPress() {
 }
 
 // ---------- OLED ----------
-void drawIdle() {
-  wakeDisplay();
-  display.clearDisplay();
+//
+// Small vector icons (WiFi status, new-message) built from Adafruit_GFX
+// primitives rather than a bitmap asset -- no extra tooling/flash needed
+// for a couple of 8x8px glyphs. drawCircleHelper()'s cornername bitmask
+// (confirmed against the real installed Adafruit_GFX_Library's own
+// drawRoundRect(), which draws each of the 4 corners with a known mask):
+// 0x1 = upper-left quadrant, 0x2 = upper-right -- combined (0x3) draws
+// just the top arc, the classic "wifi bars" look, anchored on a dot at
+// the bottom of the icon's 8x8 box.
+
+void drawWifiIcon(int x, int y, bool connected) {
+  int cx = x + 4;
+  int cy = y + 7;
+  display.fillCircle(cx, cy, 1, SSD1306_WHITE);
+  if (connected) {
+    display.drawCircleHelper(cx, cy, 2, 0x3, SSD1306_WHITE);
+    display.drawCircleHelper(cx, cy, 4, 0x3, SSD1306_WHITE);
+  }
+}
+
+// Outline rectangle + a flap (two diagonals meeting at bottom-center).
+// Only ever called when there's actually something to signal (see
+// hasUnseenMessage) -- no separate "no message" variant, the icon area
+// is just left blank instead.
+void drawEnvelopeIcon(int x, int y) {
+  display.drawRect(x, y + 1, 8, 6, SSD1306_WHITE);
+  display.drawLine(x, y + 1, x + 4, y + 4, SSD1306_WHITE);
+  display.drawLine(x + 8, y + 1, x + 4, y + 4, SSD1306_WHITE);
+}
+
+// Shared status row for the idle/menu screens -- title text on the left,
+// WiFi + new-message icons fixed at the right edge regardless of title
+// length (titles used here are always short; not truncated/measured).
+void drawTopBar(const String &title) {
   display.setTextSize(1);
   display.setCursor(0, 0);
-  display.println("PAGER");
-  display.drawFastHLine(0, 10, OLED_WIDTH, SSD1306_WHITE);
-  display.setCursor(0, 16);
+  display.print(title);
+  drawWifiIcon(108, 0, wifiConnected);
+  if (hasUnseenMessage) drawEnvelopeIcon(118, 0);
+  display.drawFastHLine(0, 9, OLED_WIDTH, SSD1306_WHITE);
+}
+
+// Word-wraps `text` into up to maxLines lines of maxCharsPerLine each,
+// breaking at the last space within each line instead of Adafruit_GFX's
+// own auto-wrap (which breaks at the screen edge mid-character -- e.g.
+// "emergency" splitting into "emergenc"/"y"). Falls back to a hard break
+// only if a single word alone exceeds maxCharsPerLine. Truncates with
+// "..." on the last line if the text doesn't fit in maxLines.
+void printWrapped(const String &text, int x, int y, int maxCharsPerLine, int maxLines, int lineHeight) {
+  int line = 0;
+  int pos = 0;
+  int len = text.length();
+  while (pos < len && line < maxLines) {
+    int remaining = len - pos;
+    int take = min(remaining, maxCharsPerLine);
+    if (take < remaining) {
+      int lastSpace = text.lastIndexOf(' ', pos + take);
+      if (lastSpace > pos) take = lastSpace - pos;
+    }
+    String chunk = text.substring(pos, pos + take);
+    bool isLastLine = (line == maxLines - 1);
+    if (isLastLine && (pos + take < len)) {
+      while (chunk.length() > 0 && (int)chunk.length() + 3 > maxCharsPerLine) {
+        chunk.remove(chunk.length() - 1);
+      }
+      chunk += "...";
+    }
+    display.setCursor(x, y + line * lineHeight);
+    display.print(chunk);
+    pos += take;
+    while (pos < len && text[pos] == ' ') pos++; // skip the space we broke on
+    line++;
+  }
+}
+
+// "3m ago" style relative timestamp -- deliberately not a wall clock
+// (would need NTP, which this device otherwise has no use for and
+// intentionally doesn't run -- see the WiFi/mDNS/OTA header comment).
+String relativeTimeAgo(unsigned long sinceMs) {
+  unsigned long elapsedS = (millis() - sinceMs) / 1000;
+  if (elapsedS < 60) return String(elapsedS) + "s ago";
+  if (elapsedS < 3600) return String(elapsedS / 60) + "m ago";
+  if (elapsedS < 86400) return String(elapsedS / 3600) + "h ago";
+  return String(elapsedS / 86400) + "d ago";
+}
+
+void drawIdle() {
+  wakeDisplay();
+  hasUnseenMessage = false; // this IS the "seeing" it -- see the flag's own comment
+  display.clearDisplay();
+  drawTopBar("PAGER #" + String(MY_CAPCODES[0]));
+
+  display.setCursor(0, 13);
   if (!hasReceivedMessage) {
     display.println("No messages yet");
   } else {
-    display.printf("From: %lu\n", (unsigned long)lastMessageFrom);
-    display.println(lastMessageText);
+    display.printf("From: %lu", (unsigned long)lastMessageFrom);
+    printWrapped(lastMessageText, 0, 23, 21, 3, 8);
     display.setCursor(0, 56);
-    display.printf("RSSI %.0f dBm", lastMessageRssi);
+    display.printf("RSSI %.0fdBm", lastMessageRssi);
+    String ago = relativeTimeAgo(lastMessageMs);
+    display.setCursor(OLED_WIDTH - ago.length() * 6, 56);
+    display.print(ago);
   }
   display.display();
 }
@@ -732,14 +853,40 @@ void drawIdle() {
 void drawMenu() {
   wakeDisplay();
   display.clearDisplay();
-  display.setTextSize(1);
-  display.setCursor(0, 0);
-  display.println("SEND (hold=send)");
-  display.drawFastHLine(0, 10, OLED_WIDTH, SSD1306_WHITE);
+  drawTopBar("SEND (hold=send)");
+
   display.setCursor(0, 16);
   display.println(CANNED_MESSAGES[cannedIndex]);
   display.setCursor(0, 56);
   display.printf("%d/%d", cannedIndex + 1, NUM_CANNED);
+  display.display();
+}
+
+// Shown once at boot, before RX/TX/WiFi are up -- see setup(). Same
+// dark/cyan aesthetic as the rest of this device's screens, just bigger
+// text for a moment of real branding instead of a bare "starting..."
+// line, matching what a "cool case" deserves.
+void drawBootScreen() {
+  display.clearDisplay();
+  display.setTextColor(SSD1306_WHITE);
+
+  display.setTextSize(2);
+  String title = "LoRaPager";
+  int titleW = title.length() * 12; // size-2 glyphs are 12px wide
+  display.setCursor((OLED_WIDTH - titleW) / 2, 8);
+  display.println(title);
+
+  display.setTextSize(1);
+  String cap = "#" + String(MY_CAPCODES[0]);
+  display.setCursor((OLED_WIDTH - (int)cap.length() * 6) / 2, 34);
+  display.println(cap);
+
+  char freqBuf[20];
+  snprintf(freqBuf, sizeof(freqBuf), "%.4f MHz", PAGER_FREQ_MHZ);
+  int freqW = strlen(freqBuf) * 6;
+  display.setCursor((OLED_WIDTH - freqW) / 2, 46);
+  display.println(freqBuf);
+
   display.display();
 }
 
