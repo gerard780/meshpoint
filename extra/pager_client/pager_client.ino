@@ -75,10 +75,12 @@
   authorized browser trigger a send, not just the physical button; stages
   the request for loop() to actually transmit, same reasoning as
   pocsag_companion.ino's own /api/send for why a web request can't call the
-  radio directly), and a WiFi-credentials card (POSTs to /api/wifi, applied
-  on the next reboot via /api/reboot). Login password is WEB_PASSWORD in
-  secrets.h, checked via an X-Auth-Password header on every API call, exactly
-  as pocsag_companion.ino's own dashboard does.
+  radio directly), a WiFi-credentials card (POSTs to /api/wifi, applied
+  on the next reboot via /api/reboot), and a screen-timeout setting (POSTs
+  to /api/timeout, backs the same displayTimeoutMs the "Display power"
+  section below also uses, 0 = never blank). Login password is
+  WEB_PASSWORD in secrets.h, checked via an X-Auth-Password header on every
+  API call, exactly as pocsag_companion.ino's own dashboard does.
 
   WiFi/OTA/web-password credentials live in secrets.h, INTENTIONALLY NOT
   INCLUDED IN THIS FILE and gitignored (see .gitignore) -- never hardcode
@@ -125,6 +127,21 @@
     A message arriving while in the menu is stored but does NOT interrupt
       the menu display (the "leaning toward wait" refinement flagged
       earlier) -- it'll show once back at idle.
+    Short press from idle also wakes the screen if it had auto-blanked
+      (see "Display power" below) -- still no menu action, long-hold
+      remains the only way in.
+
+  ---- Display power ----
+  Ported from pocsag_companion.ino's own: the OLED auto-blanks (real
+  DISPLAYOFF command, not just cleared pixels, so it actually saves power)
+  after displayTimeoutMs of no new screen content -- runtime-settable from
+  the web dashboard's "Screen Timeout" card (0 = never blank), persisted in
+  NVS so it survives a reboot. A short press from idle wakes it back up
+  (see "Button UX" above); every drawIdle()/drawMenu() call also wakes it
+  as a side effect of any real content update. No physical button toggles
+  it off manually the way pocsag_companion.ino's BOOT button does -- this
+  device's single button is already fully committed to the reply-menu
+  state machine, so display power is timeout-only plus wake-on-activity.
 
   ---- Addressing (POCSAG-style capcodes) ----
   Every frame is a JSON envelope, {"from":<capcode>,"to":<capcode>,
@@ -181,8 +198,11 @@
 // ---------- WiFi / mDNS / OTA / web dashboard tuning knobs (see header comment) ----------
 #define WIFI_CONNECT_TIMEOUT_MS 10000UL // bounded -- never hang core RX/TX waiting on WiFi that isn't there
 #define WEB_LOG_SIZE 40                 // ring buffer size backing the web UI's log card
-#define PREFS_NAMESPACE "pager"         // NVS namespace for web password + WiFi credentials
+#define PREFS_NAMESPACE "pager"         // NVS namespace for web password + WiFi credentials + screen timeout
 #define REBOOT_DELAY_MS 500UL           // lets an HTTP reply actually flush before ESP.restart()
+#define DISPLAY_TIMEOUT_MS_DEFAULT 10000UL // startup value for the runtime displayTimeoutMs
+                                   // below (settable live from the web UI's "Screen Timeout"
+                                   // card, 0 = never blank) -- same default pocsag_companion.ino uses
 
 // ---------- Radio parameters (see header comment for why each value) ----------
 #define PAGER_FREQ_MHZ        869.4625f
@@ -264,6 +284,33 @@ unsigned long lastEdgeMs    = 0;
 unsigned long pressStartMs  = 0;
 bool longPressFired    = false;
 unsigned long menuActivityMs = 0;
+
+// ---------- Display power ----------
+//
+// Ported from pocsag_companion.ino's own display-power section: the OLED
+// was staying on indefinitely, not great for a battery-powered pager sitting
+// in a pocket. Auto-blanks via the panel's own real DISPLAYOFF command (not
+// just clearing pixels, so it actually saves power) after displayTimeoutMs
+// with no new screen content, and a short button press (see onShortPress())
+// wakes it back up rather than being a no-op from idle. Every drawIdle()/
+// drawMenu() call routes through wakeDisplay() first, so any real screen
+// update both wakes the panel if it was off and resets the idle timer --
+// callers don't need to think about display power at all.
+
+bool displayOn = true;
+unsigned long lastDisplayActivity = 0;
+// Runtime-settable (starts at DISPLAY_TIMEOUT_MS_DEFAULT, changeable live from
+// the web UI's "Screen Timeout" card via POST /api/timeout, persisted in NVS
+// the same way webPassword/wifiSsid are) -- 0 means "never auto-blank."
+uint32_t displayTimeoutMs = DISPLAY_TIMEOUT_MS_DEFAULT;
+
+void wakeDisplay() {
+  if (!displayOn) {
+    display.ssd1306_command(SSD1306_DISPLAYON);
+    displayOn = true;
+  }
+  lastDisplayActivity = millis();
+}
 
 // ---------- Last received message ----------
 bool hasReceivedMessage = false;
@@ -470,6 +517,12 @@ void setup() {
     prefs.getString("wifi_ssid", WIFI_SSID),
     prefs.getString("wifi_pass", WIFI_PASSWORD)
   );
+  // Plain uint32_t read/write is effectively atomic on ESP32 for this
+  // purpose, no mutex needed the way the String-based settings above
+  // genuinely require one -- same reasoning pocsag_companion.ino's own
+  // displayTimeoutMs uses.
+  displayTimeoutMs = prefs.getUInt("dispTimeoutMs", DISPLAY_TIMEOUT_MS_DEFAULT);
+  lastDisplayActivity = millis();
   mdnsHostname = "pager-" + String(MY_CAPCODES[0]); // per-unit, so more than
                                                       // one pager on the same
                                                       // network doesn't collide
@@ -498,6 +551,11 @@ void loop() {
 
   if (rebootRequested && millis() - rebootRequestedAt >= REBOOT_DELAY_MS) {
     ESP.restart();
+  }
+
+  if (displayOn && displayTimeoutMs > 0 && millis() - lastDisplayActivity >= displayTimeoutMs) {
+    display.ssd1306_command(SSD1306_DISPLAYOFF);
+    displayOn = false;
   }
 }
 
@@ -628,9 +686,14 @@ void onShortPress() {
     cannedIndex = (cannedIndex + 1) % NUM_CANNED;
     menuActivityMs = millis();
     drawMenu();
+  } else {
+    // Short press from idle: still no menu action (long-hold is the only
+    // way into the menu) -- but this now wakes the screen if it had
+    // auto-blanked, or just resets the idle timer if it was already on.
+    // drawIdle() routes through wakeDisplay() internally, so this one call
+    // handles both cases.
+    drawIdle();
   }
-  // Short press from idle: no action defined -- idle is purely a display,
-  // long-hold is the only way in.
 }
 
 void onLongPress() {
@@ -648,6 +711,7 @@ void onLongPress() {
 
 // ---------- OLED ----------
 void drawIdle() {
+  wakeDisplay();
   display.clearDisplay();
   display.setTextSize(1);
   display.setCursor(0, 0);
@@ -666,6 +730,7 @@ void drawIdle() {
 }
 
 void drawMenu() {
+  wakeDisplay();
   display.clearDisplay();
   display.setTextSize(1);
   display.setCursor(0, 0);
@@ -834,7 +899,7 @@ const char INDEX_HTML[] = R"HTMLPAGE(
   .row .cap { color: var(--accent-amber); }
   .row .txt { color: var(--text-primary); word-break: break-word; }
   label { font-size:11px; color: var(--text-secondary); display:block; margin-bottom:4px; margin-top:10px; }
-  input[type=text], input[type=password] {
+  input[type=text], input[type=password], input[type=number] {
     width:100%; background: var(--bg-primary); border:1px solid var(--border); color: var(--text-primary);
     padding:8px; border-radius:4px; font-family:inherit; font-size:13px;
   }
@@ -926,11 +991,21 @@ const char INDEX_HTML[] = R"HTMLPAGE(
       <button class="secondary" onclick="rebootNow()">Reboot Now</button>
       <div class="result" id="rebootResult"></div>
     </div>
+
+    <div class="card">
+      <h2>Screen Timeout</h2>
+      <label for="timeout">Seconds idle before auto-off (0 = never)</label>
+      <input type="number" id="timeout" min="0" step="1">
+      <button onclick="applyTimeout()">Apply</button>
+      <div class="result" id="timeoutResult"></div>
+      <div class="hint">A short press on the physical button also wakes the screen manually at any time.</div>
+    </div>
   </div>
 </div>
 
 <script>
 let pw = sessionStorage.getItem('pagerPw') || '';
+let timeoutTouched = false;
 
 // Unauthenticated -- shown on the login screen itself, before a password
 // is entered. Neither field is sensitive: capcode is a public POCSAG-style
@@ -1027,6 +1102,7 @@ async function pollStatus() {
       document.getElementById('lastText').textContent = s.lastText;
     }
     if (!document.getElementById('wifiSsid').value) document.getElementById('wifiSsid').value = s.wifiSsid || '';
+    if (!timeoutTouched) document.getElementById('timeout').value = Math.round(s.displayTimeoutMs / 1000);
   } catch (e) {}
 }
 
@@ -1080,6 +1156,20 @@ async function rebootNow() {
   setTimeout(() => location.reload(), 6000);
 }
 
+async function applyTimeout() {
+  const seconds = parseInt(document.getElementById('timeout').value, 10) || 0;
+  const result = document.getElementById('timeoutResult');
+  try {
+    const r = await apiPost('/api/timeout', { ms: seconds * 1000 });
+    result.className = r.ok ? 'result ok' : 'result err';
+    result.textContent = r.ok ? 'Saved' : (r.error || 'Failed');
+    timeoutTouched = false;
+  } catch (e) {
+    result.className = 'result err'; result.textContent = 'Request failed';
+  }
+}
+
+document.getElementById('timeout').addEventListener('input', () => timeoutTouched = true);
 document.getElementById('pw').addEventListener('keydown', e => { if (e.key === 'Enter') tryLogin(); });
 
 if (pw) checkAuthOk().then(ok => { if (ok) enterApp(); });
@@ -1126,6 +1216,7 @@ void setupWebServer() {
 
     doc["freeHeap"] = ESP.getFreeHeap();
     doc["uptimeMs"] = millis();
+    doc["displayTimeoutMs"] = displayTimeoutMs;
 
     doc["wifiSsid"] = wifiConnected ? WiFi.SSID() : "";
     doc["wifiIp"] = wifiConnected ? WiFi.localIP().toString() : "";
@@ -1181,6 +1272,25 @@ void setupWebServer() {
     // after this returns (see checkWebSendPending()); the log card will
     // show it once it lands.
     request->send(202, "application/json", "{\"ok\":true,\"queued\":true}");
+  });
+
+  server.on("/api/timeout", HTTP_POST, [](AsyncWebServerRequest *request) {
+  }, nullptr, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+    if (!checkAuth(request)) return;
+    JsonDocument doc;
+    if (deserializeJson(doc, data, len)) {
+      request->send(400, "application/json", "{\"ok\":false,\"error\":\"bad json\"}");
+      return;
+    }
+    long ms = doc["ms"] | -1;
+    if (ms < 0 || ms > 24UL * 60 * 60 * 1000) { // 0 = disabled, up to 24h
+      request->send(400, "application/json", "{\"ok\":false,\"error\":\"ms out of range (0-86400000)\"}");
+      return;
+    }
+    displayTimeoutMs = (uint32_t)ms;
+    prefs.putUInt("dispTimeoutMs", displayTimeoutMs);
+    if (displayTimeoutMs > 0) lastDisplayActivity = millis(); // don't blank immediately on a fresh, longer setting
+    request->send(200, "application/json", "{\"ok\":true}");
   });
 
   server.on("/api/wifi", HTTP_POST, [](AsyncWebServerRequest *request) {
