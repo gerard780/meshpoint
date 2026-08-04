@@ -13,10 +13,14 @@
   ever changed (e.g. via Configuration -> Radio -> Pager on the dashboard),
   this firmware must be re-flashed to match -- there is no live sync yet.
   A future version could fetch these from the dashboard (e.g. a small HTTP
-  endpoint or a provisioning step, mirroring how pocsag_companion.ino has its
-  own WiFi dashboard) instead of hardcoding, but that's explicitly deferred --
-  hardcoded is simplest to get a first working link, and needs no WiFi
-  credentials/network access on this device at all.
+  endpoint or a provisioning step) instead of hardcoding, but that's still
+  deferred -- WiFi/mDNS/OTA/a small web dashboard were added below (see that
+  section's own comment), but only for status/manual-send/reflash
+  convenience; the RF parameters above stay compile-time constants, never
+  fetched live. WiFi is entirely best-effort and optional, same as
+  pocsag_companion.ino's own -- with no real credentials configured (see
+  secrets.h below) this device still works exactly as a standalone RX/TX
+  pager, no network required at all.
 
     Frequency:        869.4625 MHz   (PAGER_FSK_FREQUENCY_HZ = 869_462_500)
     Sync word:         0x94 0x64 0x37 (3 bytes -- PAGER_FSK_SYNC_WORD = 0x946437)
@@ -45,13 +49,50 @@
   the link can sync at all) -- worth the first thing to revisit if real
   hardware testing shows packets never being received.
 
+  ---- WiFi / mDNS / OTA (optional, best-effort) ----
+  Ported from pocsag_companion.ino's own WiFi/OTA section, minus NTP (this
+  device has no use for wall-clock time) and minus the callsign/licensing
+  gate (ch9 is ISM-band FSK, not amateur radio spectrum -- there's nothing
+  here to license-gate the way POCSAG's TX is). WiFi connect is attempted
+  once at boot with a bounded timeout (WIFI_CONNECT_TIMEOUT_MS below); if it
+  fails or secrets.h still has placeholder credentials, the sketch carries
+  on RX/TX-only exactly as before, no WiFi/OTA/mDNS/web dashboard at all --
+  the button/OLED/radio path never depends on any of this. Once WiFi is up,
+  the device is reachable at pager-<its own MY_CAPCODES[0]>.local (a
+  per-unit hostname, so more than one pager on the same network doesn't
+  collide) -- that same hostname is reused verbatim as the ArduinoOTA
+  hostname. OTA needs its own password (OTA_PASSWORD in secrets.h) -- an
+  unauthenticated OTA listener on a device sitting in someone's pocket would
+  be a bad idea.
+
+  ---- Web dashboard ----
+  Once WiFi is up, a small password-gated single-page UI is served at
+  http://pager-<capcode>.local/ (same dark color scheme + auth-modal pattern
+  as pocsag_companion.ino's own). Cards: live status (capcodes this unit
+  answers to, its own SEND_TO_CAPCODE, WiFi/hostname/uptime/heap), the last
+  received message, a live in/outgoing log (same ring buffer + housekeeping
+  as the OLED path), a free-text send form (POSTs to /api/send -- lets any
+  authorized browser trigger a send, not just the physical button; stages
+  the request for loop() to actually transmit, same reasoning as
+  pocsag_companion.ino's own /api/send for why a web request can't call the
+  radio directly), and a WiFi-credentials card (POSTs to /api/wifi, applied
+  on the next reboot via /api/reboot). Login password is WEB_PASSWORD in
+  secrets.h, checked via an X-Auth-Password header on every API call, exactly
+  as pocsag_companion.ino's own dashboard does.
+
+  WiFi/OTA/web-password credentials live in secrets.h, INTENTIONALLY NOT
+  INCLUDED IN THIS FILE and gitignored (see .gitignore) -- never hardcode
+  real credentials directly in a tracked .ino. See secrets.h.example
+  (created alongside this file) for what to fill in.
+
   ---- Status: UNTESTED ON REAL HARDWARE ----
   Compile-verified only (arduino-cli, esp32:esp32:heltec_wifi_lora_32_V3,
-  RadioLib 7.7.1). Everything about the button UX, OLED layout, and the
-  RadioLib FSK RX/TX calls themselves needs a real flash + real over-the-air
-  test against the concentrator (which has already round-trip self-tested
-  its own TX->RX loopback live, per project memory -- this is the first test
-  with a genuinely separate second radio).
+  RadioLib 7.7.1). Everything about the button UX, OLED layout, the RadioLib
+  FSK RX/TX calls themselves, AND the WiFi/mDNS/OTA/web dashboard section
+  above needs a real flash + real over-the-air test against the concentrator
+  (which has already round-trip self-tested its own TX->RX loopback live,
+  per project memory -- this is the first test with a genuinely separate
+  second radio).
 
   ---- Hardware pins (Heltec WiFi LoRa32 V3) ----
   Ground truth copied from extra/pocsag_companion/pocsag_companion.ino's own
@@ -126,6 +167,22 @@
 #include <RadioLib.h>
 #include <ArduinoJson.h> // v7.4.3 -- JsonDocument/deserializeJson v7 API,
                           // same version pocsag_companion.ino uses
+
+#include <WiFi.h>
+#include <ESPmDNS.h>
+#include <ArduinoOTA.h>
+#include <AsyncTCP.h>
+#include <ESPAsyncWebServer.h>
+#include <freertos/semphr.h>
+#include <Preferences.h> // ESP32 core, NVS-backed key/value store -- persists
+                          // the web password + WiFi credentials across reboots
+#include "secrets.h" // gitignored -- WIFI_SSID/WIFI_PASSWORD/OTA_PASSWORD/WEB_PASSWORD, see that file
+
+// ---------- WiFi / mDNS / OTA / web dashboard tuning knobs (see header comment) ----------
+#define WIFI_CONNECT_TIMEOUT_MS 10000UL // bounded -- never hang core RX/TX waiting on WiFi that isn't there
+#define WEB_LOG_SIZE 40                 // ring buffer size backing the web UI's log card
+#define PREFS_NAMESPACE "pager"         // NVS namespace for web password + WiFi credentials
+#define REBOOT_DELAY_MS 500UL           // lets an HTTP reply actually flush before ESP.restart()
 
 // ---------- Radio parameters (see header comment for why each value) ----------
 #define PAGER_FREQ_MHZ        869.4625f
@@ -213,10 +270,134 @@ bool hasReceivedMessage = false;
 String lastMessageText;
 uint32_t lastMessageFrom = 0;
 float lastMessageRssi = 0;
+int rxCount = 0; // messages actually addressed to us (MY_CAPCODES/EMERGENCY_CAPCODES) --
+                  // not every frame heard on the channel, same "forMe" gate as the OLED path
 
 // ---------- RX interrupt flag ----------
 volatile bool rxFlag = false;
 void onRadioAction() { rxFlag = true; }
+
+// ---------- WiFi / mDNS / OTA / web dashboard state ----------
+//
+// Same cross-task discipline pocsag_companion.ino's own web dashboard
+// section documents: AsyncWebServer's request/body callbacks run on
+// AsyncTCP's own FreeRTOS task, not on loop()'s thread -- loop() is the
+// only thread that may ever touch `radio`, so a web-triggered send only
+// ever stages a request (queueWebSend()) for loop() to pick up
+// (checkWebSendPending()) and actually run itself. webLog[] and the NVS-
+// backed String settings below are read on the web task and written on
+// loop()'s thread (or vice versa), so all access to them goes through
+// stateMutex.
+
+bool wifiConnected = false;
+String mdnsHostname; // "pager-<MY_CAPCODES[0]>", computed once in setup()
+                      // once the (possibly dashboard-injected) capcode is known
+
+AsyncWebServer server(80);
+SemaphoreHandle_t stateMutex;
+
+struct LogEntry {
+  uint32_t capcode; // the OTHER party -- "from" for rx, "to" for tx
+  String text;
+  String dir; // "rx" | "tx"
+  unsigned long ts; // millis() when logged
+};
+LogEntry webLog[WEB_LOG_SIZE];
+int webLogHead = 0;  // next slot to write
+int webLogCount = 0; // how many of the ring's slots are populated so far
+
+void pushWebLog(uint32_t capcode, const String &text, const String &dir) {
+  xSemaphoreTake(stateMutex, portMAX_DELAY);
+  LogEntry &e = webLog[webLogHead];
+  e.capcode = capcode;
+  e.text = text;
+  e.dir = dir;
+  e.ts = millis();
+  webLogHead = (webLogHead + 1) % WEB_LOG_SIZE;
+  if (webLogCount < WEB_LOG_SIZE) webLogCount++;
+  xSemaphoreGive(stateMutex);
+}
+
+// Web-triggered TX handoff -- see the section comment above for why this
+// exists instead of just calling sendMessage() from the web handler.
+volatile bool webSendPending = false;
+String webSendText;
+
+bool queueWebSend(const String &text) {
+  bool queued = false;
+  xSemaphoreTake(stateMutex, portMAX_DELAY);
+  if (!webSendPending) {
+    webSendText = text;
+    webSendPending = true;
+    queued = true;
+  }
+  xSemaphoreGive(stateMutex);
+  return queued;
+}
+
+bool rebootRequested = false;
+unsigned long rebootRequestedAt = 0;
+
+// Web dashboard login password -- starts as the secrets.h compile-time
+// default (WEB_PASSWORD), overridable at runtime via NVS the same way
+// pocsag_companion.ino's own is, so a changed password survives a reboot.
+Preferences prefs;
+String webPassword = WEB_PASSWORD;
+
+String getWebPassword() {
+  String p;
+  xSemaphoreTake(stateMutex, portMAX_DELAY);
+  p = webPassword;
+  xSemaphoreGive(stateMutex);
+  return p;
+}
+
+void setWebPassword(const String &newPassword) {
+  xSemaphoreTake(stateMutex, portMAX_DELAY);
+  webPassword = newPassword;
+  xSemaphoreGive(stateMutex);
+}
+
+// WiFi credentials -- start as the secrets.h compile-time defaults,
+// overridable at runtime via NVS. Unlike webPassword above, a change here
+// does NOT take effect immediately: setupWifiOta() only ever runs once, in
+// setup(), so a new SSID/password needs a reboot to actually connect with
+// (see /api/reboot).
+String wifiSsid = WIFI_SSID;
+String wifiPass = WIFI_PASSWORD;
+
+String getWifiSsid() {
+  String s;
+  xSemaphoreTake(stateMutex, portMAX_DELAY);
+  s = wifiSsid;
+  xSemaphoreGive(stateMutex);
+  return s;
+}
+
+String getWifiPassword() {
+  String p;
+  xSemaphoreTake(stateMutex, portMAX_DELAY);
+  p = wifiPass;
+  xSemaphoreGive(stateMutex);
+  return p;
+}
+
+void setWifiCredentials(const String &ssid, const String &pass) {
+  xSemaphoreTake(stateMutex, portMAX_DELAY);
+  wifiSsid = ssid;
+  wifiPass = pass;
+  xSemaphoreGive(stateMutex);
+}
+
+// Arduino's auto-prototype generator (a brace-counting heuristic, not a
+// real parser) loses track of scope inside the web dashboard section's raw
+// HTML/CSS/JS string literal further down this file, so it fails to
+// auto-declare anything defined after that point -- same issue
+// pocsag_companion.ino's own forward-declarations section documents.
+// setup()/loop() above call these, so they need explicit prototypes here.
+void setupWifiOta();
+void setupWebServer();
+void checkWebSendPending();
 
 void setup() {
   Serial.begin(115200);
@@ -282,6 +463,18 @@ void setup() {
                 PAGER_FREQ_MHZ, PAGER_BITRATE_KBPS,
                 PAGER_SYNC_WORD[0], PAGER_SYNC_WORD[1], PAGER_SYNC_WORD[2]);
 
+  stateMutex = xSemaphoreCreateMutex(); // guards webLog[]/webSend*/webPassword/wifi creds -- see that section's own comment
+  prefs.begin(PREFS_NAMESPACE, false);
+  setWebPassword(prefs.getString("web_password", WEB_PASSWORD));
+  setWifiCredentials(
+    prefs.getString("wifi_ssid", WIFI_SSID),
+    prefs.getString("wifi_pass", WIFI_PASSWORD)
+  );
+  mdnsHostname = "pager-" + String(MY_CAPCODES[0]); // per-unit, so more than
+                                                      // one pager on the same
+                                                      // network doesn't collide
+  setupWifiOta(); // best-effort, bounded timeout -- see header comment
+
   drawIdle();
 }
 
@@ -296,6 +489,15 @@ void loop() {
   if (uiState == STATE_MENU && millis() - menuActivityMs > MENU_TIMEOUT_MS) {
     uiState = STATE_IDLE;
     drawIdle();
+  }
+
+  if (wifiConnected) ArduinoOTA.handle();
+  checkWebSendPending(); // picks up a send staged by the web UI's /api/send
+                          // handler -- see queueWebSend()'s own comment for
+                          // why the handoff, not a direct call, is required
+
+  if (rebootRequested && millis() - rebootRequestedAt >= REBOOT_DELAY_MS) {
+    ESP.restart();
   }
 }
 
@@ -343,8 +545,10 @@ void handleReceivedPacket() {
     lastMessageFrom = from;
     lastMessageRssi = radio.getRSSI();
     hasReceivedMessage = true;
+    rxCount++;
     Serial.printf("[RX] from=%lu to=%lu \"%s\" rssi=%.1f\n",
                   (unsigned long)from, (unsigned long)to, text, lastMessageRssi);
+    pushWebLog(from, lastMessageText, "rx");
 
     // "Leaning toward wait" -- don't yank the menu away if the operator is
     // mid-selection; the new message still shows the moment they return to
@@ -357,24 +561,33 @@ void handleReceivedPacket() {
   radio.startReceive();
 }
 
-void sendCannedMessage(int idx) {
-  const char* msg = CANNED_MESSAGES[idx];
-
+// Shared by the physical button's canned-message send (sendCannedMessage()
+// below) and the web dashboard's free-text /api/send (via
+// checkWebSendPending()) -- one place that actually touches the radio for
+// TX, so both paths log/behave identically. Only ever called from loop()'s
+// thread (see the WiFi/web dashboard state section's own comment for why
+// that matters).
+void sendMessage(const String &text) {
   JsonDocument doc;
   doc["from"] = MY_CAPCODES[0]; // primary/personal number, not a group address
   doc["to"] = SEND_TO_CAPCODE;
-  doc["text"] = msg;
+  doc["text"] = text;
   char buf[256];
   size_t len = serializeJson(doc, buf, sizeof(buf));
 
   int state = radio.transmit((uint8_t*)buf, len);
   Serial.printf("[TX] from=%lu to=%lu \"%s\" -> %s\n",
                 (unsigned long)MY_CAPCODES[0], (unsigned long)SEND_TO_CAPCODE,
-                msg, state == RADIOLIB_ERR_NONE ? "OK" : "FAIL");
+                text.c_str(), state == RADIOLIB_ERR_NONE ? "OK" : "FAIL");
+  if (state == RADIOLIB_ERR_NONE) pushWebLog(SEND_TO_CAPCODE, text, "tx");
   // transmit() leaves the radio in TX/idle state -- must explicitly go
   // back to RX or every message sent would also deafen this device to
   // anything arriving afterward.
   radio.startReceive();
+}
+
+void sendCannedMessage(int idx) {
+  sendMessage(String(CANNED_MESSAGES[idx]));
 }
 
 // ---------- Button: debounce + short/long press detection ----------
@@ -463,4 +676,542 @@ void drawMenu() {
   display.setCursor(0, 56);
   display.printf("%d/%d", cannedIndex + 1, NUM_CANNED);
   display.display();
+}
+
+
+// ---------- WiFi / mDNS / OTA ----------
+//
+// All best-effort -- see the header comment for the full rationale. Runs
+// once at boot, after the radio's already configured for RX, so a slow/
+// failed WiFi connect only adds a bounded delay before "ready", never
+// blocks it outright.
+
+void setupWifiOta() {
+  String ssid = getWifiSsid();
+  String pass = getWifiPassword();
+
+  if (ssid.length() == 0 || ssid == "YOUR_WIFI_SSID") {
+    Serial.println("[wifi] no credentials configured, skipping WiFi/OTA/web dashboard");
+    return;
+  }
+
+  WiFi.mode(WIFI_STA);
+  WiFi.setHostname(mdnsHostname.c_str());
+  WiFi.begin(ssid.c_str(), pass.c_str());
+
+  Serial.print("[wifi] connecting to "); Serial.print(ssid);
+  unsigned long start = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - start < WIFI_CONNECT_TIMEOUT_MS) {
+    delay(250);
+    Serial.print(".");
+  }
+  Serial.println();
+
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("[wifi] connect timed out, continuing RX/TX-only");
+    return;
+  }
+
+  wifiConnected = true;
+  Serial.print("[wifi] connected, IP="); Serial.println(WiFi.localIP());
+
+  if (MDNS.begin(mdnsHostname.c_str())) {
+    Serial.print("[mdns] reachable at "); Serial.print(mdnsHostname); Serial.println(".local");
+  } else {
+    Serial.println("[mdns] begin() failed");
+  }
+
+  // Same hostname as WiFi/mDNS above, so "what is this device called on
+  // the network" has one answer everywhere, not two different ones.
+  ArduinoOTA.setHostname(mdnsHostname.c_str());
+  ArduinoOTA.setPassword(OTA_PASSWORD);
+  ArduinoOTA.onStart([]() {
+    Serial.println("[ota] update starting");
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setCursor(0, 0);
+    display.println("OTA update");
+    display.println("starting...");
+    display.display();
+  });
+  ArduinoOTA.onEnd([]() {
+    Serial.println("[ota] update complete");
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setCursor(0, 0);
+    display.println("OTA update");
+    display.println("done, rebooting");
+    display.display();
+  });
+  ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+    Serial.printf("[ota] progress: %u%%\n", (progress * 100) / total);
+  });
+  ArduinoOTA.onError([](ota_error_t error) {
+    Serial.print("[ota] error "); Serial.println((int)error);
+  });
+  ArduinoOTA.begin();
+  Serial.println("[ota] ready");
+
+  setupWebServer(); // only reachable at all once WiFi is up, so started here
+}
+
+// Called every loop() pass. Cheap when nothing's pending (one bool check).
+void checkWebSendPending() {
+  if (!webSendPending) return;
+  String text;
+  xSemaphoreTake(stateMutex, portMAX_DELAY);
+  text = webSendText;
+  webSendPending = false;
+  xSemaphoreGive(stateMutex);
+  sendMessage(text);
+}
+
+
+// ---------- Web dashboard ----------
+//
+// Small password-gated single-page UI served straight from flash (no
+// filesystem, no external assets/fonts/CDN -- this device may only have
+// LAN access, not real internet), styled to match meshpoint's own dark
+// dashboard theme, same convention pocsag_companion.ino's own web
+// dashboard already uses. Every API route (not the static page itself,
+// which has nothing sensitive in its shell) requires the X-Auth-Password
+// header -- plain string comparison is plenty, this is a LAN-local hobby
+// device's login, not a target worth building constant-time comparison for.
+
+bool checkAuth(AsyncWebServerRequest *request) {
+  if (!request->hasHeader("X-Auth-Password") ||
+      request->getHeader("X-Auth-Password")->value() != getWebPassword()) {
+    request->send(401, "application/json", "{\"ok\":false,\"error\":\"unauthorized\"}");
+    return false;
+  }
+  return true;
+}
+
+const char INDEX_HTML[] = R"HTMLPAGE(
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Meshpoint Pager</title>
+<style>
+  :root {
+    --bg-primary: #0a0e17;
+    --bg-card: #162033;
+    --border: #233049;
+    --text-primary: #e2e8f0;
+    --text-secondary: #94a3b8;
+    --text-muted: #64748b;
+    --accent-green: #00e5a0;
+    --accent-cyan: #06b6d4;
+    --accent-amber: #f59e0b;
+    --accent-red: #ef4444;
+    --radius: 8px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: 'JetBrains Mono', 'Courier New', monospace;
+    padding: 16px;
+  }
+  header { display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; flex-wrap:wrap; gap:8px; }
+  h1 { font-size: 18px; margin:0; color: var(--accent-cyan); letter-spacing: 0.5px; }
+  .status { font-size:12px; color: var(--text-secondary); display:flex; gap:14px; align-items:center; }
+  .dot { width:8px; height:8px; border-radius:50%; display:inline-block; margin-right:5px; }
+  .dot.on { background: var(--accent-green); box-shadow:0 0 6px var(--accent-green); }
+  .dot.off { background: var(--accent-red); }
+  .grid { display:grid; grid-template-columns: repeat(2, 1fr); gap:16px; }
+  @media (max-width: 700px) { .grid { grid-template-columns: 1fr; } }
+  .card { background: var(--bg-card); border:1px solid var(--border); border-radius: var(--radius); padding:14px; }
+  .card h2 { font-size:13px; text-transform:uppercase; letter-spacing:1px; color: var(--text-secondary); margin:0 0 10px 0; }
+  #log { height:260px; overflow-y:auto; font-size:12px; display:flex; flex-direction:column; gap:6px; }
+  .row { border-left:2px solid var(--border); padding:4px 8px; border-radius:4px; background: rgba(255,255,255,0.02); }
+  .row.rx { border-left-color: var(--accent-cyan); }
+  .row.tx { border-left-color: var(--accent-green); }
+  .row .meta { color: var(--text-muted); font-size:10px; }
+  .row .cap { color: var(--accent-amber); }
+  .row .txt { color: var(--text-primary); word-break: break-word; }
+  label { font-size:11px; color: var(--text-secondary); display:block; margin-bottom:4px; margin-top:10px; }
+  input[type=text], input[type=password] {
+    width:100%; background: var(--bg-primary); border:1px solid var(--border); color: var(--text-primary);
+    padding:8px; border-radius:4px; font-family:inherit; font-size:13px;
+  }
+  button {
+    margin-top:12px; width:100%; background: var(--accent-cyan); color:#04121a; border:none; border-radius:4px;
+    padding:10px; font-family:inherit; font-weight:600; font-size:13px; cursor:pointer; letter-spacing:0.5px;
+  }
+  button:active { opacity:0.8; }
+  button:disabled { opacity:0.5; cursor:default; }
+  button.secondary { background: var(--bg-primary); color: var(--text-secondary); border:1px solid var(--border); }
+  .hint { font-size:11px; color: var(--text-muted); margin-top:8px; }
+  .kv { display:flex; justify-content:space-between; gap:8px; font-size:12px; padding:3px 0; border-bottom:1px solid rgba(255,255,255,0.04); }
+  .kv span:first-child { color: var(--text-secondary); }
+  .kv span:last-child { color: var(--text-primary); text-align:right; word-break:break-all; }
+  #whoami { font-size:11px; color: var(--text-muted); margin: -4px 0 10px 0; }
+  .result { font-size:12px; margin-top:8px; min-height:14px; }
+  .result.ok { color: var(--accent-green); }
+  .result.err { color: var(--accent-red); }
+  .modal-overlay {
+    position:fixed; inset:0; background: rgba(10,14,23,0.92); display:flex; align-items:center; justify-content:center; z-index:100;
+  }
+  .modal-overlay .card { width:280px; }
+  .modal-overlay h2 { color: var(--accent-cyan); font-size:14px; }
+  .hidden { display:none !important; }
+</style>
+</head>
+<body>
+
+<div id="authOverlay" class="modal-overlay">
+  <div class="card">
+    <h2>MESHPOINT PAGER</h2>
+    <div id="whoami">--</div>
+    <label for="pw">Password</label>
+    <input type="password" id="pw" autocomplete="off" spellcheck="false">
+    <button onclick="tryLogin()">Unlock</button>
+    <div class="result err" id="authErr"></div>
+  </div>
+</div>
+
+<div id="app" class="hidden">
+  <header>
+    <h1>MESHPOINT PAGER</h1>
+    <div class="status">
+      <span><span class="dot" id="wifiDot"></span><span id="hostname">--</span></span>
+      <span>RX <span id="rxCount">0</span></span>
+    </div>
+  </header>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Status</h2>
+      <div class="kv"><span>My capcode(s)</span><span id="myCapcodes">--</span></div>
+      <div class="kv"><span>Reports to</span><span id="sendToCapcode">--</span></div>
+      <div class="kv"><span>SSID</span><span id="connSsid">--</span></div>
+      <div class="kv"><span>IP</span><span id="connIp">--</span></div>
+      <div class="kv"><span>RSSI (WiFi)</span><span id="connRssi">--</span></div>
+      <div class="kv"><span>Free Heap</span><span id="hwHeap">--</span></div>
+      <div class="kv"><span>Uptime</span><span id="uptime">--</span></div>
+    </div>
+
+    <div class="card">
+      <h2>Last Message</h2>
+      <div class="kv"><span>From</span><span id="lastFrom">--</span></div>
+      <div class="kv"><span>RSSI</span><span id="lastRssi">--</span></div>
+      <div id="lastText" style="font-size:13px; margin-top:8px; word-break:break-word;">(none yet)</div>
+    </div>
+
+    <div class="card">
+      <h2>In / Outgoing Log</h2>
+      <div id="log"></div>
+    </div>
+
+    <div class="card">
+      <h2>Send</h2>
+      <label for="text">Message (to <span id="sendToHint">--</span>)</label>
+      <input type="text" id="text" placeholder="Message text" maxlength="200">
+      <button id="sendBtn" onclick="sendPage()">Send</button>
+      <div class="result" id="sendResult"></div>
+    </div>
+
+    <div class="card">
+      <h2>WiFi Credentials</h2>
+      <label for="wifiSsid">SSID</label>
+      <input type="text" id="wifiSsid" placeholder="Network name">
+      <label for="wifiPass">Password</label>
+      <input type="password" id="wifiPass" placeholder="Leave blank to keep current">
+      <button onclick="saveWifi()">Save (needs reboot to apply)</button>
+      <div class="result" id="wifiResult"></div>
+      <button class="secondary" onclick="rebootNow()">Reboot Now</button>
+      <div class="result" id="rebootResult"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+let pw = sessionStorage.getItem('pagerPw') || '';
+
+// Unauthenticated -- shown on the login screen itself, before a password
+// is entered. Neither field is sensitive: capcode is a public POCSAG-style
+// address by definition, hostname is already broadcast in the clear via
+// mDNS anyway.
+fetch('/api/whoami').then(r => r.json()).then(d => {
+  document.getElementById('whoami').textContent = 'Capcode ' + d.capcode + ' · ' + d.hostname + '.local';
+}).catch(() => {});
+
+function authHeaders() { return { 'X-Auth-Password': pw }; }
+
+async function checkAuthOk() {
+  try {
+    const r = await fetch('/api/status', { headers: authHeaders() });
+    return r.ok;
+  } catch (e) { return false; }
+}
+
+async function tryLogin() {
+  pw = document.getElementById('pw').value;
+  const ok = await checkAuthOk();
+  if (ok) {
+    sessionStorage.setItem('pagerPw', pw);
+    enterApp();
+  } else {
+    document.getElementById('authErr').textContent = 'Wrong password';
+  }
+}
+
+function enterApp() {
+  document.getElementById('authOverlay').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  pollStatus();
+  pollLog();
+  setInterval(pollStatus, 5000);
+  setInterval(pollLog, 3000);
+}
+
+async function apiGet(path) {
+  const r = await fetch(path, { headers: authHeaders() });
+  if (r.status === 401) { sessionStorage.removeItem('pagerPw'); location.reload(); throw new Error('unauthorized'); }
+  return r.json();
+}
+
+async function apiPost(path, body) {
+  const r = await fetch(path, {
+    method: 'POST',
+    headers: Object.assign({ 'Content-Type': 'application/json' }, authHeaders()),
+    body: JSON.stringify(body)
+  });
+  if (r.status === 401) { sessionStorage.removeItem('pagerPw'); location.reload(); throw new Error('unauthorized'); }
+  return r.json();
+}
+
+function escapeHtml(s) {
+  return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function fmtRow(e) {
+  const secsAgo = Math.round(e.ms_ago / 1000);
+  return '<div class="row ' + e.dir + '">' +
+    '<div class="meta">' + e.dir.toUpperCase() + ' · ' + secsAgo + 's ago</div>' +
+    '<div><span class="cap">#' + e.capcode + '</span> <span class="txt">' + escapeHtml(e.text || '(no text)') + '</span></div>' +
+    '</div>';
+}
+
+async function pollLog() {
+  try {
+    const entries = await apiGet('/api/log'); // oldest-first from the server
+    const log = document.getElementById('log');
+    const atTop = log.scrollTop <= 10;
+    log.innerHTML = entries.slice().reverse().map(fmtRow).join('');
+    if (atTop) log.scrollTop = 0;
+  } catch (e) {}
+}
+
+async function pollStatus() {
+  try {
+    const s = await apiGet('/api/status');
+    document.getElementById('hostname').textContent = s.hostname;
+    document.getElementById('wifiDot').className = 'dot ' + (s.wifi ? 'on' : 'off');
+    document.getElementById('rxCount').textContent = s.rxCount;
+    document.getElementById('myCapcodes').textContent = s.myCapcodes.join(', ');
+    document.getElementById('sendToCapcode').textContent = s.sendToCapcode;
+    document.getElementById('sendToHint').textContent = s.sendToCapcode;
+    document.getElementById('connSsid').textContent = s.wifiSsid || '--';
+    document.getElementById('connIp').textContent = s.wifiIp || '--';
+    document.getElementById('connRssi').textContent = s.wifi ? (s.wifiRssi + ' dBm') : '--';
+    document.getElementById('hwHeap').textContent = Math.round(s.freeHeap / 1024) + ' KB free';
+    document.getElementById('uptime').textContent = Math.round(s.uptimeMs / 60000) + ' min';
+    if (s.hasLastMessage) {
+      document.getElementById('lastFrom').textContent = s.lastFrom;
+      document.getElementById('lastRssi').textContent = s.lastRssi + ' dBm';
+      document.getElementById('lastText').textContent = s.lastText;
+    }
+    if (!document.getElementById('wifiSsid').value) document.getElementById('wifiSsid').value = s.wifiSsid || '';
+  } catch (e) {}
+}
+
+async function sendPage() {
+  const textInput = document.getElementById('text');
+  const btn = document.getElementById('sendBtn');
+  const result = document.getElementById('sendResult');
+  const text = textInput.value.trim();
+  if (!text) { result.className = 'result err'; result.textContent = 'Enter a message'; return; }
+  btn.disabled = true;
+  result.className = 'result'; result.textContent = 'Sending...';
+  try {
+    const r = await apiPost('/api/send', { text });
+    if (r.ok) {
+      result.className = 'result ok'; result.textContent = 'Queued';
+      textInput.value = '';
+      setTimeout(pollLog, 1500);
+    } else {
+      result.className = 'result err'; result.textContent = r.error || 'Failed';
+    }
+  } catch (e) {
+    result.className = 'result err'; result.textContent = 'Request failed';
+  }
+  btn.disabled = false;
+}
+
+async function saveWifi() {
+  const ssid = document.getElementById('wifiSsid').value.trim();
+  const pass = document.getElementById('wifiPass').value;
+  const result = document.getElementById('wifiResult');
+  if (!ssid) { result.className = 'result err'; result.textContent = 'SSID is required'; return; }
+  try {
+    const r = await apiPost('/api/wifi', { ssid, password: pass });
+    result.className = r.ok ? 'result ok' : 'result err';
+    result.textContent = r.ok ? 'Saved -- reboot to apply' : (r.error || 'Failed');
+  } catch (e) {
+    result.className = 'result err'; result.textContent = 'Request failed';
+  }
+}
+
+async function rebootNow() {
+  const result = document.getElementById('rebootResult');
+  result.className = 'result'; result.textContent = 'Rebooting...';
+  try {
+    await apiPost('/api/reboot', {});
+  } catch (e) {
+    // Expected -- the device drops the connection as it restarts.
+  }
+  result.className = 'result ok';
+  result.textContent = 'Reconnecting...';
+  setTimeout(() => location.reload(), 6000);
+}
+
+document.getElementById('pw').addEventListener('keydown', e => { if (e.key === 'Enter') tryLogin(); });
+
+if (pw) checkAuthOk().then(ok => { if (ok) enterApp(); });
+</script>
+</body>
+</html>
+)HTMLPAGE";
+
+void setupWebServer() {
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
+    request->send(200, "text/html", INDEX_HTML);
+  });
+
+  // Deliberately NOT gated by checkAuth() -- shown on the login screen
+  // itself, before a password is entered. Neither field is sensitive: a
+  // capcode is a public POCSAG-style address by definition, hostname is
+  // already broadcast in the clear via mDNS anyway.
+  server.on("/api/whoami", HTTP_GET, [](AsyncWebServerRequest *request) {
+    JsonDocument doc;
+    doc["capcode"] = MY_CAPCODES[0];
+    doc["hostname"] = mdnsHostname;
+    String json;
+    serializeJson(doc, json);
+    request->send(200, "application/json", json);
+  });
+
+  server.on("/api/status", HTTP_GET, [](AsyncWebServerRequest *request) {
+    if (!checkAuth(request)) return;
+    JsonDocument doc;
+    doc["ok"] = true;
+    doc["hostname"] = mdnsHostname;
+    doc["wifi"] = wifiConnected;
+    doc["rxCount"] = rxCount;
+    doc["sendToCapcode"] = SEND_TO_CAPCODE;
+    JsonArray caps = doc["myCapcodes"].to<JsonArray>();
+    for (int i = 0; i < NUM_MY_CAPCODES; i++) caps.add(MY_CAPCODES[i]);
+
+    doc["hasLastMessage"] = hasReceivedMessage;
+    if (hasReceivedMessage) {
+      doc["lastFrom"] = lastMessageFrom;
+      doc["lastText"] = lastMessageText;
+      doc["lastRssi"] = lastMessageRssi;
+    }
+
+    doc["freeHeap"] = ESP.getFreeHeap();
+    doc["uptimeMs"] = millis();
+
+    doc["wifiSsid"] = wifiConnected ? WiFi.SSID() : "";
+    doc["wifiIp"] = wifiConnected ? WiFi.localIP().toString() : "";
+    doc["wifiRssi"] = wifiConnected ? WiFi.RSSI() : 0;
+
+    String json;
+    serializeJson(doc, json);
+    request->send(200, "application/json", json);
+  });
+
+  server.on("/api/log", HTTP_GET, [](AsyncWebServerRequest *request) {
+    if (!checkAuth(request)) return;
+    JsonDocument doc;
+    JsonArray arr = doc.to<JsonArray>();
+    unsigned long now = millis();
+    xSemaphoreTake(stateMutex, portMAX_DELAY);
+    int start = (webLogHead - webLogCount + WEB_LOG_SIZE) % WEB_LOG_SIZE;
+    for (int i = 0; i < webLogCount; i++) {
+      int idx = (start + i) % WEB_LOG_SIZE;
+      JsonObject o = arr.add<JsonObject>();
+      o["capcode"] = webLog[idx].capcode;
+      o["text"] = webLog[idx].text;
+      o["dir"] = webLog[idx].dir;
+      o["ms_ago"] = now - webLog[idx].ts;
+    }
+    xSemaphoreGive(stateMutex);
+    String json;
+    serializeJson(doc, json);
+    request->send(200, "application/json", json);
+  });
+
+  server.on("/api/send", HTTP_POST, [](AsyncWebServerRequest *request) {
+    // Body is handled by the callback below; nothing to do on the
+    // "request known, body not yet received" pass.
+  }, nullptr, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+    if (!checkAuth(request)) return;
+    JsonDocument doc;
+    if (deserializeJson(doc, data, len)) {
+      request->send(400, "application/json", "{\"ok\":false,\"error\":\"bad json\"}");
+      return;
+    }
+    String text = doc["text"] | "";
+    text.trim();
+    if (text.length() == 0) {
+      request->send(400, "application/json", "{\"ok\":false,\"error\":\"text is required\"}");
+      return;
+    }
+    if (!queueWebSend(text)) {
+      request->send(429, "application/json", "{\"ok\":false,\"error\":\"a send is already in progress\"}");
+      return;
+    }
+    // Queued, not yet transmitted -- loop() runs the actual send shortly
+    // after this returns (see checkWebSendPending()); the log card will
+    // show it once it lands.
+    request->send(202, "application/json", "{\"ok\":true,\"queued\":true}");
+  });
+
+  server.on("/api/wifi", HTTP_POST, [](AsyncWebServerRequest *request) {
+  }, nullptr, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
+    if (!checkAuth(request)) return;
+    JsonDocument doc;
+    if (deserializeJson(doc, data, len)) {
+      request->send(400, "application/json", "{\"ok\":false,\"error\":\"bad json\"}");
+      return;
+    }
+    String ssid = doc["ssid"] | "";
+    String pass = doc["password"] | ""; // empty is valid -- open networks have no password
+    ssid.trim();
+    if (ssid.length() == 0) {
+      request->send(400, "application/json", "{\"ok\":false,\"error\":\"ssid is required\"}");
+      return;
+    }
+    setWifiCredentials(ssid, pass);
+    prefs.putString("wifi_ssid", ssid);
+    prefs.putString("wifi_pass", pass);
+    request->send(200, "application/json", "{\"ok\":true}");
+  });
+
+  server.on("/api/reboot", HTTP_POST, [](AsyncWebServerRequest *request) {
+    if (!checkAuth(request)) return;
+    Serial.println("[web] reboot requested via dashboard");
+    request->send(200, "application/json", "{\"ok\":true}");
+    rebootRequested = true;
+    rebootRequestedAt = millis(); // loop() does the actual ESP.restart() -- see its own comment
+  });
+
+  server.begin();
+  Serial.print("[web] dashboard ready at http://"); Serial.print(mdnsHostname); Serial.println(".local/");
 }
