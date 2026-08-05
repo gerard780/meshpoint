@@ -79,12 +79,6 @@ class TopbarDapnetChip {
         root.appendChild(this._sep());
         root.appendChild(freqEl);
 
-        const boardEl = document.createElement('span');
-        boardEl.className = 'topbar-serial__preset';
-        boardEl.textContent = !reachable ? '--' : this._formatBoard(dev.board);
-        root.appendChild(this._sep(true));
-        root.appendChild(boardEl);
-
         root.classList.toggle('topbar-serial--offline', reachable && !connected);
         root.classList.toggle('topbar-serial--reconnecting', !reachable);
         return root;
@@ -104,10 +98,6 @@ class TopbarDapnetChip {
         return `${n.toFixed(4)} MHz`;
     }
 
-    _formatBoard(board) {
-        const labels = { ttgo: 'TTGO LoRa32', heltec: 'Heltec V3' };
-        return labels[board] || board || '--';
-    }
 }
 
 window.TopbarDapnetChip = TopbarDapnetChip;

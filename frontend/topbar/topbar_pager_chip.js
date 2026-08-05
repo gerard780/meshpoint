@@ -45,12 +45,32 @@ class TopbarPagerChip {
         lamp.appendChild(dot);
         root.appendChild(lamp);
 
+        const capcodeEl = document.createElement('span');
+        capcodeEl.className = 'topbar-serial__call';
+        capcodeEl.textContent = this._formatCapcode(p.pager_capcode);
+        root.appendChild(capcodeEl);
+
         const freqEl = document.createElement('span');
         freqEl.className = 'topbar-serial__freq';
         freqEl.textContent = this._formatFreq(p.pager_frequency_mhz);
+        root.appendChild(this._sep());
         root.appendChild(freqEl);
 
         return root;
+    }
+
+    _sep() {
+        const sep = document.createElement('span');
+        sep.className = 'topbar-serial__sep';
+        sep.setAttribute('aria-hidden', 'true');
+        sep.textContent = '·';
+        return sep;
+    }
+
+    _formatCapcode(capcode) {
+        const n = Number(capcode);
+        if (!n || Number.isNaN(n)) return '--';
+        return String(n);
     }
 
     _formatFreq(mhz) {

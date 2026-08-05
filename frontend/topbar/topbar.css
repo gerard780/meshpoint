@@ -49,6 +49,15 @@
     gap: 0.5rem;
 }
 
+/* Author `display: inline-flex` above beats the browser's built-in
+ * `[hidden] { display: none }` UA rule regardless of specificity, so a
+ * hidden group stays a zero-content flex item that still eats a `gap`
+ * slot in `.topbar` -- an extra phantom gap next to whichever group is
+ * hidden (e.g. no Meshtastic serial companion configured). */
+.topbar__group[hidden] {
+    display: none;
+}
+
 .topbar__spacer {
     flex: 1 1 auto;
 }

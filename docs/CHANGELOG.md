@@ -7,6 +7,7 @@
 ### v0.8.0 (August 2026)
 
 - **Changes since v0.7.9.** See the v0.7.9 section of this changelog for the full pager buildout (firmware, dashboard, ACKs) and LoRaWAN/DAPNET work.
+- **Topbar protocol pills cleaned up.** Fixed an uneven gap between the Meshtastic and MeshCore pills — a hidden-but-still-laid-out group (the Meshtastic serial companion slot, empty on most setups) was eating an extra flex gap next to it. The DAPNET pill no longer shows its board/hardware name (e.g. "Heltec V3"). The Pager pill now shows this unit's own capcode, matching how the DAPNET pill shows its callsign.
 
 ### v0.7.9 (July 2026)
 
