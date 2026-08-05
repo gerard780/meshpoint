@@ -24,6 +24,7 @@ from src.storage.database import DatabaseManager
 from src.storage.node_repository import NodeRepository
 from src.storage.packet_repository import PacketRepository
 from src.storage.telemetry_repository import TelemetryRepository
+from src.version import __version__
 
 logger = logging.getLogger(__name__)
 
@@ -352,7 +353,7 @@ class PipelineCoordinator:
             latitude=latitude,
             longitude=longitude,
             altitude=self._config.device.altitude,
-            firmware_version=self._config.device.firmware_version,
+            firmware_version=__version__,
             region=radio.region,
             modem_preset=preset_name,
             primary_channel_name=primary_channel,

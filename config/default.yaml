@@ -104,7 +104,6 @@ device:                   # this Meshpoint's identity and location (Meshradar fl
   longitude: 0.0
   altitude: 25
   hardware_description: "RAK2287 + Raspberry Pi 4"
-  firmware_version: "0.7.7"
   # device_id: auto-generated UUID on first "meshpoint setup" run, then
   # preserved across re-runs. Not normally hand-edited.
 

@@ -1236,10 +1236,9 @@ See [config/default.yaml](../config/default.yaml) for all available settings and
 A flat overview of every top-level section in `local.yaml`. Use this as a checklist when assembling a custom config.
 
 ```yaml
-device:                # name, location, firmware version (mostly wizard-managed)
+device:                # name, location (mostly wizard-managed)
   device_id: null
   device_name: "My Meshpoint"
-  firmware_version: "0.6.5"
   latitude: null
   longitude: null
   altitude: null

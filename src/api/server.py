@@ -189,7 +189,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             longitude=config.device.longitude,
             altitude=config.device.altitude,
             hardware_description=config.device.hardware_description,
-            firmware_version=config.device.firmware_version,
+            firmware_version=__version__,
         )
         pipeline = _build_pipeline(config)
         pipeline.on_packet(_on_packet_received)

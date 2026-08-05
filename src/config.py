@@ -10,8 +10,6 @@ from typing import Optional
 
 import yaml
 
-from src.version import __version__
-
 logger = logging.getLogger(__name__)
 
 
@@ -360,7 +358,6 @@ class DeviceConfig:
     longitude: Optional[float] = None
     altitude: Optional[float] = None
     hardware_description: str = "RAK2287 + Raspberry Pi 4"
-    firmware_version: str = __version__
 
 
 @dataclass
