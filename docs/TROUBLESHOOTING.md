@@ -100,6 +100,8 @@ If the logs show `SX1302 concentrator started` and `Sync word set to 0x2B` but t
 
 The SX1250's digital SPI interface can recover while the RF receive path remains non-functional. To confirm: test a known-working Meshtastic device within a few meters. If still zero packets, the RAK2287 module needs replacement (~$50-60). The Pi and carrier board are unaffected.
 
+**Partial variant — one RF chain silent, not the whole concentrator:** the same SPI-latch class of issue can also present as only RF1 (Meshtastic ch8, Pager ch9) going deaf while RF0 (LoRaWAN) keeps working normally — the dashboard still shows every channel correctly configured ("ON", right frequency/sync word) since that's just the software-side channel plan, not a live RF confirmation. Seen on a RAK V2 unit: pager showed "sent" in the web UI with nothing received on the physical pager (and nothing received back from it either), while LoRaWAN kept working. A full power cycle (as above) resolved it without any module replacement — try that first before assuming hardware damage when only one RF chain is affected.
+
 ### No LoRa packets captured
 
 - Verify the concentrator is detected: `ls /dev/spidev0.*`
