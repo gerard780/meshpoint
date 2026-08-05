@@ -507,6 +507,14 @@ do
         || warn "Could not install library: ${lib}"
 done
 
+# The `meshpoint` system user isn't created until step 20 (it needs
+# MESHPOINT_DIR to exist first, for its own chown/group-grant work) --
+# but this chown needs it NOW, on a fresh install with no prior run.
+# Same idempotent `id -u` guard step 20 uses; that step's own guard
+# then just sees the user already exists and skips re-creating it.
+if ! id -u meshpoint &>/dev/null; then
+    useradd --system --no-create-home --shell /usr/sbin/nologin meshpoint
+fi
 chown -R meshpoint:meshpoint "$ARDUINO_CLI_HOME"
 
 # ── 14. Build SX1302 HAL ──────────────────────────────────────────
