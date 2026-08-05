@@ -104,14 +104,24 @@ radio:
 
 When enabled, every `spectral_scan_interval_seconds` (default 60, minimum 5) the SX1261 samples ambient channel power on the radio's frequency for roughly 50 ms and the service reports the 10th-percentile reading as the noise floor. At 60 s cadence that is ~0.08% of receive time. If you set `spectral_scan_interval_seconds: 0`, scanning is disabled entirely and the packet-derived fallback is used.
 
-**Detecting an unsupported board.** If you set `sx1261_spi_path` on a carrier where the SX1261 isn't directly reachable, `libloragw` will log lines like:
+**⚠️ Detecting an unsupported board — this is not a soft failure.** If you set `sx1261_spi_path` on a carrier where the SX1261 isn't directly reachable, `libloragw` logs lines like:
 
 ```
 ERROR: sx1261_check_status: SX1261 status is not as expected: got:0x00 expected:0x22
 ERROR: failed to patch sx1261 radio for LBT/Spectral Scan
 ```
 
-…and `lgw_start()` may then refuse to bring up the concentrator. If you see that, revert `sx1261_spi_path` to `""`, restart the service, and stay on the packet-derived fallback.
+…and `lgw_start()` refuses to bring up the concentrator **at all** — not just spectral scan. This is real, unmodified Semtech HAL behavior (`loragw_hal.c`): an enabled-but-unreachable SX1261 aborts the whole `lgw_start()` call, which takes down RX, TX, and native relay along with it. The service crashes on startup (`RuntimeError: lgw_start() failed`) and stays down until you fix the config — this is a real device outage, not spectral scan quietly falling back.
+
+If this happens, recover immediately:
+
+```bash
+sudo sed -i 's#sx1261_spi_path:.*#sx1261_spi_path: ""#' /opt/meshpoint/config/local.yaml
+sudo systemctl restart meshpoint
+sudo systemctl status meshpoint --no-pager
+```
+
+(or edit `config/local.yaml` directly and set `sx1261_spi_path: ""` if `sed` doesn't match the line cleanly). Only try a non-empty `sx1261_spi_path` on hardware you're prepared to remotely recover — many RAK2287/RAK5146 revisions route the SX1261 behind the SX1302's internal SPI router rather than a Pi-visible chip-select, so `/dev/spidev0.1` existing as a device node is not proof the chip is actually reachable there.
 
 If your `libloragw` build does not expose the spectral scan symbols at all (older HAL revisions), the service logs a single info line at startup and falls back automatically.
 

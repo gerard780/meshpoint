@@ -216,6 +216,24 @@ class SX1302Wrapper:
             self.load()
         result = self._lib.lgw_start()
         if result != LGW_HAL_SUCCESS:
+            # If an SX1261 was staged as enabled (radio.sx1261_spi_path
+            # set), it's the most likely cause: an enabled-but-unreachable
+            # SX1261 makes the real Semtech HAL abort lgw_start() entirely
+            # (RX/TX/relay included, not just spectral scan) -- see
+            # loragw_hal.c's CONTEXT_SX1261.enable branch. The real
+            # "ERROR: failed to patch sx1261..." line is easy to miss
+            # buried above a long FastAPI lifespan traceback, so point at
+            # the fix directly instead of a bare "lgw_start() failed".
+            if self._sx1261_configured:
+                raise RuntimeError(
+                    "lgw_start() failed -- radio.sx1261_spi_path is set "
+                    f"({self._sx1261_spi_path!r}) and is the most likely "
+                    "cause (check the log above for an 'sx1261' error line). "
+                    "This carrier's SX1261 may not be reachable at that "
+                    "path even if the device node exists. Set "
+                    "radio.sx1261_spi_path to \"\" in config/local.yaml and "
+                    "restart to recover."
+                )
             raise RuntimeError("lgw_start() failed")
         self._started = True
         logger.info("SX1302 concentrator started")
