@@ -182,24 +182,37 @@ def format_bullet_full(bullet: ChangelogBullet) -> dict:
 
 
 def format_section_for_preview(section: ChangelogSection) -> dict:
-    """Serialize a section with operator-friendly bullets."""
+    """Serialize a section with operator-friendly bullets.
+
+    Bullets are reversed for display: CHANGELOG.md itself is written
+    append-at-the-bottom (each new entry added after the last one, per
+    this project's own working convention), but an operator checking
+    "What's New" cares about the most recently landed change first --
+    the raw file's chronological order is for maintainers reading top
+    to bottom, not for this preview.
+    """
     return {
         "header": section.header,
         "version": section.version,
         "date": section.date,
         "is_unreleased": section.is_unreleased,
-        "bullets": [format_bullet_for_preview(b) for b in section.bullets],
+        "bullets": [format_bullet_for_preview(b) for b in reversed(section.bullets)],
     }
 
 
 def format_section_full(section: ChangelogSection) -> dict:
-    """Serialize a section with full-text bullets for the modal."""
+    """Serialize a section with full-text bullets for the modal.
+
+    Same newest-first reversal as ``format_section_for_preview`` --
+    kept consistent so the "Read full release notes" modal doesn't
+    show a different order than the compact preview that links to it.
+    """
     return {
         "header": section.header,
         "version": section.version,
         "date": section.date,
         "is_unreleased": section.is_unreleased,
-        "bullets": [format_bullet_full(b) for b in section.bullets],
+        "bullets": [format_bullet_full(b) for b in reversed(section.bullets)],
     }
 
 

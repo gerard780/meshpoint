@@ -191,9 +191,12 @@ async def pager_stats():
     )
     acked = sum(1 for row in outbox_rows if _decode_payload(row).get("status") == "acked")
     pending = len(outbox_rows) - acked
+    total = totals["total"] if totals else 0
+    outbox_count = len(outbox_rows)
 
     return {
-        "total_messages": totals["total"] if totals else 0,
+        "inbox_count": total - outbox_count,
+        "outbox_count": outbox_count,
         "unique_capcodes": len(unique_capcodes),
         "acked": acked,
         "pending": pending,

@@ -75,7 +75,7 @@ class PagerDashboardPanel {
 
             <section class="lw-stats" id="pgd-stats">
                 <div class="stat-card">
-                    <div class="stat-card__label">Total Messages</div>
+                    <div class="stat-card__label">Messages (In / Out)</div>
                     <div class="stat-card__value" id="pgd-stat-total">--</div>
                 </div>
                 <div class="stat-card">
@@ -258,7 +258,9 @@ class PagerDashboardPanel {
             const r = await fetch('/api/pager/stats');
             if (!r.ok) return;
             const s = await r.json();
-            this._setText('pgd-stat-total', s.total_messages ?? '--');
+            const inCount = s.inbox_count ?? '--';
+            const outCount = s.outbox_count ?? '--';
+            this._setText('pgd-stat-total', `${inCount} / ${outCount}`);
             this._setText('pgd-stat-capcodes', s.unique_capcodes ?? '--');
             this._setText('pgd-stat-acked', s.acked ?? '--');
             this._setText('pgd-stat-pending', s.pending ?? '--');
