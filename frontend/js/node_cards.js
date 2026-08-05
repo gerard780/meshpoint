@@ -384,7 +384,7 @@ class NodeCards {
     _buildMeta(n) {
         const parts = [];
         if (n.hardware_model) {
-            parts.push(`<span class="nc-chip nc-chip--meta">${this._esc(n.hardware_model)}</span>`);
+            parts.push(`<span class="nc-chip nc-chip--meta">${this._esc(this._hardwareName(n.hardware_model))}</span>`);
         }
         if (n.role != null) {
             parts.push(`<span class="nc-chip nc-chip--meta">${this._roleName(n.role)}</span>`);
@@ -452,6 +452,17 @@ class NodeCards {
         };
         if (typeof role === 'number') return names[role] || `ROLE_${role}`;
         return String(role).toUpperCase();
+    }
+
+    // `hardware_model` comes over the wire as a stringified raw protobuf
+    // enum int (e.g. "70") -- HW_NAMES (meshtastic_hw_names.js) maps it to
+    // a real model name, same lookup meshtastic_panel.js's own table uses.
+    _hardwareName(model) {
+        const num = Number(model);
+        if (!isNaN(num) && typeof HW_NAMES !== 'undefined') {
+            return HW_NAMES[num] || String(model);
+        }
+        return String(model);
     }
 
     _heardMs(ts) {

@@ -150,7 +150,7 @@ class NodeDrawer {
 
     _buildInfoSection(n) {
         const rows = [];
-        if (n.hardware_model) rows.push(['Hardware', n.hardware_model]);
+        if (n.hardware_model) rows.push(['Hardware', this._hardwareName(n.hardware_model)]);
         if (n.role != null) rows.push(['Role', this._roleName(n.role)]);
         rows.push(['Protocol', (n.protocol || 'meshtastic').toUpperCase()]);
         const band = this._bandLabel(n.latest_capture_source);
@@ -460,6 +460,17 @@ class NodeDrawer {
         };
         if (typeof role === 'number') return names[role] || `ROLE_${role}`;
         return String(role).toUpperCase();
+    }
+
+    // `hardware_model` comes over the wire as a stringified raw protobuf
+    // enum int (e.g. "70") -- HW_NAMES (meshtastic_hw_names.js) maps it to
+    // a real model name, same lookup meshtastic_panel.js's own table uses.
+    _hardwareName(model) {
+        const num = Number(model);
+        if (!isNaN(num) && typeof HW_NAMES !== 'undefined') {
+            return HW_NAMES[num] || String(model);
+        }
+        return String(model);
     }
 
     /**
