@@ -6,7 +6,7 @@
 
 ### v0.8.0 (August 2026)
 
-Builds on v0.7.9 — see the v0.7.9 section of CHANGELOG.md for the full log of changes buildout (firmware, dashboard, ACKs) and LoRaWAN/DAPNET work.
+- **Changes since v0.7.9.** See the v0.7.9 section of this changelog for the full pager buildout (firmware, dashboard, ACKs) and LoRaWAN/DAPNET work.
 
 ### v0.7.9 (July 2026)
 
