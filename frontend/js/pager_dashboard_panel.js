@@ -66,11 +66,31 @@ class PagerDashboardPanel {
             <header class="lw-panel__head">
                 <h2 class="lw-panel__title">Pager</h2>
                 <div class="lw-panel__actions">
+                    <button class="terminal-button" type="button" id="pgd-export-btn">Export CSV</button>
                     <button class="terminal-button" type="button" id="pgd-refresh-btn">Refresh</button>
                 </div>
             </header>
 
             <p class="cfg-card__hint" id="pgd-status-hint"></p>
+
+            <section class="lw-stats" id="pgd-stats">
+                <div class="stat-card">
+                    <div class="stat-card__label">Total Messages</div>
+                    <div class="stat-card__value" id="pgd-stat-total">--</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-card__label">Unique Capcodes</div>
+                    <div class="stat-card__value" id="pgd-stat-capcodes">--</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-card__label">Acked</div>
+                    <div class="stat-card__value" id="pgd-stat-acked">--</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-card__label">Pending</div>
+                    <div class="stat-card__value" id="pgd-stat-pending">--</div>
+                </div>
+            </section>
 
             <section class="lw-section">
                 <div class="panel">
@@ -172,6 +192,11 @@ class PagerDashboardPanel {
 
         document.getElementById('pgd-refresh-btn')
             ?.addEventListener('click', () => this._load());
+        document.getElementById('pgd-export-btn')
+            ?.addEventListener('click', () => {
+                const ds = this._tab === 'outbox' ? 'outbox' : 'inbox';
+                window.location = `/api/pager/export/${ds}.csv`;
+            });
         root.querySelectorAll('[data-pgd-tab]').forEach((btn) => {
             btn.addEventListener('click', () => this._setTab(btn.dataset.pgdTab));
         });
@@ -223,7 +248,26 @@ class PagerDashboardPanel {
     }
 
     async _load() {
-        await Promise.all([this._loadStatus(), this._loadInbox(), this._loadOutbox()]);
+        await Promise.all([
+            this._loadStatus(), this._loadStats(), this._loadInbox(), this._loadOutbox(),
+        ]);
+    }
+
+    async _loadStats() {
+        try {
+            const r = await fetch('/api/pager/stats');
+            if (!r.ok) return;
+            const s = await r.json();
+            this._setText('pgd-stat-total', s.total_messages ?? '--');
+            this._setText('pgd-stat-capcodes', s.unique_capcodes ?? '--');
+            this._setText('pgd-stat-acked', s.acked ?? '--');
+            this._setText('pgd-stat-pending', s.pending ?? '--');
+        } catch (_) {}
+    }
+
+    _setText(id, value) {
+        const el = document.getElementById(id);
+        if (el) el.textContent = value;
     }
 
     async _loadStatus() {

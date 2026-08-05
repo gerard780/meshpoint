@@ -159,6 +159,120 @@ async def pager_messages(
     return result
 
 
+@router.get("/stats")
+async def pager_stats():
+    """Aggregate counts for the page's stat tiles.
+
+    ``acked``/``pending`` only ever count Outbox rows (status lives in
+    ``decoded_payload``, same as ``pager_messages`` above, decoded in
+    Python rather than via SQL JSON functions -- no other route in this
+    codebase queries JSON at the SQL level, so this stays consistent
+    with the rest of the app instead of introducing a one-off pattern).
+    """
+    if _packet_repo is None or _config is None:
+        raise HTTPException(503, "Routes not initialised")
+
+    totals = await _packet_repo._db.fetch_one(
+        "SELECT COUNT(*) AS total FROM packets WHERE protocol = 'pager'"
+    )
+    capcode_rows = await _packet_repo._db.fetch_all(
+        "SELECT DISTINCT source_id, destination_id FROM packets WHERE protocol = 'pager'"
+    )
+    unique_capcodes = {r["source_id"] for r in capcode_rows} | {
+        r["destination_id"] for r in capcode_rows
+    }
+    unique_capcodes.discard(None)
+    unique_capcodes.discard("")
+
+    our_capcode = str(_config.radio.pager_capcode)
+    outbox_rows = await _packet_repo._db.fetch_all(
+        "SELECT decoded_payload FROM packets WHERE protocol = 'pager' AND source_id = ?",
+        (our_capcode,),
+    )
+    acked = sum(1 for row in outbox_rows if _decode_payload(row).get("status") == "acked")
+    pending = len(outbox_rows) - acked
+
+    return {
+        "total_messages": totals["total"] if totals else 0,
+        "unique_capcodes": len(unique_capcodes),
+        "acked": acked,
+        "pending": pending,
+    }
+
+
+_INBOX_EXPORT_COLUMNS = [
+    "timestamp", "packet_id", "from_capcode", "to_capcode", "text", "rssi", "snr",
+]
+_OUTBOX_EXPORT_COLUMNS = [
+    "timestamp", "packet_id", "from_capcode", "to_capcode", "text", "status",
+]
+
+
+def _pager_flatten(row: dict) -> dict:
+    payload = _decode_payload(row)
+    row["from_capcode"] = row.get("source_id")
+    row["to_capcode"] = row.get("destination_id")
+    row["text"] = payload.get("text", "")
+    row["status"] = payload.get("status")
+    return row
+
+
+@router.get("/export/inbox.csv")
+async def pager_inbox_csv():
+    """All received pager messages as a downloadable CSV."""
+    if _packet_repo is None or _config is None:
+        raise HTTPException(503, "Routes not initialised")
+    from src.api.csv_export import export_filename, streaming_csv, stream_query
+
+    our_capcode = str(_config.radio.pager_capcode)
+    device_name = _config.device.device_name or "meshpoint"
+    rows = stream_query(
+        _packet_repo._db,
+        """
+        SELECT packet_id, source_id, destination_id, timestamp,
+               decoded_payload, rssi, snr
+        FROM packets
+        WHERE protocol = 'pager' AND source_id != ?
+        ORDER BY timestamp DESC
+        """,
+        (our_capcode,),
+        _INBOX_EXPORT_COLUMNS,
+        transform=_pager_flatten,
+    )
+    return streaming_csv(
+        _INBOX_EXPORT_COLUMNS, rows,
+        export_filename(device_name, "pager-inbox"),
+    )
+
+
+@router.get("/export/outbox.csv")
+async def pager_outbox_csv():
+    """All sent pager messages (with delivery status) as a downloadable CSV."""
+    if _packet_repo is None or _config is None:
+        raise HTTPException(503, "Routes not initialised")
+    from src.api.csv_export import export_filename, streaming_csv, stream_query
+
+    our_capcode = str(_config.radio.pager_capcode)
+    device_name = _config.device.device_name or "meshpoint"
+    rows = stream_query(
+        _packet_repo._db,
+        """
+        SELECT packet_id, source_id, destination_id, timestamp,
+               decoded_payload, rssi, snr
+        FROM packets
+        WHERE protocol = 'pager' AND source_id = ?
+        ORDER BY timestamp DESC
+        """,
+        (our_capcode,),
+        _OUTBOX_EXPORT_COLUMNS,
+        transform=_pager_flatten,
+    )
+    return streaming_csv(
+        _OUTBOX_EXPORT_COLUMNS, rows,
+        export_filename(device_name, "pager-outbox"),
+    )
+
+
 class PagerSendRequest(BaseModel):
     to_capcode: int
     text: str
