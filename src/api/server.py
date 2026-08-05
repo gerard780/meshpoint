@@ -554,12 +554,6 @@ def _build_pipeline(config: AppConfig) -> PipelineCoordinator:
         elif source_name == "pocsag_serial":
             _add_dapnet_source(coordinator, config)
 
-    if (
-        "meshcore_usb" not in config.capture.sources
-        and any(c.auto_detect for c in config.capture.meshcore_usb)
-    ):
-        _add_meshcore_usb_source(coordinator, config)
-
     return coordinator
 
 
