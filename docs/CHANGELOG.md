@@ -4,6 +4,8 @@
 
 - **MQTT broker TLS.** Transport TLS (`mqtts`, CA bundle, cert validation) is not implemented on `mqtt_publisher.py` (plain TCP only). Until then use plain port 1883 or a LAN broker without TLS.
 
+### v0.8.0 (August 2026)
+
 ### v0.7.9 (July 2026)
 
 First tagged release of the javastraat/meshpoint fork. Adds LoRaWAN sniffing, multi-radio capture, an RTL-SDR web listener, and a dashboard self-update fix, on top of everything merged from upstream's v0.7.7 (backup/restore, RF Environment tab, mesh broadcast cadence, operator tools). Run `install.sh` when upgrading. **Boxes still on v0.7.6:** the dashboard's own updater can't fetch this release — run this once over SSH, then updates from the dashboard work again: `cd /opt/meshpoint && sudo git fetch origin main && sudo git reset --hard origin/main && sudo systemctl restart meshpoint`.
