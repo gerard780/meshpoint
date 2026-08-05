@@ -14,10 +14,18 @@ if TYPE_CHECKING:
 
 router = APIRouter(prefix="/api/rf", tags=["rf"])
 
-# Shown when interval > 0 but the SX1261 is not on a Pi-visible SPI bus
-# (RAK2287, RAK5146, SenseCap M1, and most fleet carriers).
+# Shown when interval > 0 but radio.sx1261_spi_path isn't set. Confirmed
+# working on SenseCap M1 once that path is set correctly -- but some
+# RAK2287/RAK V2 revisions route the SX1261 behind the SX1302's internal
+# SPI router instead of a Pi-visible chip-select, and setting the path on
+# those units makes lgw_start() abort the WHOLE concentrator (RX/TX/relay,
+# not just the scan) instead of just skipping it. See CONFIGURATION.md's
+# "Opting in to true spectral scan" section before setting it on a RAK unit.
 _FLEET_SPECTRAL_SCAN_NOTE = (
-    "Expected on RAK V2 and SenseCap M1; packet fallback is normal."
+    "Packet fallback is normal here. Confirmed working on SenseCap M1; "
+    "not every RAK V2 exposes the SX1261 the same way, and forcing "
+    "radio.sx1261_spi_path can crash the whole concentrator on those units "
+    "-- see CONFIGURATION.md before setting it."
 )
 
 _tracker: NoiseFloorTracker | None = None

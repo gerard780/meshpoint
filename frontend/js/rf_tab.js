@@ -458,8 +458,10 @@ class RfTab {
     static _histogramEmptyText(scan) {
         if (scan.fleet_expected_fallback) {
             return (
-                'Hardware histogram not available on this carrier. '
-                + 'Expected on RAK V2 and SenseCap M1; use the noise-floor card above (packet fallback).'
+                'Hardware histogram not available (radio.sx1261_spi_path unset or unreachable). '
+                + 'Confirmed working on SenseCap M1; not every RAK V2 exposes the SX1261 the same way, '
+                + 'and forcing this setting can crash the whole concentrator on those units — see '
+                + 'CONFIGURATION.md before setting it. Use the noise-floor card above (packet fallback) instead.'
             );
         }
         if (!scan.enabled) {
