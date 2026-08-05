@@ -285,11 +285,11 @@ class PagerDashboardPanel {
                 hint.textContent = 'Pager channel (ch9) is currently disabled -- '
                     + 'enable it from Configuration → Radio (Pager).';
             } else if (!s.pager_capcode) {
-                hint.textContent = `Pager channel (ch9) active at ${s.pager_frequency_mhz} MHz -- `
-                    + 'set your own capcode in Configuration → Radio (Pager) before sending.';
+                hint.textContent = 'Set your own capcode in Configuration → Radio (Pager) before sending.';
             } else {
-                hint.textContent = `Pager channel (ch9) active at ${s.pager_frequency_mhz} MHz `
-                    + `as capcode ${s.pager_capcode}.`;
+                // Frequency + capcode are already shown on the topbar Pager
+                // pill -- no need to restate them here once everything's OK.
+                hint.textContent = '';
             }
         } catch (_) {}
     }
