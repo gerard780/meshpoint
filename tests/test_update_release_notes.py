@@ -317,9 +317,13 @@ class TestPreviewFormatting(unittest.TestCase):
                 ),
             ],
         )
+        # format_section_for_preview shows bullets newest-first (CHANGELOG.md
+        # itself is append-at-the-bottom, but an operator checking "What's
+        # New" cares about the most recent change first) -- so the *last*
+        # bullet in the section ("Long") is first in the payload.
         payload = format_section_for_preview(section)
-        self.assertEqual(payload["bullets"][0]["detail"], "Brief note.")
-        self.assertTrue(payload["bullets"][1]["detail"].endswith("…"))
+        self.assertTrue(payload["bullets"][0]["detail"].endswith("…"))
+        self.assertEqual(payload["bullets"][1]["detail"], "Brief note.")
 
 
 if __name__ == "__main__":
