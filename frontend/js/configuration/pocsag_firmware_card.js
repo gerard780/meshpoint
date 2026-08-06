@@ -49,6 +49,11 @@ class PocsagFirmwareConfigCard {
                             dashboard -- no Arduino IDE needed. Requires the arduino-cli
                             toolchain (installed automatically by scripts/install.sh).
                         </p>
+                        <p class="cfg-status" data-kind="error" data-firmware-cli-warning hidden>
+                            arduino-cli isn't installed on this Pi, so Compile/Flash won't
+                            work yet -- re-run <code>scripts/install.sh</code> (without
+                            <code>--skip-arduino</code>) to add it, then reload this page.
+                        </p>
                     </header>
                     <label class="cfg-field cfg-field--narrow">
                         <span class="cfg-field__label">Board</span>
@@ -189,6 +194,22 @@ class PocsagFirmwareConfigCard {
             `<option value="${this._esc(b.macro)}">${this._esc(b.label)}</option>`
         )).join('');
         this._autoSelectFirmwareBoard();
+        // Defaults true (don't warn before we actually know) -- flipped
+        // to false only once GET .../targets confirms arduino-cli is
+        // missing (e.g. scripts/install.sh was run with --skip-arduino).
+        this._arduinoCliAvailable = result ? !!result.arduino_cli_available : true;
+        this._updateCliAvailabilityUI();
+    }
+
+    /** Shows/hides the "arduino-cli isn't installed" warning and
+     * disables Compile (always) -- Flash's own enabled state is decided
+     * together with port availability in _renderFirmwareDevicePicker(). */
+    _updateCliAvailabilityUI() {
+        const warning = this._root.querySelector('[data-firmware-cli-warning]');
+        const compileBtn = this._root.querySelector('[data-firmware-compile]');
+        if (warning) warning.hidden = this._arduinoCliAvailable !== false;
+        if (compileBtn) compileBtn.disabled = this._arduinoCliAvailable === false;
+        this._renderFirmwareDevicePicker();
     }
 
     /** Maps the companion's own reported `board` string (from its live
@@ -271,6 +292,11 @@ class PocsagFirmwareConfigCard {
         )).join('');
         if (previous && ports.some((p) => p.stable_path === previous)) select.value = previous;
 
+        if (this._arduinoCliAvailable === false) {
+            flashBtn.disabled = true;
+            flashBtn.title = 'arduino-cli is not installed -- see the warning above.';
+            return;
+        }
         flashBtn.disabled = false;
         flashBtn.title = '';
     }

@@ -34,6 +34,11 @@ class PagerFirmwareConfigCard {
                             Heltec V3 only -- a standalone over-the-air pager, not a USB
                             companion.
                         </p>
+                        <p class="cfg-status" data-kind="error" data-firmware-cli-warning hidden>
+                            arduino-cli isn't installed on this Pi, so Compile/Flash won't
+                            work yet -- re-run <code>scripts/install.sh</code> (without
+                            <code>--skip-arduino</code>) to add it, then reload this page.
+                        </p>
                     </header>
                     <label class="cfg-field">
                         <span class="cfg-field__label">Capcodes to program</span>
@@ -82,6 +87,30 @@ class PagerFirmwareConfigCard {
             .addEventListener('click', (e) => this._rescanUsb(e.currentTarget));
 
         this._refreshSerialPortsList();
+        this._loadFirmwareTargets();
+    }
+
+    /** Single fixed board -- the only thing this card actually needs
+     * from GET .../targets is arduino_cli_available (see
+     * pager_firmware_routes.py's firmware_targets()). */
+    async _loadFirmwareTargets() {
+        const result = await this._api.get('/api/pager/firmware/targets');
+        // Defaults true (don't warn before we actually know) -- flipped
+        // to false only once this confirms arduino-cli is missing (e.g.
+        // scripts/install.sh was run with --skip-arduino).
+        this._arduinoCliAvailable = result ? !!result.arduino_cli_available : true;
+        this._updateCliAvailabilityUI();
+    }
+
+    /** Shows/hides the "arduino-cli isn't installed" warning and
+     * disables Compile (always) -- Flash's own enabled state is decided
+     * together with port availability in _renderFirmwareDevicePicker(). */
+    _updateCliAvailabilityUI() {
+        const warning = this._root.querySelector('[data-firmware-cli-warning]');
+        const compileBtn = this._root.querySelector('[data-firmware-compile]');
+        if (warning) warning.hidden = this._arduinoCliAvailable !== false;
+        if (compileBtn) compileBtn.disabled = this._arduinoCliAvailable === false;
+        this._renderFirmwareDevicePicker();
     }
 
     render(config) {
@@ -162,6 +191,11 @@ class PagerFirmwareConfigCard {
         )).join('');
         if (previous && ports.some((p) => p.stable_path === previous)) select.value = previous;
 
+        if (this._arduinoCliAvailable === false) {
+            flashBtn.disabled = true;
+            flashBtn.title = 'arduino-cli is not installed -- see the warning above.';
+            return;
+        }
         flashBtn.disabled = false;
         flashBtn.title = '';
     }

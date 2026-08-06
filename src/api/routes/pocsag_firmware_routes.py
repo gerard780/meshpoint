@@ -31,6 +31,7 @@ import asyncio
 import json
 import logging
 import re
+import shutil
 from pathlib import Path
 from typing import AsyncIterator, Optional
 
@@ -190,11 +191,23 @@ async def _stream_subprocess(cmd: list[str]) -> AsyncIterator[bytes]:
     })
 
 
+def _arduino_cli_available() -> bool:
+    """Whether `arduino-cli` is actually on PATH -- scripts/install.sh's
+    "Install arduino-cli + ESP32 toolchain" section is opt-in (asked
+    interactively, or skippable with --skip-arduino), so a fresh install
+    may legitimately not have it. Compile/Flash would otherwise just
+    fail with an opaque "command not found" deep in the stream output."""
+    return shutil.which(_ARDUINO_CLI_BIN) is not None
+
+
 @router.get("/targets")
 async def firmware_targets(_claims: SessionClaims = Depends(require_admin)) -> dict:
     """Board choices for the Compile/Flash pulldown, auto-discovered from
     the sketch's own BOARD_* defines (see _discover_board_targets)."""
-    return {"boards": _discover_board_targets()}
+    return {
+        "boards": _discover_board_targets(),
+        "arduino_cli_available": _arduino_cli_available(),
+    }
 
 
 class CompileRequest(BaseModel):

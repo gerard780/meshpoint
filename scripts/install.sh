@@ -11,6 +11,10 @@
 #
 # Usage:
 #   sudo ./scripts/install.sh
+#   sudo ./scripts/install.sh --skip-arduino   # skip the arduino-cli/ESP32
+#                                               # toolchain (POCSAG/Pager/RF
+#                                               # Environment Compile+Flash);
+#                                               # otherwise prompted [y/N]
 #
 # After completion, reboot then run:  meshpoint setup
 #
@@ -40,6 +44,30 @@ fi
 
 if ! grep -qi "raspberry\|raspbian\|debian" /etc/os-release 2>/dev/null; then
     warn "This doesn't look like Raspberry Pi OS. Proceeding anyway."
+fi
+
+# The arduino-cli/ESP32 toolchain (section 13 below) is only needed for
+# the Configuration -> Firmware page's POCSAG/Pager/RF Environment
+# Compile+Flash cards -- MeshCore/Meshtastic flashing uses prebuilt
+# releases + esptool instead and is unaffected either way. It's a
+# genuinely large, multi-minute download (the ESP32 core + toolchain
+# runs a few hundred MB), so ask upfront -- before the long unattended
+# stretch of steps that follow -- rather than blocking mid-run on a
+# prompt nobody's watching for. Every step in that section is
+# idempotent, so re-running this installer later (without
+# --skip-arduino) adds it at any time without redoing anything else.
+INSTALL_ARDUINO=1
+for arg in "$@"; do
+    case "$arg" in
+        --skip-arduino) INSTALL_ARDUINO=0 ;;
+    esac
+done
+if [ "$INSTALL_ARDUINO" = "1" ] && [ -t 0 ]; then
+    read -r -p "Install the arduino-cli/ESP32 toolchain for POCSAG/Pager/RF Environment firmware Compile+Flash? [y/N] " arduino_reply || arduino_reply=""
+    case "$arduino_reply" in
+        [yY]*) INSTALL_ARDUINO=1 ;;
+        *) INSTALL_ARDUINO=0 ;;
+    esac
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -448,74 +476,78 @@ fi
 # already installed/present, same pattern as the other build-from-source
 # sections above.
 
-ARDUINO_CLI_HOME="/opt/arduino-cli"
-ARDUINO_CLI_BIN="/usr/local/bin/arduino-cli"
-ARDUINO_CLI_CONFIG="${ARDUINO_CLI_HOME}/arduino-cli.yaml"
-ESP32_CORE_VERSION="3.3.10"
+if [ "$INSTALL_ARDUINO" = "1" ]; then
+    ARDUINO_CLI_HOME="/opt/arduino-cli"
+    ARDUINO_CLI_BIN="/usr/local/bin/arduino-cli"
+    ARDUINO_CLI_CONFIG="${ARDUINO_CLI_HOME}/arduino-cli.yaml"
+    ESP32_CORE_VERSION="3.3.10"
 
-if [ -x "$ARDUINO_CLI_BIN" ]; then
-    info "arduino-cli already installed, skipping"
+    if [ -x "$ARDUINO_CLI_BIN" ]; then
+        info "arduino-cli already installed, skipping"
+    else
+        info "Installing arduino-cli..."
+        mkdir -p "${ARDUINO_CLI_HOME}/bin"
+        curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh \
+            | BINDIR="${ARDUINO_CLI_HOME}/bin" sh
+        ln -sf "${ARDUINO_CLI_HOME}/bin/arduino-cli" "$ARDUINO_CLI_BIN"
+    fi
+
+    if [ ! -f "$ARDUINO_CLI_CONFIG" ]; then
+        info "Writing arduino-cli config (${ARDUINO_CLI_CONFIG})..."
+        # ARDUINO_CLI_HOME/cache also gets pre-created here (not just data/
+        # user/downloads, which the config file itself controls) because
+        # arduino-cli's build cache is a separate concept with no config-file
+        # key -- it always resolves via Go's os.UserCacheDir() ($XDG_CACHE_HOME,
+        # else $HOME/.cache). `meshpoint` (below) is a --no-create-home system
+        # account, so without XDG_CACHE_HOME pointed here explicitly (see
+        # meshpoint.service's Environment= line), a compile as that user fails
+        # trying to mkdir a cache dir under a $HOME that doesn't exist.
+        mkdir -p "${ARDUINO_CLI_HOME}/data" "${ARDUINO_CLI_HOME}/user" "${ARDUINO_CLI_HOME}/downloads" "${ARDUINO_CLI_HOME}/cache"
+        arduino-cli config init --dest-file "$ARDUINO_CLI_CONFIG" --overwrite
+        arduino-cli --config-file "$ARDUINO_CLI_CONFIG" config set directories.data "${ARDUINO_CLI_HOME}/data"
+        arduino-cli --config-file "$ARDUINO_CLI_CONFIG" config set directories.user "${ARDUINO_CLI_HOME}/user"
+        arduino-cli --config-file "$ARDUINO_CLI_CONFIG" config set directories.downloads "${ARDUINO_CLI_HOME}/downloads"
+        arduino-cli --config-file "$ARDUINO_CLI_CONFIG" config add board_manager.additional_urls \
+            https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
+    else
+        info "arduino-cli config already present, skipping"
+    fi
+
+    info "Updating arduino-cli board index..."
+    arduino-cli --config-file "$ARDUINO_CLI_CONFIG" core update-index
+
+    if arduino-cli --config-file "$ARDUINO_CLI_CONFIG" core list | grep -q "^esp32:esp32 "; then
+        info "esp32:esp32 core already installed, skipping"
+    else
+        info "Installing ESP32 board core ${ESP32_CORE_VERSION} (this takes a few minutes)..."
+        arduino-cli --config-file "$ARDUINO_CLI_CONFIG" core install "esp32:esp32@${ESP32_CORE_VERSION}"
+    fi
+
+    info "Installing pocsag_companion sketch libraries..."
+    for lib in \
+        "Adafruit GFX Library@1.12.6" \
+        "Adafruit SSD1306@2.5.17" \
+        "RadioLib@7.7.1" \
+        "ArduinoJson@7.4.3" \
+        "Async TCP" \
+        "ESP Async WebServer@3.12.0"
+    do
+        arduino-cli --config-file "$ARDUINO_CLI_CONFIG" lib install "$lib" \
+            || warn "Could not install library: ${lib}"
+    done
+
+    # The `meshpoint` system user isn't created until step 20 (it needs
+    # MESHPOINT_DIR to exist first, for its own chown/group-grant work) --
+    # but this chown needs it NOW, on a fresh install with no prior run.
+    # Same idempotent `id -u` guard step 20 uses; that step's own guard
+    # then just sees the user already exists and skips re-creating it.
+    if ! id -u meshpoint &>/dev/null; then
+        useradd --system --no-create-home --shell /usr/sbin/nologin meshpoint
+    fi
+    chown -R meshpoint:meshpoint "$ARDUINO_CLI_HOME"
 else
-    info "Installing arduino-cli..."
-    mkdir -p "${ARDUINO_CLI_HOME}/bin"
-    curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh \
-        | BINDIR="${ARDUINO_CLI_HOME}/bin" sh
-    ln -sf "${ARDUINO_CLI_HOME}/bin/arduino-cli" "$ARDUINO_CLI_BIN"
+    info "Skipping arduino-cli/ESP32 toolchain (POCSAG/Pager/RF Environment Compile+Flash won't be available) -- re-run without --skip-arduino, or answer Y next time, to add it later"
 fi
-
-if [ ! -f "$ARDUINO_CLI_CONFIG" ]; then
-    info "Writing arduino-cli config (${ARDUINO_CLI_CONFIG})..."
-    # ARDUINO_CLI_HOME/cache also gets pre-created here (not just data/
-    # user/downloads, which the config file itself controls) because
-    # arduino-cli's build cache is a separate concept with no config-file
-    # key -- it always resolves via Go's os.UserCacheDir() ($XDG_CACHE_HOME,
-    # else $HOME/.cache). `meshpoint` (below) is a --no-create-home system
-    # account, so without XDG_CACHE_HOME pointed here explicitly (see
-    # meshpoint.service's Environment= line), a compile as that user fails
-    # trying to mkdir a cache dir under a $HOME that doesn't exist.
-    mkdir -p "${ARDUINO_CLI_HOME}/data" "${ARDUINO_CLI_HOME}/user" "${ARDUINO_CLI_HOME}/downloads" "${ARDUINO_CLI_HOME}/cache"
-    arduino-cli config init --dest-file "$ARDUINO_CLI_CONFIG" --overwrite
-    arduino-cli --config-file "$ARDUINO_CLI_CONFIG" config set directories.data "${ARDUINO_CLI_HOME}/data"
-    arduino-cli --config-file "$ARDUINO_CLI_CONFIG" config set directories.user "${ARDUINO_CLI_HOME}/user"
-    arduino-cli --config-file "$ARDUINO_CLI_CONFIG" config set directories.downloads "${ARDUINO_CLI_HOME}/downloads"
-    arduino-cli --config-file "$ARDUINO_CLI_CONFIG" config add board_manager.additional_urls \
-        https://raw.githubusercontent.com/espressif/arduino-esp32/gh-pages/package_esp32_index.json
-else
-    info "arduino-cli config already present, skipping"
-fi
-
-info "Updating arduino-cli board index..."
-arduino-cli --config-file "$ARDUINO_CLI_CONFIG" core update-index
-
-if arduino-cli --config-file "$ARDUINO_CLI_CONFIG" core list | grep -q "^esp32:esp32 "; then
-    info "esp32:esp32 core already installed, skipping"
-else
-    info "Installing ESP32 board core ${ESP32_CORE_VERSION} (this takes a few minutes)..."
-    arduino-cli --config-file "$ARDUINO_CLI_CONFIG" core install "esp32:esp32@${ESP32_CORE_VERSION}"
-fi
-
-info "Installing pocsag_companion sketch libraries..."
-for lib in \
-    "Adafruit GFX Library@1.12.6" \
-    "Adafruit SSD1306@2.5.17" \
-    "RadioLib@7.7.1" \
-    "ArduinoJson@7.4.3" \
-    "Async TCP" \
-    "ESP Async WebServer@3.12.0"
-do
-    arduino-cli --config-file "$ARDUINO_CLI_CONFIG" lib install "$lib" \
-        || warn "Could not install library: ${lib}"
-done
-
-# The `meshpoint` system user isn't created until step 20 (it needs
-# MESHPOINT_DIR to exist first, for its own chown/group-grant work) --
-# but this chown needs it NOW, on a fresh install with no prior run.
-# Same idempotent `id -u` guard step 20 uses; that step's own guard
-# then just sees the user already exists and skips re-creating it.
-if ! id -u meshpoint &>/dev/null; then
-    useradd --system --no-create-home --shell /usr/sbin/nologin meshpoint
-fi
-chown -R meshpoint:meshpoint "$ARDUINO_CLI_HOME"
 
 # ── 14. Build SX1302 HAL ──────────────────────────────────────────
 

@@ -38,6 +38,13 @@ class RfenvCompanionFirmwareConfigCard {
                             scanner on a second board -- it won't feed this box's own
                             RF Environment page.
                         </p>
+                        <p class="cfg-status" data-kind="error" data-firmware-cli-warning hidden>
+                            arduino-cli isn't installed on this Pi, so Compile/Flash won't
+                            work yet -- re-run <code>scripts/install.sh</code> (without
+                            <code>--skip-arduino</code>) to add it, then reload this page.
+                            Live Device Commands below are unaffected -- those go over a
+                            direct serial connection, not arduino-cli.
+                        </p>
                     </header>
                     <label class="cfg-field cfg-firmware-field">
                         <span class="cfg-field__label">Band</span>
@@ -151,11 +158,29 @@ class RfenvCompanionFirmwareConfigCard {
         this._bandTargets = bands;
         if (bands.length === 0) {
             select.innerHTML = '<option value="">No bands found</option>';
-            return;
+        } else {
+            select.innerHTML = bands.map((b) => (
+                `<option value="${this._esc(b.macro)}">${this._esc(b.label)}</option>`
+            )).join('');
         }
-        select.innerHTML = bands.map((b) => (
-            `<option value="${this._esc(b.macro)}">${this._esc(b.label)}</option>`
-        )).join('');
+        // Defaults true (don't warn before we actually know) -- flipped
+        // to false only once this confirms arduino-cli is missing (e.g.
+        // scripts/install.sh was run with --skip-arduino). Doesn't affect
+        // the Live Device Commands section below, which uses a direct
+        // serial connection, not arduino-cli.
+        this._arduinoCliAvailable = result ? !!result.arduino_cli_available : true;
+        this._updateCliAvailabilityUI();
+    }
+
+    /** Shows/hides the "arduino-cli isn't installed" warning and
+     * disables Compile (always) -- Flash's own enabled state is decided
+     * together with port availability in _renderFirmwareDevicePicker(). */
+    _updateCliAvailabilityUI() {
+        const warning = this._root.querySelector('[data-firmware-cli-warning]');
+        const compileBtn = this._root.querySelector('[data-firmware-compile]');
+        if (warning) warning.hidden = this._arduinoCliAvailable !== false;
+        if (compileBtn) compileBtn.disabled = this._arduinoCliAvailable === false;
+        this._renderFirmwareDevicePicker();
     }
 
     render(config) {
@@ -246,6 +271,11 @@ class RfenvCompanionFirmwareConfigCard {
         )).join('');
         if (previous && ports.some((p) => p.stable_path === previous)) select.value = previous;
 
+        if (this._arduinoCliAvailable === false) {
+            flashBtn.disabled = true;
+            flashBtn.title = 'arduino-cli is not installed -- see the warning above.';
+            return;
+        }
         flashBtn.disabled = false;
         flashBtn.title = '';
     }
