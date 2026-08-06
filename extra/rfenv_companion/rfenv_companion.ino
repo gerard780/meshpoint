@@ -202,7 +202,7 @@ Adafruit_SSD1306 display(OLED_WIDTH, OLED_HEIGHT, &Wire, OLED_RST_PIN);
 #define BAND_START_MHZ 863.0f
 #define BAND_END_MHZ   870.0f
 #define BAND_STEPS 32 // -> 4px-wide columns on a 128px-wide screen
-#define BAND_REDRAW_EVERY_N_STEPS 4
+#define BAND_REDRAW_EVERY_N_STEPS 1 // 32 steps is few enough to redraw every hop
 
 static float bandRssi[BAND_STEPS];
 static int bandIndex = 0;

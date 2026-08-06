@@ -50,14 +50,7 @@ class RadioSpectrumCard {
                     automatic sweep.
                 </div>
             </div>
-            <div class="spectrum-legend" data-sp-legend>
-                <span><i style="background:${RadioSpectrumCard.MEDIAN_COLOR}"></i>Median</span>
-                <span><i style="background:${RadioSpectrumCard.PEAK_COLOR}"></i>Peak (p95)</span>
-                <span><i style="background:${RadioSpectrumCard.MARKER_COLORS.lorawan}"></i>LoRaWAN ch</span>
-                <span><i style="background:${RadioSpectrumCard.MARKER_COLORS.meshtastic}"></i>Meshtastic</span>
-                <span><i style="background:${RadioSpectrumCard.MARKER_COLORS.meshcore}"></i>MeshCore</span>
-                <span><i style="background:${RadioSpectrumCard.MARKER_COLORS.pager}"></i>Pager</span>
-            </div>
+            <div class="spectrum-legend" data-sp-legend></div>
         `;
         this._canvas = rootEl.querySelector('[data-sp-canvas]');
         this._tooltip = rootEl.querySelector('[data-sp-tooltip]');
@@ -73,8 +66,34 @@ class RadioSpectrumCard {
 
     render(config) {
         this._markers = this._buildMarkers(config);
+        this._renderLegend();
         this._load();
         this._armAutoRefresh();
+    }
+
+    // Median/Peak are always shown (the chart's own data lines always
+    // draw when there are points at all). The four channel-marker
+    // entries are guarded on whether that protocol actually has a
+    // marker in _markers -- e.g. MeshCore's swatch shouldn't appear if
+    // no MeshCore radio is configured (mc.frequency_mhz unset), same
+    // reasoning for Pager. Without this, the legend claimed a color
+    // for a line that was never actually drawn on the chart.
+    _renderLegend() {
+        const legend = this._root.querySelector('[data-sp-legend]');
+        if (!legend) return;
+        const present = new Set(this._markers.map((m) => m.protocol));
+        const entries = [
+            { label: 'Median', color: RadioSpectrumCard.MEDIAN_COLOR },
+            { label: 'Peak (p95)', color: RadioSpectrumCard.PEAK_COLOR },
+            { protocol: 'lorawan', label: 'LoRaWAN ch', color: RadioSpectrumCard.MARKER_COLORS.lorawan },
+            { protocol: 'meshtastic', label: 'Meshtastic', color: RadioSpectrumCard.MARKER_COLORS.meshtastic },
+            { protocol: 'meshcore', label: 'MeshCore', color: RadioSpectrumCard.MARKER_COLORS.meshcore },
+            { protocol: 'pager', label: 'Pager', color: RadioSpectrumCard.MARKER_COLORS.pager },
+        ];
+        legend.innerHTML = entries
+            .filter((e) => !e.protocol || present.has(e.protocol))
+            .map((e) => `<span><i style="background:${e.color}"></i>${e.label}</span>`)
+            .join('');
     }
 
     _buildMarkers(config) {
