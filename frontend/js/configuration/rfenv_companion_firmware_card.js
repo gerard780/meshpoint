@@ -67,12 +67,13 @@ class RfenvCompanionFirmwareConfigCard {
                     <p class="cfg-status" data-firmware-status aria-live="polite"></p>
 
                     <hr style="border:none;border-top:1px solid var(--border,#233049);margin:20px 0 14px;">
-                    <div data-rfenv-live-section hidden>
+                    <div data-rfenv-live-section>
                         <h3 class="cfg-card__title" style="font-size:14px;">Live Device Commands</h3>
                         <p class="cfg-card__hint">
-                            Sent over the currently-connected companion's own USB serial
-                            link (not the Compile/Flash section above) -- only shown while
-                            it's actually connected and running.
+                            Sent as a one-off command straight to the port selected above
+                            under "Device to flash" -- works whether or not that device is
+                            already configured as Meshpoint's companion. Handy right after
+                            flashing a brand new board, before it's registered anywhere.
                         </p>
                         <div class="cfg-mc-identity" data-rfenv-web-password-edit>
                             <label class="cfg-field">
@@ -160,15 +161,14 @@ class RfenvCompanionFirmwareConfigCard {
     render(config) {
         this._portUsage = this._buildPortUsageMap(config);
         this._renderFirmwareDevicePicker();
+    }
 
-        // Live-command controls (WiFi/web password/reboot) only make
-        // sense while a companion is actually connected over serial --
-        // config.rfenv_companion_status comes from GET /api/config
-        // (src/api/routes/config_routes.py's _rfenv_companion_status_entry),
-        // null when no companion is configured/running at all.
-        const liveSection = this._root.querySelector('[data-rfenv-live-section]');
-        const status = config && config.rfenv_companion_status;
-        if (liveSection) liveSection.hidden = !(status && status.connected);
+    /** The port currently selected in the "Device to flash" picker --
+     * shared by the live-command Save/Reboot buttons below, since they
+     * all target that same port directly. */
+    _selectedPort() {
+        const select = this._root.querySelector('[data-firmware-device]');
+        return (select && select.value) || '';
     }
 
     /** Maps every currently-configured serial_port value (across Serial,
@@ -356,9 +356,10 @@ class RfenvCompanionFirmwareConfigCard {
         if (success) await this._api.refresh();
     }
 
-    /** Set the companion's web dashboard login password over its live
-     * serial connection (PUT /api/config/rfenv-companion/web-password)
-     * -- mirrors pocsag_serial_card.js's own identical control. Never
+    /** Set the companion's web dashboard login password over a direct
+     * one-off serial connection to the port selected above (PUT
+     * /api/config/rfenv-companion/web-password) -- mirrors
+     * pocsag_serial_card.js's own identical control. Never
      * cached/echoed anywhere on this side; the field is cleared
      * immediately after a send, success or not. */
     async _saveWebPassword() {
@@ -374,12 +375,18 @@ class RfenvCompanionFirmwareConfigCard {
             status.textContent = 'Enter a password.';
             return;
         }
+        const port = this._selectedPort();
+        if (!port) {
+            status.dataset.kind = 'error';
+            status.textContent = 'Select a device above first.';
+            return;
+        }
 
         button.disabled = true;
         status.dataset.kind = 'pending';
         status.textContent = 'Sending to companion…';
 
-        const result = await this._api.put('/api/config/rfenv-companion/web-password', { password });
+        const result = await this._api.put('/api/config/rfenv-companion/web-password', { port, password });
 
         if (result) {
             status.dataset.kind = 'success';
@@ -412,6 +419,12 @@ class RfenvCompanionFirmwareConfigCard {
             status.textContent = 'Enter an SSID.';
             return;
         }
+        const port = this._selectedPort();
+        if (!port) {
+            status.dataset.kind = 'error';
+            status.textContent = 'Select a device above first.';
+            return;
+        }
 
         const ok = await window.confirmModal({
             label: 'Save new WiFi credentials',
@@ -425,7 +438,7 @@ class RfenvCompanionFirmwareConfigCard {
         status.dataset.kind = 'pending';
         status.textContent = 'Sending to companion…';
 
-        const result = await this._api.put('/api/config/rfenv-companion/wifi', { ssid, password });
+        const result = await this._api.put('/api/config/rfenv-companion/wifi', { port, ssid, password });
 
         if (result) {
             status.dataset.kind = 'success';
@@ -451,7 +464,13 @@ class RfenvCompanionFirmwareConfigCard {
 
     async _rebootCompanion() {
         const status = this._root.querySelector('[data-rfenv-wifi-status]');
-        const result = await this._api.post('/api/config/rfenv-companion/reboot', {});
+        const port = this._selectedPort();
+        if (!port) {
+            status.dataset.kind = 'error';
+            status.textContent = 'Select a device above first.';
+            return;
+        }
+        const result = await this._api.post('/api/config/rfenv-companion/reboot', { port });
         if (result) {
             status.dataset.kind = 'success';
             status.textContent = 'Rebooting…';

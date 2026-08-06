@@ -49,7 +49,6 @@ _channel_hash_resolver = None
 _serial_sources: list = []
 _meshcore_sources: list = []
 _dapnet_sources: list = []
-_rfenv_companion_service = None
 
 
 def init_routes(
@@ -61,10 +60,9 @@ def init_routes(
     serial_sources: list | None = None,
     meshcore_sources: list | None = None,
     dapnet_sources: list | None = None,
-    rfenv_companion_service=None,
 ) -> None:
     global _config, _crypto, _tx_service, _identity, _channel_hash_resolver
-    global _serial_sources, _meshcore_sources, _dapnet_sources, _rfenv_companion_service
+    global _serial_sources, _meshcore_sources, _dapnet_sources
     _config = config
     _crypto = crypto
     _tx_service = tx_service
@@ -73,7 +71,6 @@ def init_routes(
     _serial_sources = serial_sources or []
     _meshcore_sources = meshcore_sources or []
     _dapnet_sources = dapnet_sources or []
-    _rfenv_companion_service = rfenv_companion_service
 
 
 def _refresh_channel_hash_map() -> None:
@@ -227,24 +224,6 @@ def _dapnet_status_entry(src) -> dict:
     }
 
 
-def _rfenv_companion_status_entry(service) -> dict | None:
-    """Minimal live status for the RF Environment companion -- just
-    enough for the Firmware page's live-command controls (WiFi/web
-    password/reboot, rfenv_companion_config_routes.py) to know whether
-    there's actually a serial connection to send a command over. `None`
-    when no companion is configured/running at all (vs. a real dict
-    with connected=False, which never happens today since the service
-    only exists in server.py once `_build_rfenv_companion_service`
-    already confirmed a device is configured -- kept as a dict shape
-    anyway for room to grow, e.g. cached board/band from its own
-    {"cmd":"status"} reply, same as DAPNET's fuller entry above, if
-    that's ever worth adding).
-    """
-    if service is None:
-        return None
-    return {"connected": bool(getattr(service, "is_running", False))}
-
-
 async def _meshcore_companion_status_entry(src) -> dict:
     """Live status for one MeshCore USB companion capture source.
 
@@ -360,7 +339,6 @@ async def get_config(claims: SessionClaims = Depends(require_auth)):
 
     serial_status = [_serial_status_entry(src) for src in _serial_sources]
     dapnet_status = [_dapnet_status_entry(src) for src in _dapnet_sources]
-    rfenv_companion_status = _rfenv_companion_status_entry(_rfenv_companion_service)
     # One entry per configured MeshCore companion (own connection, own
     # radio/device readouts) -- unlike mc_status above, which only ever
     # reflects company[0] (the single companion _tx_service._meshcore_tx
@@ -446,7 +424,6 @@ async def get_config(claims: SessionClaims = Depends(require_auth)):
         "meshcore": mc_status,
         "serial": serial_status,
         "dapnet_status": dapnet_status,
-        "rfenv_companion_status": rfenv_companion_status,
         "duty_cycle": duty_info,
         "presets": all_presets_list(),
         "regions": [

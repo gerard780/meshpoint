@@ -135,6 +135,14 @@ class RfEnvCompanionScanService:
         return self._poll_task is not None and not self._poll_task.done()
 
     @property
+    def port(self) -> Optional[str]:
+        """The serial port this service owns, if any -- lets other
+        modules (e.g. rfenv_companion_config_routes.py) tell whether a
+        port they're about to open one-off ``is`` this service's own,
+        without reaching into ``_port`` directly."""
+        return self._port
+
+    @property
     def scans_run(self) -> int:
         return self._scans_run
 
