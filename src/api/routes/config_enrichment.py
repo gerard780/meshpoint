@@ -39,6 +39,7 @@ def enrich_config_payload(cfg: AppConfig, base: dict) -> dict:
     }
     base["capture"] = {
         "sources": list(capture.sources or []),
+        "rtl_sdr_page_enabled": capture.rtl_sdr_page_enabled,
         "concentrator_spi_device": capture.concentrator_spi_device,
         "meshcore_usb": [
             {

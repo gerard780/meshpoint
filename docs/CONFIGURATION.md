@@ -1320,6 +1320,7 @@ capture:               # what packet sources to read from
     - concentrator
     - meshcore_usb
     # - serial           # optional: Meshtastic node on USB (e.g. 433 MHz)
+  rtl_sdr_page_enabled: true  # shows/hides the RTL-SDR sidebar page; UI-only, no dongle required
   meshcore_usb:          # list — up to 4 companions, each with a label
     - serial_port: null  # null + auto_detect finds /dev/ttyACM*
       baud_rate: 115200
