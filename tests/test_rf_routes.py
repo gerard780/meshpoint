@@ -97,6 +97,38 @@ class TestRfRoutes(unittest.TestCase):
         self.assertEqual(len(hist["levels_dbm"]), 35)
         self.assertGreater(hist["total_samples"], 0)
 
+    def test_companion_scan_service_gets_via_companion_note(self) -> None:
+        # RfEnvCompanionScanService (extra/rfenv_companion) is duck-typed
+        # against the same interface as SpectralScanService -- rf_routes
+        # only distinguishes it via the is_companion marker, to avoid
+        # implying the RAK's own (nonexistent) SX1261 is working.
+        class _FakeCompanionService:
+            is_companion = True
+            hardware_supported = True
+            is_running = True
+            scans_run = 3
+            scans_failed = 0
+
+            def histogram_payload(self):
+                hist = _histogram_result()
+                return {
+                    "levels_dbm": list(hist.levels_dbm),
+                    "counts": list(hist.counts),
+                    "total_samples": hist.total_samples,
+                    "floor_dbm": hist.floor_dbm,
+                    "median_dbm": hist.median_dbm,
+                    "frequency_hz": hist.frequency_hz,
+                    "timestamp": hist.timestamp,
+                }
+
+        client = self._client(scan_service=_FakeCompanionService())
+        body = client.get("/api/rf/status").json()
+        scan = body["spectral_scan"]
+        self.assertIsNotNone(scan["histogram"])
+        self.assertFalse(scan.get("fleet_expected_fallback", False))
+        self.assertIn("companion", scan["message"])
+        self.assertIn("extra/rfenv_companion", scan["message"])
+
 
 if __name__ == "__main__":
     unittest.main()

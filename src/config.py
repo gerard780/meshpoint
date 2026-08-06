@@ -257,6 +257,42 @@ def _coerce_pocsag_serial_devices(value) -> list[PocsagSerialDeviceConfig]:
     return []
 
 
+@dataclass
+class RfEnvCompanionDeviceConfig:
+    """RF Environment companion (``extra/rfenv_companion``) -- one entry per
+    board. A Heltec V3 with its own SX1262, polled over USB serial for a
+    real ambient-RSSI histogram -- the fallback for boards (e.g. RAK2287)
+    confirmed to have no SX1261, where a real hardware spectral scan is
+    otherwise never possible. See ``RfEnvCompanionScanService``.
+    """
+
+    serial_port: Optional[str] = None
+    serial_baud: int = 115200
+    label: str = ""   # shown in logs
+    name: str = ""    # free-text display name
+    nb_scan: int = 512  # samples per scan; lower than the real HAL's 1024
+                         # default since this device physically retunes and
+                         # samples over a serial round-trip, not near-instant
+                         # in-silicon sampling
+
+
+_RFENV_COMPANION_DEVICE_FIELDS: frozenset[str] = frozenset(
+    {"serial_port", "serial_baud", "label", "name", "nb_scan"}
+)
+
+
+def _coerce_rfenv_companion_devices(value) -> list[RfEnvCompanionDeviceConfig]:
+    """Parse the multi-device ``capture.rfenv_companion`` list (same shape as ``pocsag_serial``)."""
+    def _from_dict(d: dict) -> RfEnvCompanionDeviceConfig:
+        return RfEnvCompanionDeviceConfig(
+            **{k: v for k, v in d.items() if k in _RFENV_COMPANION_DEVICE_FIELDS}
+        )
+
+    if isinstance(value, list):
+        return [_from_dict(d) for d in value if isinstance(d, dict)]
+    return []
+
+
 _REPEATER_FIELDS = {"key", "password", "name"}
 
 
@@ -296,6 +332,7 @@ class CaptureConfig:
     serial_baud: int = 115200
     serial: list[SerialDeviceConfig] = field(default_factory=list)
     pocsag_serial: list[PocsagSerialDeviceConfig] = field(default_factory=list)
+    rfenv_companion: list[RfEnvCompanionDeviceConfig] = field(default_factory=list)
     concentrator_spi_device: str = "/dev/spidev0.0"
     meshcore_usb: list[MeshcoreUsbConfig] = field(
         default_factory=lambda: [MeshcoreUsbConfig()]
@@ -766,6 +803,10 @@ def _apply_yaml(cfg: AppConfig, path: Path) -> None:
     # the generic merge so _merge_dataclass doesn't store raw dicts.
     if isinstance(cap_raw, dict) and "pocsag_serial" in cap_raw:
         cfg.capture.pocsag_serial = _coerce_pocsag_serial_devices(cap_raw.pop("pocsag_serial"))
+    # rfenv_companion is a list-of-dicts, same shape as pocsag_serial; pop
+    # it before the generic merge so _merge_dataclass doesn't store raw dicts.
+    if isinstance(cap_raw, dict) and "rfenv_companion" in cap_raw:
+        cfg.capture.rfenv_companion = _coerce_rfenv_companion_devices(cap_raw.pop("rfenv_companion"))
     # repeater_poll.repeaters is a list-of-dicts; pop it before the
     # generic merge so _merge_dataclass doesn't store raw dicts.
     rp_raw = raw.get("repeater_poll")

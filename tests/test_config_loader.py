@@ -17,8 +17,10 @@ from pathlib import Path
 from src.config import (
     AppConfig,
     CaptureConfig,
+    RfEnvCompanionDeviceConfig,
     SerialDeviceConfig,
     _apply_yaml,
+    _coerce_rfenv_companion_devices,
     _coerce_serial_devices,
     _collect_unknown_keys,
     load_config,
@@ -195,6 +197,62 @@ class SerialDeviceConfigTest(unittest.TestCase):
         _apply_yaml(cfg, path)
         self.assertEqual(cfg.capture.serial, [])
         self.assertEqual(cfg.capture.serial_port, "/dev/ttyUSB0")
+
+
+class RfEnvCompanionDeviceConfigTest(unittest.TestCase):
+    """RF Environment companion (extra/rfenv_companion): opt-in
+    capture.rfenv_companion list, same shape as capture.pocsag_serial."""
+
+    def _write(self, text: str) -> Path:
+        tmp = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".yaml", delete=False, encoding="utf-8"
+        )
+        tmp.write(text)
+        tmp.close()
+        path = Path(tmp.name)
+        self.addCleanup(lambda: path.unlink(missing_ok=True))
+        return path
+
+    def test_default_is_empty_list(self):
+        cap = CaptureConfig()
+        self.assertEqual(cap.rfenv_companion, [])
+
+    def test_device_config_defaults(self):
+        dev = RfEnvCompanionDeviceConfig()
+        self.assertIsNone(dev.serial_port)
+        self.assertEqual(dev.serial_baud, 115200)
+        self.assertEqual(dev.label, "")
+        self.assertEqual(dev.nb_scan, 512)
+
+    def test_coerce_parses_list_of_dicts(self):
+        devices = _coerce_rfenv_companion_devices([
+            {"serial_port": "/dev/ttyUSB2", "label": "rfenv", "nb_scan": 256},
+        ])
+        self.assertEqual(len(devices), 1)
+        self.assertEqual(devices[0].serial_port, "/dev/ttyUSB2")
+        self.assertEqual(devices[0].label, "rfenv")
+        self.assertEqual(devices[0].nb_scan, 256)
+
+    def test_coerce_ignores_non_list_value(self):
+        self.assertEqual(
+            _coerce_rfenv_companion_devices({"serial_port": "/dev/ttyUSB2"}), [],
+        )
+        self.assertEqual(_coerce_rfenv_companion_devices(None), [])
+
+    def test_apply_yaml_populates_rfenv_companion_list_and_pops_key(self):
+        cfg = AppConfig()
+        path = self._write(
+            "capture:\n"
+            "  rfenv_companion:\n"
+            "    - serial_port: /dev/ttyUSB2\n"
+            "      label: rfenv\n"
+            "      nb_scan: 300\n"
+        )
+        with self.assertNoLogs("src.config", level="WARNING"):
+            _apply_yaml(cfg, path)
+        self.assertEqual(len(cfg.capture.rfenv_companion), 1)
+        self.assertEqual(cfg.capture.rfenv_companion[0].serial_port, "/dev/ttyUSB2")
+        self.assertEqual(cfg.capture.rfenv_companion[0].nb_scan, 300)
 
 
 class LoadConfigIntegrationTest(unittest.TestCase):

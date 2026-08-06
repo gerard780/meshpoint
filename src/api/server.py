@@ -104,6 +104,7 @@ from src.models.packet import Packet
 from src.storage.message_repository import MessageRepository
 from src.api.telemetry.noise_floor import NoiseFloorTracker
 from src.api.telemetry.spectral_scan_service import SpectralScanService
+from src.api.telemetry.rfenv_companion_scan_service import RfEnvCompanionScanService
 from src.transmit.broadcast_interval import clamp_interval_minutes
 from src.transmit.nodeinfo_broadcaster import NodeInfoBroadcaster
 from src.transmit.position_broadcaster import PositionBroadcaster
@@ -124,6 +125,7 @@ position_broadcaster: PositionBroadcaster | None = None
 noise_floor_tracker = NoiseFloorTracker()
 _noise_floor_emitter_task = None
 _spectral_scan_service: SpectralScanService | None = None
+_rfenv_companion_service: RfEnvCompanionScanService | None = None
 _rtl_listener: RtlListener | None = None
 _p2000_listener: PagerListener | None = None
 _pagers_listener: PagerListener | None = None
@@ -269,13 +271,24 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             _noise_floor_emitter_loop(noise_floor_tracker, ws_manager)
         )
 
-        global _spectral_scan_service
+        global _spectral_scan_service, _rfenv_companion_service
         _spectral_scan_service = _build_spectral_scan_service(
             pipeline, config, noise_floor_tracker,
         )
         if _spectral_scan_service is not None:
             await _spectral_scan_service.start()
         spectrum_routes.init_routes(_spectral_scan_service)
+
+        # RF Environment companion (extra/rfenv_companion) -- only
+        # constructed when the real HAL-backed service above is
+        # unavailable. It's a fallback for boards with no working
+        # SX1261, not a competitor to real hardware when one exists.
+        if _spectral_scan_service is None:
+            _rfenv_companion_service = _build_rfenv_companion_service(
+                config, noise_floor_tracker,
+            )
+            if _rfenv_companion_service is not None:
+                await _rfenv_companion_service.start()
 
         global _fan_controller_task, _fan_controller
         if config.fan.enabled:
@@ -388,6 +401,8 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             await _adsb_listener.stop()
         if _spectral_scan_service is not None:
             await _spectral_scan_service.stop()
+        if _rfenv_companion_service is not None:
+            await _rfenv_companion_service.stop()
         if _noise_floor_emitter_task is not None:
             _noise_floor_emitter_task.cancel()
             try:
@@ -1301,6 +1316,47 @@ def _build_spectral_scan_service(
     )
 
 
+def _build_rfenv_companion_service(
+    config: AppConfig,
+    tracker: NoiseFloorTracker,
+) -> RfEnvCompanionScanService | None:
+    """Build the RF Environment companion poller if opted in + configured.
+
+    Only ever called when the real ``_build_spectral_scan_service`` above
+    returned None -- this is the fallback for boards with no working
+    SX1261 (see rfenv_companion_scan_service.py's own module docstring),
+    not a competitor to real hardware.
+    """
+    if "rfenv_companion" not in config.capture.sources:
+        return None
+    interval = config.radio.spectral_scan_interval_seconds
+    if interval is None or interval <= 0:
+        return None
+    devices = config.capture.rfenv_companion
+    if not devices:
+        return None
+    if len(devices) > 1:
+        logger.warning(
+            "capture.rfenv_companion: %d devices configured, only the "
+            "first (%s) is used", len(devices), devices[0].serial_port,
+        )
+    device = devices[0]
+    freq_mhz = config.radio.frequency_mhz
+    if freq_mhz is None:
+        logger.warning("RF Environment companion: no resolved radio.frequency_mhz; skipping")
+        return None
+    return RfEnvCompanionScanService(
+        tracker=tracker,
+        serial_port=device.serial_port,
+        serial_baud=device.serial_baud,
+        frequency_hz=int(freq_mhz * 1_000_000),
+        bandwidth_khz=config.radio.bandwidth_khz,
+        nb_scan=device.nb_scan,
+        interval_seconds=float(interval),
+        label=device.label,
+    )
+
+
 def _sweep_frequencies_hz(config: AppConfig, step_hz: int = 100_000) -> list[int]:
     """Frequency steps covering the region band for the spectrum sweep."""
     from src.hal.concentrator_config import ConcentratorChannelPlan
@@ -1713,10 +1769,10 @@ def _init_routes(
         capture_coordinator=coord.capture_coordinator,
         region=config.radio.region or "US",
     )
-    global _spectral_scan_service
+    global _spectral_scan_service, _rfenv_companion_service
     rf_routes.init_routes(
         noise_floor_tracker,
-        _spectral_scan_service,
+        _spectral_scan_service or _rfenv_companion_service,
         config,
         coord.stray_frame_log,
     )

@@ -11,6 +11,7 @@ from src.decode.stray_frame_log import StrayFrameLog
 
 if TYPE_CHECKING:
     from src.api.telemetry.spectral_scan_service import SpectralScanService
+    from src.api.telemetry.rfenv_companion_scan_service import RfEnvCompanionScanService
 
 router = APIRouter(prefix="/api/rf", tags=["rf"])
 
@@ -29,14 +30,14 @@ _FLEET_SPECTRAL_SCAN_NOTE = (
 )
 
 _tracker: NoiseFloorTracker | None = None
-_scan_service: SpectralScanService | None = None
+_scan_service: SpectralScanService | RfEnvCompanionScanService | None = None
 _config: AppConfig | None = None
 _stray_frame_log: StrayFrameLog | None = None
 
 
 def init_routes(
     tracker: NoiseFloorTracker,
-    scan_service: SpectralScanService | None,
+    scan_service: SpectralScanService | RfEnvCompanionScanService | None,
     config: AppConfig,
     stray_frame_log: StrayFrameLog | None = None,
 ) -> None:
@@ -108,7 +109,10 @@ def _spectral_status() -> dict:
         "scans_run": _scan_service.scans_run,
         "scans_failed": _scan_service.scans_failed,
         "histogram": _scan_service.histogram_payload(),
-        "message": None,
+        "message": (
+            "Histogram from the RF Environment companion "
+            "(extra/rfenv_companion), not the concentrator's own hardware."
+        ) if getattr(_scan_service, "is_companion", False) else None,
     }
 
 

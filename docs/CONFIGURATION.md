@@ -128,6 +128,31 @@ If your `libloragw` build does not expose the spectral scan symbols at all (olde
 
 **Band spectrum sweep.** With spectral scan enabled, the service also sweeps the whole region band (one scan per 100 kHz step; EU868 = 71 points in a few seconds) every `spectrum_sweep_interval_seconds` (default 300) and draws the result as the **Band Spectrum** card on the RF Environment page — median and peak level per step with the channel positions overlaid. Set it to `0` to disable automatic sweeps; the card's "Sweep now" button (admin) still works. A full sweep costs roughly 4 s of scan time per interval (~1% of receive time at the default cadence).
 
+### RF Environment companion — for boards with no SX1261 (extra/rfenv_companion)
+
+RAK2287 (see the capability matrix above) has **no SX1261 at all** — no config change makes a real hardware spectral scan possible on that board. `extra/rfenv_companion` is a Heltec V3 with its own independent SX1262 radio and antenna that samples real ambient RSSI and reports a histogram back to Meshpoint over USB serial, so the RF Environment page's histogram and noise-floor card can show real hardware-measured data again even on hardware that will never grow a working SX1261.
+
+```yaml
+capture:
+  sources:
+    - rfenv_companion
+  rfenv_companion:
+    - serial_port: "/dev/ttyUSB3"
+      serial_baud: 115200
+      label: "rfenv"
+      name: "RF Env companion"
+      nb_scan: 512          # RSSI samples per scan; lower than the real
+                             # HAL's 1024 default since this board
+                             # physically retunes+samples over a serial
+                             # round-trip, not near-instant in-silicon
+```
+
+Only ever active when the real HAL-backed spectral scan is unavailable (`_build_spectral_scan_service` returned `None`) — it's a fallback, not a competitor to real hardware when the SX1261 genuinely works (e.g. SenseCap M1). Polls on the same `radio.spectral_scan_interval_seconds` cadence as the real scan (reused as-is, no separate interval to configure) and the same `radio.frequency_mhz` anchor frequency. Implemented by `RfEnvCompanionScanService` (`src/api/telemetry/rfenv_companion_scan_service.py`), which exposes the exact same interface `rf_routes.py` already expects from the real `SpectralScanService` — so the RF Environment page needs zero changes to render it; the message field just adds a note that the histogram came from the companion, not the concentrator's own hardware.
+
+Flash `extra/rfenv_companion/rfenv_companion.ino` (RadioLib 7.7.1, same board/pins already proven by `extra/pager_client`) — no WiFi/secrets needed, it's polled directly over the USB serial connection. The board's own OLED shows a status screen (last poll time) and, independent of any USB/Meshpoint connection at all, a live band-scan view (hold the PRG button to switch) — useful as a standalone handheld RF scanner even when not plugged into the Pi.
+
+Config-editor UI (a Configuration card + persisted `PUT` route, matching the POCSAG companion's own) is not yet built — this is currently YAML-hand-edit only.
+
 ### Standard Meshtastic Presets
 
 To match a Meshtastic preset, set `spreading_factor` and `bandwidth_khz` together:
@@ -894,7 +919,8 @@ Changes take effect on service restart. If the configured address can't be used 
 Open **RF Environment** in the sidebar for a full-page noise-floor sparkline, calibration state, and the latest SX1302 spectral-scan histogram. Data comes from `GET /api/rf/status` (same sources as the sidebar telemetry rail).
 
 - **Live scan** — hardware spectral scan on the tuned channel (`radio.spectral_scan_interval_seconds` > 0 and SX1261/HAL support present)
-- **Packet fallback** — rolling minimum of `RSSI − SNR` when scan is disabled or unavailable
+- **RF Environment companion** — real ambient RSSI from a Heltec V3 board (`extra/rfenv_companion`), automatically used instead of packet fallback on boards with no SX1261 (see below)
+- **Packet fallback** — rolling minimum of `RSSI − SNR` when scan is disabled and no companion is configured
 - Set `radio.spectral_scan_interval_seconds: 0` in **Configuration → Radio** to disable hardware scan; the tab shows a clear message and uses packet fallback only
 
 ---

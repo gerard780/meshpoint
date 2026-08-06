@@ -39,7 +39,7 @@ from datetime import datetime, timezone
 from typing import Optional, Protocol
 
 from src.api.telemetry.noise_floor import NoiseFloorTracker
-from src.hal.sx1302_spectral_scan import SpectralScanResult
+from src.hal.sx1302_spectral_scan import SpectralScanResult, spectral_scan_result_payload
 
 logger = logging.getLogger(__name__)
 
@@ -135,18 +135,7 @@ class SpectralScanService:
 
     def histogram_payload(self) -> dict | None:
         """Serialise the most recent scan histogram for the RF dashboard."""
-        result = self._last_result
-        if result is None:
-            return None
-        return {
-            "levels_dbm": list(result.levels_dbm),
-            "counts": list(result.counts),
-            "total_samples": result.total_samples,
-            "floor_dbm": result.floor_dbm,
-            "median_dbm": result.median_dbm,
-            "frequency_hz": result.frequency_hz,
-            "timestamp": result.timestamp,
-        }
+        return spectral_scan_result_payload(self._last_result)
 
     async def start(self) -> None:
         """Begin the periodic-scan loop.

@@ -108,6 +108,24 @@ class SpectralScanResult:
         return self.percentile(10.0)
 
 
+def spectral_scan_result_payload(result: Optional["SpectralScanResult"]) -> Optional[dict]:
+    """Serialise a scan result for the RF dashboard API -- shared by the real
+    HAL-backed ``SpectralScanService`` and any RSSI-histogram-producing
+    companion (e.g. ``RfEnvCompanionScanService``) that builds its own
+    ``SpectralScanResult`` from a non-HAL source."""
+    if result is None:
+        return None
+    return {
+        "levels_dbm": list(result.levels_dbm),
+        "counts": list(result.counts),
+        "total_samples": result.total_samples,
+        "floor_dbm": result.floor_dbm,
+        "median_dbm": result.median_dbm,
+        "frequency_hz": result.frequency_hz,
+        "timestamp": result.timestamp,
+    }
+
+
 class SX1302SpectralScan:
     """Run a single spectral scan via the loaded libloragw.
 
