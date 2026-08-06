@@ -93,6 +93,12 @@ echo "MeshCore/Meshtastic flashing uses prebuilt releases instead and"
 echo "needs none of this. Skip it now and re-run this installer later"
 echo "(without --skip-arduino) to add it whenever you actually need it."
 echo ""
+echo "On a RAK2287 (RAK V2) board: that concentrator has no SX1261, so"
+echo "the RF Environment page has nothing to show on its own -- a"
+echo "separate Heltec V3 flashed as an RF Environment companion (one"
+echo "of the three cards above) is the only way to get it. Say yes"
+echo "here if you want that page working."
+echo ""
 
 INSTALL_ARDUINO=1
 for arg in "$@"; do
