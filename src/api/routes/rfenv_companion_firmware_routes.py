@@ -57,8 +57,8 @@ _BOARD_LABEL = "Heltec V3"
 # which macros exist is auto-discovered from the sketch itself, but the
 # human label can't be derived from the macro name alone.
 _KNOWN_BANDS: dict[str, dict[str, str]] = {
-    "BAND_EU868": {"label": "868 MHz (EU868, feeds Meshpoint's RF Environment)"},
-    "BAND_70CM": {"label": "430-440 MHz (70cm amateur, standalone scanner only)"},
+    "BAND_EU868": {"label": "868 MHz (EU868)"},
+    "BAND_70CM": {"label": "430-440 MHz (70cm)"},
 }
 
 # Matches a whole-line `#define BAND_xxx` or `//#define BAND_xxx` --

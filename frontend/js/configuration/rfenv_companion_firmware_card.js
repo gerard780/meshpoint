@@ -39,7 +39,7 @@ class RfenvCompanionFirmwareConfigCard {
                             RF Environment page.
                         </p>
                     </header>
-                    <label class="cfg-field cfg-field--narrow">
+                    <label class="cfg-field cfg-firmware-field">
                         <span class="cfg-field__label">Band</span>
                         <select class="cfg-field__input" data-firmware-band></select>
                     </label>
