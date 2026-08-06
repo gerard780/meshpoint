@@ -30,11 +30,25 @@ CLI_SCRIPT="scripts/meshpoint"
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
 NC='\033[0m'
 
 info()  { echo -e "${GREEN}[INFO]${NC}  $*"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 fail()  { echo -e "${RED}[FAIL]${NC}  $*"; exit 1; }
+
+# ── Welcome ─────────────────────────────────────────────────────────
+
+echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${CYAN}${BOLD}  MESHPOINT INSTALLER${NC}"
+echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo ""
+echo "Welcome! This sets up a fresh Raspberry Pi for Meshpoint: system"
+echo "packages, SPI/UART/GPS config, the SX1302 HAL, a Python venv, and"
+echo "the systemd service. Expect this to take 15-30 minutes depending"
+echo "on your Pi and network connection."
+echo ""
 
 # ── Pre-flight checks ──────────────────────────────────────────────
 
@@ -44,6 +58,20 @@ fi
 
 if ! grep -qi "raspberry\|raspbian\|debian" /etc/os-release 2>/dev/null; then
     warn "This doesn't look like Raspberry Pi OS. Proceeding anyway."
+fi
+
+# Informational -- not a hard requirement, just worth knowing before a
+# multi-GB run (apt packages, the SX1302 HAL build, a Python venv, and
+# optionally the arduino-cli/ESP32 toolchain below) starts on what might
+# be a small SD card.
+FREE_ROOT_GB="$(df -Pk / 2>/dev/null | awk 'NR==2 { printf "%.1f", $4/1024/1024 }')"
+if [ -n "$FREE_ROOT_GB" ]; then
+    info "Free space on /: ${FREE_ROOT_GB} GB"
+    if awk -v f="$FREE_ROOT_GB" 'BEGIN { exit !(f < 4) }'; then
+        warn "That's getting tight -- the HAL build, venv, and (if installed) the arduino-cli/ESP32 toolchain need real room. A larger SD card is worth considering; answering 'n' below saves roughly 300-500 MB if you don't need POCSAG/Pager/RF Environment firmware flashing."
+    fi
+else
+    warn "Could not determine free disk space (df failed) -- proceeding anyway."
 fi
 
 # The arduino-cli/ESP32 toolchain (section 13 below) is only needed for
@@ -56,6 +84,16 @@ fi
 # prompt nobody's watching for. Every step in that section is
 # idempotent, so re-running this installer later (without
 # --skip-arduino) adds it at any time without redoing anything else.
+echo ""
+echo "One optional piece before we start: Configuration -> Firmware's"
+echo "POCSAG, Pager, and RF Environment companion cards compile their"
+echo "own firmware from source via arduino-cli + the ESP32 toolchain --"
+echo "a genuinely large (few hundred MB), multi-minute download."
+echo "MeshCore/Meshtastic flashing uses prebuilt releases instead and"
+echo "needs none of this. Skip it now and re-run this installer later"
+echo "(without --skip-arduino) to add it whenever you actually need it."
+echo ""
+
 INSTALL_ARDUINO=1
 for arg in "$@"; do
     case "$arg" in
@@ -63,13 +101,14 @@ for arg in "$@"; do
     esac
 done
 if [ "$INSTALL_ARDUINO" = "1" ] && [ -t 0 ]; then
-    read -r -p "Install the arduino-cli/ESP32 toolchain for POCSAG/Pager/RF Environment firmware Compile+Flash? [y/N] " arduino_reply || arduino_reply=""
+    read -r -p "Install the arduino-cli/ESP32 toolchain now? [y/N] " arduino_reply || arduino_reply=""
     case "$arduino_reply" in
         [yY]*) INSTALL_ARDUINO=1 ;;
         *) INSTALL_ARDUINO=0 ;;
     esac
 fi
 
+echo ""
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 info "Source directory: ${SCRIPT_DIR}"
 
