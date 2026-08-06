@@ -68,35 +68,63 @@
   behaviour as every other companion's serial parser in this repo.
 
   ---------------------------------------------------------------------
-  OLED (128x64 SSD1306, onboard). PRG button (GPIO0, same physical
-  button pager_client.ino uses) drives three screens -- everything
-  here works with no USB/Meshpoint connection at all, so the board is
-  a genuinely useful standalone RF tool on its own:
+  OLED (128x64 SSD1306, onboard). Every screen opens with a one-line
+  header (STATUS / LIVE SCAN / BAND SPECTRUM / CHANNEL HISTOGRAM,
+  drawHeader()) naming itself after the matching RF Environment
+  dashboard card, so it's unambiguous which screen/data you're looking
+  at without needing to read the whole layout. PRG button (GPIO0, same
+  physical button pager_client.ino uses) drives four screens --
+  everything here works with no USB/Meshpoint connection at all, so
+  the board is a genuinely useful standalone RF tool on its own:
 
-    STATUS         -- board name, how long ago Meshpoint last polled
-                      (or "waiting for Meshpoint..." before the first
-                      poll). Short-press cycles to LIVE BAND SCAN.
-    LIVE BAND SCAN -- continuously hops across BAND_STEPS fixed
-                      frequencies spanning BAND_START_MHZ..BAND_END_MHZ
-                      (compile-time, defaults to EU868) and renders a
-                      live bar-per-frequency RSSI view. Short-press
-                      returns to STATUS.
-    LOCAL SCAN     -- hold the button (>= LONG_PRESS_MS, works from
-                      either screen above) to run the exact same
-                      35-bin histogram scan Meshpoint itself requests
-                      over serial ({"cmd":"scan"}), at whatever
-                      frequency Meshpoint last polled (or
-                      DEFAULT_FREQ_MHZ before the first poll), and
-                      render it right here -- floor/median computed
-                      the same way (percentileDbm(), mirroring
-                      SpectralScanResult.percentile()) so this matches
-                      what the RF Environment page would show for the
-                      same scan. Short-press returns to STATUS.
+    STATUS            -- how long ago Meshpoint last polled (or
+                          "waiting for Meshpoint..." before the first
+                          poll). Short-press cycles to LIVE SCAN.
+    LIVE SCAN         -- continuously hops across BAND_STEPS fixed
+                          frequencies spanning BAND_START_MHZ..BAND_END_MHZ
+                          (compile-time, defaults to EU868) and renders
+                          a live bar-per-frequency RSSI view (one raw
+                          instantaneous sample per hop). Short-press
+                          advances to BAND SPECTRUM.
+    BAND SPECTRUM     -- short-press runs a fresh discrete sweep across
+                          the same BAND_STEPS frequency plan (a handful
+                          of samples per point via runHistogramScan(),
+                          not one raw sample like LIVE SCAN), and draws
+                          median (solid line) + p95/peak (sparse dots)
+                          -- the on-device equivalent of the dashboard's
+                          Band Spectrum card, same math as the
+                          {"cmd":"sweep"} handler below just local and
+                          synchronous. Short-press returns to STATUS.
+    CHANNEL HISTOGRAM -- hold the button (>= LONG_PRESS_MS, works from
+                          any of the three screens above) to run the
+                          exact same 35-bin histogram scan Meshpoint
+                          itself requests over serial ({"cmd":"scan"}),
+                          at whatever frequency Meshpoint last polled
+                          (or DEFAULT_FREQ_MHZ before the first poll),
+                          and render it right here -- floor/median
+                          computed the same way (percentileDbm(),
+                          mirroring SpectralScanResult.percentile()) so
+                          this matches what the RF Environment page
+                          would show for the same scan. Short-press
+                          returns to STATUS.
 
-  A serial scan request from Meshpoint briefly interrupts whichever
-  screen is active to service it (same "scan pauses everything else
-  for its short window" tradeoff the real HAL's own docstring already
-  documents), then that screen resumes/redraws normally afterward.
+  Auto-blanks after DISPLAY_TIMEOUT_MS (default 5s) of no button
+  activity -- burn-in protection, same wakeDisplay()/SSD1306_DISPLAYOFF
+  pattern already proven in extra/pager_client.ino and
+  extra/pocsag_companion.ino. Any button press wakes the panel AND
+  performs its normal action in the same press (no separate "just
+  wake" gesture) -- wakeDisplay() runs at the top of drawCurrentScreen(),
+  which every button-triggered path already calls. Deliberately NOT
+  reset by LIVE SCAN's own continuous background redraw (stepLiveScan()
+  calls drawLiveScanScreen() directly, bypassing drawCurrentScreen()) --
+  otherwise that screen's animation would keep the panel on forever
+  regardless of whether anyone's actually there watching it.
+
+  A serial scan/sweep request from Meshpoint briefly interrupts
+  whichever screen is active to service it (same "scan pauses
+  everything else for its short window" tradeoff the real HAL's own
+  docstring already documents), then that screen resumes/redraws
+  normally afterward.
 
   Hardware pins are the exact ones already verified on this same board
   in extra/pager_client/pager_client.ino -- copied, not re-derived.
@@ -180,6 +208,34 @@ static float bandRssi[BAND_STEPS];
 static int bandIndex = 0;
 static bool bandRssiValid[BAND_STEPS] = {false};
 
+// ---------- Local band spectrum (short-press screen) ----------
+// Same BAND_STEPS frequency plan as the live scan above, but a discrete
+// snapshot with median/p95 per point (same math/spirit as the real
+// Band Spectrum card and the {"cmd":"sweep"} handler) instead of one
+// raw instantaneous sample per hop -- run fresh each time this screen
+// is entered, not continuously.
+#define BAND_SPECTRUM_NB_SCAN_PER_POINT 8
+static float bandSpectrumMedian[BAND_STEPS];
+static float bandSpectrumP95[BAND_STEPS];
+static bool hasBandSpectrum = false;
+
+// ---------- Display auto-blank (burn-in protection) ----------
+// Same pattern already proven in extra/pager_client.ino and
+// extra/pocsag_companion.ino (there: 10s default; shorter here since
+// this board mostly just sits polling in the background, no one's
+// meant to be reading it continuously).
+#define DISPLAY_TIMEOUT_MS 5000
+static bool displayOn = true;
+static uint32_t lastDisplayActivity = 0;
+
+void wakeDisplay() {
+  if (!displayOn) {
+    display.ssd1306_command(SSD1306_DISPLAYON);
+    displayOn = true;
+  }
+  lastDisplayActivity = millis();
+}
+
 // ---------- Standalone local histogram scan (button long-press) ----------
 // Same 35-bin scan Meshpoint itself requests over serial ({"cmd":"scan"}),
 // just triggered locally and rendered on-device -- a user standing next
@@ -192,7 +248,7 @@ static bool hasLocalHist = false;
 // falls back to DEFAULT_FREQ_MHZ before the first serial poll ever arrives.
 static uint32_t lastRequestedFrequencyHz = 0;
 
-enum ScreenMode { SCREEN_STATUS, SCREEN_LIVE_SCAN, SCREEN_LOCAL_HIST };
+enum ScreenMode { SCREEN_STATUS, SCREEN_LIVE_SCAN, SCREEN_BAND_SPECTRUM, SCREEN_LOCAL_HIST };
 static ScreenMode currentScreen = SCREEN_STATUS;
 
 static uint32_t lastPollAtMs = 0;
@@ -205,8 +261,11 @@ static bool everPolled = false;
 void drawCurrentScreen();
 void drawStatusScreen();
 void drawLiveScanScreen();
+void drawBandSpectrumScreen();
 void drawLocalHistScreen();
 bool runHistogramScan(uint32_t frequencyHz, uint16_t nbScan, uint16_t *counts);
+float percentileDbm(uint16_t *counts, float p);
+void runBandSpectrumSweep();
 
 // ---------- Button (short-press cycles screens, long-press = local scan) ----------
 static bool lastButtonReading = HIGH;
@@ -229,6 +288,25 @@ void runLocalHistScan() {
   drawCurrentScreen();
 }
 
+// Sweeps the same BAND_STEPS frequency plan the live-scan view uses,
+// but with a small per-point histogram (BAND_SPECTRUM_NB_SCAN_PER_POINT)
+// instead of one raw sample, so median/p95 are real statistics rather
+// than a single noisy reading -- same idea as handleSweepCommand(),
+// just local and synchronous (~32 * ~20ms =~ 0.6s, fine to block on
+// button release the same way the local histogram scan already does).
+void runBandSpectrumSweep() {
+  static uint16_t counts[NB_LEVELS];
+  for (int i = 0; i < BAND_STEPS; i++) {
+    float freqMHz = BAND_START_MHZ + (BAND_END_MHZ - BAND_START_MHZ) * i / (float)(BAND_STEPS - 1);
+    uint32_t freqHz = (uint32_t)(freqMHz * 1e6f);
+    if (runHistogramScan(freqHz, BAND_SPECTRUM_NB_SCAN_PER_POINT, counts)) {
+      bandSpectrumMedian[i] = percentileDbm(counts, 50.0f);
+      bandSpectrumP95[i] = percentileDbm(counts, 95.0f);
+    }
+  }
+  hasBandSpectrum = true;
+}
+
 void checkButton() {
   bool reading = digitalRead(BUTTON_GPIO);
   if (reading != lastButtonReading) {
@@ -241,10 +319,18 @@ void checkButton() {
       longPressFired = false;
     } else { // released
       if (!longPressFired) {
-        // Short press -- cycle STATUS <-> LIVE_SCAN. From SCREEN_LOCAL_HIST
-        // (only ever entered via a long press) a short press returns to
-        // STATUS too, same as any other non-STATUS screen.
-        currentScreen = (currentScreen == SCREEN_STATUS) ? SCREEN_LIVE_SCAN : SCREEN_STATUS;
+        // Short press -- cycle STATUS -> LIVE_SCAN -> BAND_SPECTRUM ->
+        // STATUS. From SCREEN_LOCAL_HIST (only ever entered via a long
+        // press) a short press also returns to STATUS, same as any
+        // other non-cycle screen -- it isn't part of the cycle itself.
+        if (currentScreen == SCREEN_STATUS) {
+          currentScreen = SCREEN_LIVE_SCAN;
+        } else if (currentScreen == SCREEN_LIVE_SCAN) {
+          currentScreen = SCREEN_BAND_SPECTRUM;
+          runBandSpectrumSweep(); // fresh snapshot every time this screen is entered
+        } else {
+          currentScreen = SCREEN_STATUS;
+        }
         drawCurrentScreen();
       }
     }
@@ -446,12 +532,20 @@ void checkSerialInput() {
 
 // ---------- Display ----------
 
-void drawStatusScreen() {
-  display.clearDisplay();
+// Consistent top bar for every screen -- same title wording as the
+// matching dashboard card ("CHANNEL HISTOGRAM", "BAND SPECTRUM", ...)
+// so at a glance you know which screen you're on and what it maps to
+// on the RF Environment page.
+void drawHeader(const char *title) {
   display.setTextSize(1);
   display.setCursor(0, 0);
-  display.println("RF Env Companion");
+  display.println(title);
   display.drawFastHLine(0, 9, OLED_WIDTH, SSD1306_WHITE);
+}
+
+void drawStatusScreen() {
+  display.clearDisplay();
+  drawHeader("STATUS");
 
   display.setCursor(0, 16);
   if (!everPolled) {
@@ -465,7 +559,7 @@ void drawStatusScreen() {
   }
 
   display.setCursor(0, 40);
-  display.print("Press: live view");
+  display.print("Press: cycle views");
   display.setCursor(0, 56);
   display.print("Hold: scan now");
   display.display();
@@ -473,14 +567,7 @@ void drawStatusScreen() {
 
 void drawLiveScanScreen() {
   display.clearDisplay();
-  display.setTextSize(1);
-  display.setCursor(0, 0);
-  display.print("Live scan ");
-  display.print((int)BAND_START_MHZ);
-  display.print("-");
-  display.print((int)BAND_END_MHZ);
-  display.println(" MHz");
-  display.drawFastHLine(0, 9, OLED_WIDTH, SSD1306_WHITE);
+  drawHeader("LIVE SCAN");
 
   // Bars span the region below the header down to just above the
   // bottom hint line. Each sample is clamped into the same dBm range
@@ -502,7 +589,55 @@ void drawLiveScanScreen() {
   }
 
   display.setCursor(0, OLED_HEIGHT - 8);
-  display.print("Hold: status");
+  display.print("Press: next  Hold: scan");
+  display.display();
+}
+
+// dBm -> pixel-row helper shared by the band-spectrum chart's two series.
+int bandSpectrumY(float dbm, int bottomY, int chartH) {
+  const float rangeDbm = (float)(NB_LEVELS * LEVEL_STEP_DBM);
+  float norm = (dbm - LEVEL_MIN_DBM) / rangeDbm;
+  if (norm < 0) norm = 0;
+  if (norm > 1) norm = 1;
+  return bottomY - (int)(norm * chartH);
+}
+
+// Median (solid connected line) + p95/peak (sparse dots, visually
+// distinct from the median line on a 1-bit display) across the same
+// BAND_STEPS frequency plan the live-scan view uses -- the on-device
+// equivalent of the dashboard's Band Spectrum card.
+void drawBandSpectrumScreen() {
+  display.clearDisplay();
+  drawHeader("BAND SPECTRUM");
+
+  if (!hasBandSpectrum) {
+    display.setCursor(0, 20);
+    display.println("Sweeping...");
+    display.display();
+    return;
+  }
+
+  const int topY = 11;
+  const int bottomY = OLED_HEIGHT - 9;
+  const int chartH = bottomY - topY;
+  const int colWidth = OLED_WIDTH / BAND_STEPS;
+
+  int prevX = -1, prevY = 0;
+  for (int i = 0; i < BAND_STEPS; i++) {
+    int x = i * colWidth + colWidth / 2;
+    int yMed = bandSpectrumY(bandSpectrumMedian[i], bottomY, chartH);
+    if (prevX >= 0) {
+      display.drawLine(prevX, prevY, x, yMed, SSD1306_WHITE);
+    }
+    prevX = x;
+    prevY = yMed;
+    if (i % 2 == 0) {
+      display.drawPixel(x, bandSpectrumY(bandSpectrumP95[i], bottomY, chartH), SSD1306_WHITE);
+    }
+  }
+
+  display.setCursor(0, OLED_HEIGHT - 8);
+  display.print("Press: status");
   display.display();
 }
 
@@ -512,20 +647,21 @@ void drawLiveScanScreen() {
 // what the RF Environment page would show for this exact scan.
 void drawLocalHistScreen() {
   display.clearDisplay();
-  display.setTextSize(1);
-  display.setCursor(0, 0);
+  drawHeader("CHANNEL HISTOGRAM");
+
   if (!hasLocalHist) {
+    display.setCursor(0, 20);
     display.println("Local scan failed");
     display.println("(radio busy/error)");
     display.display();
     return;
   }
-  display.print("Scan @ ");
-  display.print(localHistFrequencyHz / 1e6f, 1);
-  display.println(" MHz");
-  display.drawFastHLine(0, 9, OLED_WIDTH, SSD1306_WHITE);
+  display.setCursor(0, 11);
+  display.print("@ ");
+  display.print(localHistFrequencyHz / 1e6f, 3);
+  display.print(" MHz");
 
-  const int topY = 11;
+  const int topY = 20;
   const int bottomY = OLED_HEIGHT - 17;
   const int barAreaH = bottomY - topY;
   const int colWidth = OLED_WIDTH / NB_LEVELS;
@@ -553,8 +689,11 @@ void drawLocalHistScreen() {
 }
 
 void drawCurrentScreen() {
+  wakeDisplay(); // any real content update wakes the panel if blanked
+                 // and resets the idle timer -- see loop()'s auto-blank check.
   if (currentScreen == SCREEN_STATUS) drawStatusScreen();
   else if (currentScreen == SCREEN_LIVE_SCAN) drawLiveScanScreen();
+  else if (currentScreen == SCREEN_BAND_SPECTRUM) drawBandSpectrumScreen();
   else drawLocalHistScreen();
 }
 
@@ -632,4 +771,9 @@ void loop() {
   checkSerialInput(); // services {"cmd":"status"}/{"cmd":"scan"} promptly, always first
   checkButton();
   stepLiveScan(); // cheap (one retune + one RSSI read) -- fine to run every loop iteration
+
+  if (displayOn && millis() - lastDisplayActivity >= DISPLAY_TIMEOUT_MS) {
+    display.ssd1306_command(SSD1306_DISPLAYOFF);
+    displayOn = false;
+  }
 }

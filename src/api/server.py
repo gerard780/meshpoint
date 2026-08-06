@@ -71,6 +71,7 @@ from src.api.routes import (
     dapnet_config_routes,
     pocsag_firmware_routes,
     pager_firmware_routes,
+    rfenv_companion_firmware_routes,
     meshtastic_firmware_routes,
     meshcore_firmware_routes,
     spectrum_routes,
@@ -490,6 +491,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.include_router(dapnet_config_routes.router, dependencies=protected)
     app.include_router(pocsag_firmware_routes.router, dependencies=protected)
     app.include_router(pager_firmware_routes.router, dependencies=protected)
+    app.include_router(rfenv_companion_firmware_routes.router, dependencies=protected)
     app.include_router(meshtastic_firmware_routes.router, dependencies=protected)
     app.include_router(meshcore_firmware_routes.router, dependencies=protected)
     app.include_router(config_routes.router, dependencies=protected)
@@ -1847,6 +1849,7 @@ def _init_routes(
         config=config,
     )
     pager_firmware_routes.init_routes(config=config)
+    rfenv_companion_firmware_routes.init_routes(config=config, service=_rfenv_companion_service)
     meshtastic_routes.init_routes(
         coord.packet_repo, coord.node_repo, device_name=_dev_name,
     )
