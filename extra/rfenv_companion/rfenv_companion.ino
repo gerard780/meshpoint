@@ -175,8 +175,8 @@
 // antenna/RF matching network built for that band) used purely as a
 // standalone handheld scanner -- it can never usefully feed a
 // 868/915-band Meshpoint's own RF Environment page.
-#define BAND_EU868
-//#define BAND_70CM
+//#define BAND_EU868
+#define BAND_70CM
 
 #if defined(BAND_EU868) && defined(BAND_70CM)
   #error "Uncomment only ONE band in the BAND SELECT block above"
