@@ -41,6 +41,29 @@
       35-level table -- it only needs to be internally consistent for
       the percentile math the Python side already has (SpectralScanResult).
 
+    {"cmd":"sweep","frequencies_hz":[<uint32>, ...],"nb_scan":<uint16>}
+      -> {"type":"sweep_result","point_count":<uint16>,
+          "points":[{"frequency_hz":<uint32>,"floor_dbm":<int>,
+                      "median_dbm":<int>,"p95_dbm":<int>}, ...]}
+
+      Powers the Band Spectrum card (src/api/routes/spectrum_routes.py),
+      a genuinely different feature from the single-frequency histogram
+      above -- RfEnvCompanionScanService requests this with the SAME
+      frequency list src/api/server.py's own _sweep_frequencies_hz()
+      computes for the real HAL sweep (frequency-plan logic stays
+      Python-side, single source of truth, same reasoning as the scan
+      command not hardcoding a region here either). Per point, this
+      firmware takes nb_scan samples (clamped to
+      [MIN_NB_SCAN, SWEEP_MAX_NB_SCAN_PER_POINT] -- deliberately a much
+      smaller ceiling than the histogram scan's, since a 71-point EU868
+      sweep needs to finish in a few seconds, not a few seconds PER
+      point), computes floor/median/p95 from a throwaway per-point
+      histogram (percentileDbm(), same math as the standalone local
+      scan), and reports only those three numbers per point rather than
+      the full histogram -- keeps a 71-point reply small. frequencies_hz
+      is capped at SWEEP_MAX_POINTS; excess entries are ignored rather
+      than blowing the sweep's time budget or JSON reply size.
+
   Any malformed/unrecognised line is logged to Serial and ignored, same
   behaviour as every other companion's serial parser in this repo.
 
@@ -137,6 +160,12 @@ Adafruit_SSD1306 display(OLED_WIDTH, OLED_HEIGHT, &Wire, OLED_RST_PIN);
 // the serial-triggered default since a human is standing there watching
 // the screen rather than a timeout budget on the other end of a wire.
 #define LOCAL_SCAN_NB_SCAN 400
+
+// ---------- Band spectrum sweep ({"cmd":"sweep"}, see header comment) ----------
+// Much smaller than MAX_NB_SCAN -- a 71-point EU868 sweep needs a per-point
+// budget small enough that the WHOLE sweep still finishes in a few seconds.
+#define SWEEP_MAX_NB_SCAN_PER_POINT 32
+#define SWEEP_MAX_POINTS 128 // safety cap on the incoming frequencies_hz array
 
 // ---------- Standalone live band-scan (see header comment) ----------
 // Default EU868 -- adjust to the deployment's own region if reused
@@ -328,6 +357,48 @@ void handleScanCommand(JsonDocument &doc) {
   Serial.println();
 }
 
+// Sweeps every frequency in the requested list, replies on Serial as
+// sweep_result. Powers the Band Spectrum card -- see the header comment
+// for why this reports only floor/median/p95 per point (not a full
+// histogram like handleScanCommand()) and why the frequency list comes
+// from Meshpoint rather than a firmware-local band constant.
+void handleSweepCommand(JsonDocument &doc) {
+  JsonArray freqArray = doc["frequencies_hz"].as<JsonArray>();
+  if (freqArray.isNull() || freqArray.size() == 0) {
+    Serial.println("[serial] sweep: missing/empty frequencies_hz, ignored");
+    return;
+  }
+  uint16_t nbScan = doc["nb_scan"] | SWEEP_MAX_NB_SCAN_PER_POINT;
+  if (nbScan < MIN_NB_SCAN) nbScan = MIN_NB_SCAN;
+  if (nbScan > SWEEP_MAX_NB_SCAN_PER_POINT) nbScan = SWEEP_MAX_NB_SCAN_PER_POINT;
+
+  JsonDocument out;
+  out["type"] = "sweep_result";
+  JsonArray pointsOut = out["points"].to<JsonArray>();
+
+  static uint16_t counts[NB_LEVELS];
+  int pointCount = 0;
+  for (JsonVariant v : freqArray) {
+    if (pointCount >= SWEEP_MAX_POINTS) break;
+    uint32_t freqHz = v.as<uint32_t>();
+    if (freqHz == 0 || !runHistogramScan(freqHz, nbScan, counts)) continue;
+    JsonObject point = pointsOut.add<JsonObject>();
+    point["frequency_hz"] = freqHz;
+    point["floor_dbm"] = (int)percentileDbm(counts, 10.0f);
+    point["median_dbm"] = (int)percentileDbm(counts, 50.0f);
+    point["p95_dbm"] = (int)percentileDbm(counts, 95.0f);
+    pointCount++;
+  }
+  out["point_count"] = pointCount;
+
+  lastPollAtMs = millis();
+  everPolled = true;
+  drawCurrentScreen(); // radio was retuned repeatedly -- refresh whatever's on screen
+
+  serializeJson(out, Serial);
+  Serial.println();
+}
+
 void sendStatusReply() {
   JsonDocument out;
   out["type"] = "status";
@@ -354,6 +425,7 @@ void handleSerialJsonLine(const String &line) {
   String cmd = doc["cmd"] | "";
   if (cmd == "status") { sendStatusReply(); return; }
   if (cmd == "scan") { handleScanCommand(doc); return; }
+  if (cmd == "sweep") { handleSweepCommand(doc); return; }
   Serial.print("[serial] unrecognised cmd: \""); Serial.print(cmd); Serial.println("\"");
 }
 

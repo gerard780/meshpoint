@@ -33,6 +33,7 @@ import logging
 import queue
 import threading
 import time
+from datetime import datetime, timezone
 from typing import Optional
 
 from src.api.telemetry.noise_floor import NoiseFloorTracker
@@ -42,8 +43,20 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_INTERVAL_SECONDS: float = 60.0
 DEFAULT_NB_SCAN: int = 512
+DEFAULT_SWEEP_INTERVAL_SECONDS: float = 300.0
+# Per-point sample count for a band sweep -- deliberately much smaller
+# than DEFAULT_NB_SCAN: a sweep can be 70-260+ points (region-dependent),
+# and this companion physically retunes+samples each one over a serial
+# round-trip rather than the real HAL's near-instant in-silicon scan, so
+# a deep per-point histogram would make the whole sweep take minutes.
+DEFAULT_SWEEP_NB_SCAN_PER_POINT: int = 16
 _SCAN_TIMEOUT_SECONDS: float = 8.0
 _STATUS_TIMEOUT_SECONDS: float = 5.0
+# Generous: worst case (a firmware-capped 128-point sweep) is roughly
+# 128 * (retune settle + 16 samples) ~= 5s -- this leaves real margin
+# for serial/scheduling jitter without the caller waiting forever on a
+# genuinely wedged companion.
+_SWEEP_TIMEOUT_SECONDS: float = 20.0
 
 
 class RfEnvCompanionScanService:
@@ -64,6 +77,8 @@ class RfEnvCompanionScanService:
         nb_scan: int = DEFAULT_NB_SCAN,
         interval_seconds: float = DEFAULT_INTERVAL_SECONDS,
         label: str = "",
+        sweep_frequencies_hz: Optional[list[int]] = None,
+        sweep_interval_seconds: float = DEFAULT_SWEEP_INTERVAL_SECONDS,
     ) -> None:
         self._tracker = tracker
         self._port = serial_port
@@ -73,6 +88,13 @@ class RfEnvCompanionScanService:
         self._nb_scan = nb_scan
         self._interval_seconds = max(5.0, interval_seconds)
         self._label = label
+        self._sweep_frequencies_hz = list(sweep_frequencies_hz or [])
+        # 0 = no automatic sweeps; on-demand request_sweep() still works.
+        self._sweep_interval_seconds = max(0.0, sweep_interval_seconds)
+        self._sweep_requested = asyncio.Event()
+        self._last_sweep_monotonic: Optional[float] = None
+        self._latest_sweep: Optional[dict] = None
+        self._sweeps_run = 0
         self._serial = None
         self._running = False
         self._connected = False
@@ -122,6 +144,24 @@ class RfEnvCompanionScanService:
 
     def histogram_payload(self) -> Optional[dict]:
         return spectral_scan_result_payload(self._last_result)
+
+    @property
+    def sweep_supported(self) -> bool:
+        """True when a sweep frequency list is configured -- same meaning
+        as SpectralScanService's own property, duck-typed by spectrum_routes.py."""
+        return bool(self._sweep_frequencies_hz)
+
+    @property
+    def latest_sweep(self) -> Optional[dict]:
+        """Most recent band sweep, or None before the first one."""
+        return self._latest_sweep
+
+    def request_sweep(self) -> bool:
+        """Ask the poll loop to run a sweep on its next wake-up (~immediately)."""
+        if not self.sweep_supported or self._poll_task is None or self._poll_task.done():
+            return False
+        self._sweep_requested.set()
+        return True
 
     async def send_command(
         self, command: dict, expect_type: str, timeout: float,
@@ -190,9 +230,90 @@ class RfEnvCompanionScanService:
                 self._ever_connected = True
             while self._running:
                 await self._run_one_scan()
-                await asyncio.sleep(self._interval_seconds)
+                if self._sweep_due():
+                    await self._run_sweep()
+                await self._sleep_until_next()
         except asyncio.CancelledError:
             pass
+
+    async def _sleep_until_next(self) -> None:
+        """Sleep one scan interval, waking early for sweep requests --
+        mirrors SpectralScanService's own _sleep_until_next()."""
+        try:
+            await asyncio.wait_for(
+                self._sweep_requested.wait(), timeout=self._interval_seconds,
+            )
+        except asyncio.TimeoutError:
+            pass
+
+    def _sweep_due(self) -> bool:
+        if not self.sweep_supported:
+            return False
+        if self._sweep_requested.is_set():
+            return True
+        if self._sweep_interval_seconds <= 0:
+            return False
+        if self._last_sweep_monotonic is None:
+            return True
+        elapsed = time.monotonic() - self._last_sweep_monotonic
+        return elapsed >= self._sweep_interval_seconds
+
+    async def _run_sweep(self) -> None:
+        """Sweeps every configured frequency once and stores the envelope
+        -- mirrors SpectralScanService._run_sweep()'s shape exactly
+        (generated_at/duration_seconds/point_count/points with
+        frequency_mhz/floor_dbm/median_dbm/p95_dbm per point), so
+        spectrum_routes.py's GET response looks identical regardless of
+        which service backs it."""
+        self._sweep_requested.clear()
+        started = time.monotonic()
+        reply = await self.send_command(
+            {
+                "cmd": "sweep",
+                "frequencies_hz": self._sweep_frequencies_hz,
+                "nb_scan": DEFAULT_SWEEP_NB_SCAN_PER_POINT,
+            },
+            expect_type="sweep_result",
+            timeout=_SWEEP_TIMEOUT_SECONDS,
+        )
+        self._last_sweep_monotonic = time.monotonic()
+        if reply is None:
+            logger.warning("%s: sweep timed out or companion disconnected", self.name)
+            return
+
+        try:
+            points = [
+                {
+                    "frequency_mhz": round(int(p["frequency_hz"]) / 1e6, 4),
+                    "floor_dbm": float(p["floor_dbm"]),
+                    "median_dbm": float(p["median_dbm"]),
+                    "p95_dbm": float(p["p95_dbm"]),
+                }
+                for p in reply["points"]
+            ]
+        except (KeyError, TypeError, ValueError):
+            logger.warning("%s: malformed sweep_result reply: %r", self.name, reply)
+            return
+
+        if not points:
+            logger.warning(
+                "%s: sweep produced no points (%d frequencies requested)",
+                self.name, len(self._sweep_frequencies_hz),
+            )
+            return
+
+        self._sweeps_run += 1
+        self._latest_sweep = {
+            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "duration_seconds": round(time.monotonic() - started, 2),
+            "point_count": len(points),
+            "points": points,
+        }
+        logger.info(
+            "%s: band sweep #%d: %d points in %.1fs",
+            self.name, self._sweeps_run, len(points),
+            self._latest_sweep["duration_seconds"],
+        )
 
     async def _run_one_scan(self) -> None:
         if self._frequency_hz <= 0:

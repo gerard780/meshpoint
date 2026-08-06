@@ -277,7 +277,6 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         )
         if _spectral_scan_service is not None:
             await _spectral_scan_service.start()
-        spectrum_routes.init_routes(_spectral_scan_service)
 
         # RF Environment companion (extra/rfenv_companion) -- only
         # constructed when the real HAL-backed service above is
@@ -289,6 +288,11 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             )
             if _rfenv_companion_service is not None:
                 await _rfenv_companion_service.start()
+
+        # Band Spectrum sweep card -- same fallback precedence as the
+        # histogram/noise-floor wiring above (real hardware wins; the
+        # companion only ever backs this when the real service is None).
+        spectrum_routes.init_routes(_spectral_scan_service or _rfenv_companion_service)
 
         global _fan_controller_task, _fan_controller
         if config.fan.enabled:
@@ -1354,6 +1358,8 @@ def _build_rfenv_companion_service(
         nb_scan=device.nb_scan,
         interval_seconds=float(interval),
         label=device.label,
+        sweep_frequencies_hz=_sweep_frequencies_hz(config),
+        sweep_interval_seconds=float(config.radio.spectrum_sweep_interval_seconds),
     )
 
 

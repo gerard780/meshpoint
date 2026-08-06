@@ -1,16 +1,17 @@
 """Tests for RfEnvCompanionScanService's scan-reply handling.
 
-Scope: exercises ``_run_one_scan``'s reply parsing / SpectralScanResult
-reuse / NoiseFloorTracker wiring, and the standalone ``_parse_json_line``
-helper -- the same level ``test_spectral_scan_service.py`` exercises its
-own service against a fake HAL wrapper. ``send_command`` itself (the
-real reader-thread/Future request-response machinery, which needs an
-actual or fake serial.Serial object) is monkeypatched rather than
-exercised here -- there's no physical companion board or fake serial
-transport to drive it against yet.
+Scope: exercises ``_run_one_scan``/``_run_sweep``'s reply parsing /
+SpectralScanResult reuse / NoiseFloorTracker wiring, and the standalone
+``_parse_json_line`` helper -- the same level ``test_spectral_scan_service.py``
+exercises its own service against a fake HAL wrapper. ``send_command``
+itself (the real reader-thread/Future request-response machinery, which
+needs an actual or fake serial.Serial object) is monkeypatched rather
+than exercised here -- there's no physical companion board or fake
+serial transport to drive it against yet.
 """
 from __future__ import annotations
 
+import asyncio
 import unittest
 
 from src.api.telemetry.noise_floor import NoiseFloorTracker, SOURCE_PACKETS, SOURCE_SPECTRAL
@@ -156,6 +157,113 @@ class RunOneScanTest(unittest.IsolatedAsyncioTestCase):
     def test_is_companion_marker(self) -> None:
         service, _tracker = self._service()
         self.assertTrue(service.is_companion)
+
+
+def _sweep_reply(frequencies_hz) -> dict:
+    return {
+        "type": "sweep_result",
+        "point_count": len(frequencies_hz),
+        "points": [
+            {"frequency_hz": f, "floor_dbm": -110, "median_dbm": -95, "p95_dbm": -80}
+            for f in frequencies_hz
+        ],
+    }
+
+
+class RunSweepTest(unittest.IsolatedAsyncioTestCase):
+    def _service(self, sweep_frequencies_hz=None) -> RfEnvCompanionScanService:
+        tracker = NoiseFloorTracker()
+        return RfEnvCompanionScanService(
+            tracker=tracker,
+            serial_port="/dev/ttyUSB9",
+            frequency_hz=869_525_000,
+            bandwidth_khz=250,
+            interval_seconds=60.0,
+            sweep_frequencies_hz=sweep_frequencies_hz,
+            sweep_interval_seconds=300.0,
+        )
+
+    def test_sweep_not_supported_without_frequencies(self) -> None:
+        service = self._service(sweep_frequencies_hz=None)
+        self.assertFalse(service.sweep_supported)
+        self.assertIsNone(service.latest_sweep)
+
+    def test_sweep_supported_with_frequencies(self) -> None:
+        service = self._service(sweep_frequencies_hz=[863_000_000, 864_000_000])
+        self.assertTrue(service.sweep_supported)
+
+    async def test_request_sweep_false_when_not_running(self) -> None:
+        service = self._service(sweep_frequencies_hz=[863_000_000])
+        self.assertFalse(service.request_sweep())
+
+    async def test_request_sweep_true_when_running_and_supported(self) -> None:
+        service = self._service(sweep_frequencies_hz=[863_000_000])
+        service._poll_task = asyncio.get_running_loop().create_task(asyncio.sleep(10))
+        self.addAsyncCleanup(self._cancel, service._poll_task)
+        self.assertTrue(service.request_sweep())
+        self.assertTrue(service._sweep_requested.is_set())
+
+    async def _cancel(self, task):
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+    async def test_successful_sweep_builds_latest_sweep_envelope(self) -> None:
+        freqs = [863_000_000, 863_100_000, 863_200_000]
+        service = self._service(sweep_frequencies_hz=freqs)
+
+        async def fake_send_command(command, expect_type, timeout):
+            self.assertEqual(command["cmd"], "sweep")
+            self.assertEqual(command["frequencies_hz"], freqs)
+            self.assertEqual(expect_type, "sweep_result")
+            return _sweep_reply(freqs)
+
+        service.send_command = fake_send_command  # type: ignore[method-assign]
+        await service._run_sweep()
+
+        sweep = service.latest_sweep
+        self.assertIsNotNone(sweep)
+        self.assertEqual(sweep["point_count"], 3)
+        self.assertEqual(len(sweep["points"]), 3)
+        self.assertEqual(sweep["points"][0]["frequency_mhz"], 863.0)
+        self.assertEqual(sweep["points"][0]["median_dbm"], -95.0)
+        self.assertIn("generated_at", sweep)
+        self.assertIsInstance(sweep["duration_seconds"], float)
+
+    async def test_sweep_timeout_leaves_latest_sweep_unset(self) -> None:
+        service = self._service(sweep_frequencies_hz=[863_000_000])
+
+        async def fake_send_command(command, expect_type, timeout):
+            return None
+
+        service.send_command = fake_send_command  # type: ignore[method-assign]
+        await service._run_sweep()
+
+        self.assertIsNone(service.latest_sweep)
+
+    async def test_sweep_malformed_reply_leaves_latest_sweep_unset(self) -> None:
+        service = self._service(sweep_frequencies_hz=[863_000_000])
+
+        async def fake_send_command(command, expect_type, timeout):
+            return {"type": "sweep_result"}  # no "points" key
+
+        service.send_command = fake_send_command  # type: ignore[method-assign]
+        await service._run_sweep()
+
+        self.assertIsNone(service.latest_sweep)
+
+    async def test_sweep_empty_points_leaves_latest_sweep_unset(self) -> None:
+        service = self._service(sweep_frequencies_hz=[863_000_000])
+
+        async def fake_send_command(command, expect_type, timeout):
+            return {"type": "sweep_result", "point_count": 0, "points": []}
+
+        service.send_command = fake_send_command  # type: ignore[method-assign]
+        await service._run_sweep()
+
+        self.assertIsNone(service.latest_sweep)
 
 
 if __name__ == "__main__":

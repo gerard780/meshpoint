@@ -10,7 +10,7 @@ spectral-scan support it stays None and GET reports unavailable.
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -18,14 +18,17 @@ from src.api.auth.dependencies import require_admin
 from src.api.auth.jwt_session import SessionClaims
 from src.api.telemetry.spectral_scan_service import SpectralScanService
 
+if TYPE_CHECKING:
+    from src.api.telemetry.rfenv_companion_scan_service import RfEnvCompanionScanService
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/device/spectrum", tags=["spectrum"])
 
-_service: Optional[SpectralScanService] = None
+_service: Optional[SpectralScanService | RfEnvCompanionScanService] = None
 
 
-def init_routes(service: Optional[SpectralScanService]) -> None:
+def init_routes(service: Optional[SpectralScanService | RfEnvCompanionScanService]) -> None:
     global _service
     _service = service
 
