@@ -349,7 +349,7 @@ _DVB_BLACKLIST
     modprobe -r rtl_2832 2>/dev/null || true
     modprobe -r rtl_2830 2>/dev/null || true
 
-    if ldconfig -p | grep -q librtlsdr; then
+    if command -v rtl_sdr &>/dev/null; then
         info "librtlsdr already installed, skipping RTL-SDR build"
     else
         info "Cloning and building rtl-sdr..."
