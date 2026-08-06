@@ -1179,7 +1179,7 @@ function drawBars(canvas, counts, color) {
   }
 }
 
-function drawLines(canvas, median, p95) {
+function drawLines(canvas, median, p95, startMhz, endMhz) {
   const ctx = canvas.getContext('2d');
   const dpr = window.devicePixelRatio || 1;
   const w = canvas.clientWidth, h = canvas.clientHeight;
@@ -1187,11 +1187,36 @@ function drawLines(canvas, median, p95) {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, w, h);
   if (!median || !median.length) return;
+  const padBottom = 14; // room for the frequency axis labels below
+  const chartH = h - padBottom;
   const all = median.concat(p95 || []);
   let lo = Math.min(...all), hi = Math.max(...all);
   if (hi - lo < 10) hi = lo + 10;
   const x = (i) => (i / (median.length - 1)) * w;
-  const y = (v) => h - ((v - lo) / (hi - lo)) * (h - 4) - 2;
+  const y = (v) => chartH - ((v - lo) / (hi - lo)) * (chartH - 4) - 2;
+
+  // Frequency axis -- light gridlines + MHz labels, same idea as the
+  // real dashboard's own Band Spectrum card (frontend/js/radio_spectrum_card.js)
+  // -- without this there was no way to tell which x position was which
+  // frequency, just a floating line.
+  if (typeof startMhz === 'number' && typeof endMhz === 'number' && endMhz > startMhz) {
+    const span = endMhz - startMhz;
+    const step = span > 20 ? 5 : (span > 4 ? 1 : 0.5);
+    ctx.font = '9px monospace';
+    ctx.strokeStyle = 'rgba(148,163,184,0.12)';
+    ctx.fillStyle = 'rgba(148,163,184,0.7)';
+    ctx.lineWidth = 1;
+    ctx.textAlign = 'center';
+    for (let f = Math.ceil(startMhz / step) * step; f <= endMhz + 0.001; f += step) {
+      const fx = ((f - startMhz) / span) * w;
+      ctx.beginPath();
+      ctx.moveTo(fx, 0);
+      ctx.lineTo(fx, chartH);
+      ctx.stroke();
+      ctx.fillText(step >= 1 ? f.toFixed(0) : f.toFixed(1), Math.min(Math.max(fx, 12), w - 12), h - 3);
+    }
+  }
+
   if (p95 && p95.length) {
     ctx.strokeStyle = '#a855f7';
     ctx.lineWidth = 1;
@@ -1232,7 +1257,7 @@ async function pollStatus() {
     histAge.className = d.hist.age_s > 300 ? 'stale' : '';
   }
   if (d.sweep.has) {
-    drawLines(document.getElementById('sweepCanvas'), d.sweep.median, d.sweep.p95);
+    drawLines(document.getElementById('sweepCanvas'), d.sweep.median, d.sweep.p95, d.sweep.start_mhz, d.sweep.end_mhz);
     const sweepAge = document.getElementById('sweepAge');
     sweepAge.textContent = fmtAgo(d.sweep.age_s) + ' · ' + d.sweep.start_mhz + '-' + d.sweep.end_mhz + ' MHz';
     sweepAge.className = d.sweep.age_s > 300 ? 'stale' : '';
