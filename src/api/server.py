@@ -69,6 +69,7 @@ from src.api.routes import (
     repeater_config_routes,
     serial_config_routes,
     dapnet_config_routes,
+    rfenv_companion_config_routes,
     pocsag_firmware_routes,
     pager_firmware_routes,
     rfenv_companion_firmware_routes,
@@ -489,6 +490,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.include_router(meshcore_config_routes.router, dependencies=protected)
     app.include_router(serial_config_routes.router, dependencies=protected)
     app.include_router(dapnet_config_routes.router, dependencies=protected)
+    app.include_router(rfenv_companion_config_routes.router, dependencies=protected)
     app.include_router(pocsag_firmware_routes.router, dependencies=protected)
     app.include_router(pager_firmware_routes.router, dependencies=protected)
     app.include_router(rfenv_companion_firmware_routes.router, dependencies=protected)
@@ -1820,6 +1822,7 @@ def _init_routes(
         serial_sources=_find_serial_sources(coord),
         meshcore_sources=_find_meshcore_sources(coord),
         dapnet_sources=_find_dapnet_sources(coord),
+        rfenv_companion_service=_rfenv_companion_service,
     )
     mqtt_config_routes.init_routes(
         config=config,
@@ -1837,6 +1840,7 @@ def _init_routes(
     )
     serial_config_routes.init_routes(config=config, serial_sources=_find_serial_sources(coord))
     dapnet_config_routes.init_routes(dapnet_sources=_find_dapnet_sources(coord))
+    rfenv_companion_config_routes.init_routes(service=_rfenv_companion_service)
     pocsag_firmware_routes.init_routes(config=config, dapnet_sources=_find_dapnet_sources(coord))
     meshtastic_firmware_routes.init_routes(config=config, serial_sources=_find_serial_sources(coord))
     meshcore_firmware_routes.init_routes(config=config, meshcore_sources=_find_meshcore_sources(coord))

@@ -65,6 +65,57 @@ class RfenvCompanionFirmwareConfigCard {
                     </div>
                     <pre class="cfg-firmware-output" data-firmware-output hidden></pre>
                     <p class="cfg-status" data-firmware-status aria-live="polite"></p>
+
+                    <hr style="border:none;border-top:1px solid var(--border,#233049);margin:20px 0 14px;">
+                    <div data-rfenv-live-section hidden>
+                        <h3 class="cfg-card__title" style="font-size:14px;">Live Device Commands</h3>
+                        <p class="cfg-card__hint">
+                            Sent over the currently-connected companion's own USB serial
+                            link (not the Compile/Flash section above) -- only shown while
+                            it's actually connected and running.
+                        </p>
+                        <div class="cfg-mc-identity" data-rfenv-web-password-edit>
+                            <label class="cfg-field">
+                                <span class="cfg-field__label">Set web dashboard password</span>
+                                <input class="cfg-field__input" type="password"
+                                       autocomplete="new-password" placeholder="New password"
+                                       data-rfenv-web-password-input>
+                            </label>
+                            <div class="cfg-card__actions">
+                                <button class="terminal-button terminal-button--primary"
+                                        type="button" data-rfenv-web-password-save>
+                                    Set Password
+                                </button>
+                            </div>
+                            <p class="cfg-status" data-rfenv-web-password-status aria-live="polite"></p>
+                        </div>
+                        <div class="cfg-mc-identity" data-rfenv-wifi-edit>
+                            <label class="cfg-field">
+                                <span class="cfg-field__label">WiFi SSID</span>
+                                <input class="cfg-field__input" type="text"
+                                       placeholder="Network name" data-rfenv-wifi-ssid-input>
+                            </label>
+                            <label class="cfg-field">
+                                <span class="cfg-field__label">WiFi password</span>
+                                <input class="cfg-field__input" type="password"
+                                       autocomplete="new-password"
+                                       placeholder="Leave blank for an open network"
+                                       data-rfenv-wifi-password-input>
+                            </label>
+                            <div class="cfg-card__actions">
+                                <button class="terminal-button terminal-button--primary"
+                                        type="button" data-rfenv-wifi-save>
+                                    Save WiFi Credentials
+                                </button>
+                            </div>
+                            <p class="cfg-field__hint">
+                                Takes effect on the companion's next reboot, not
+                                immediately -- it stays on its CURRENT WiFi (or none)
+                                until then.
+                            </p>
+                            <p class="cfg-status" data-rfenv-wifi-status aria-live="polite"></p>
+                        </div>
+                    </div>
                 </article>
             </div>
         `;
@@ -77,6 +128,10 @@ class RfenvCompanionFirmwareConfigCard {
             .addEventListener('click', (e) => this._toggleFirmwareOutput(e.currentTarget));
         this._root.querySelector('[data-firmware-rescan-usb]')
             .addEventListener('click', (e) => this._rescanUsb(e.currentTarget));
+        this._root.querySelector('[data-rfenv-web-password-save]')
+            .addEventListener('click', () => this._saveWebPassword());
+        this._root.querySelector('[data-rfenv-wifi-save]')
+            .addEventListener('click', () => this._saveWifi());
 
         this._loadFirmwareTargets();
         this._refreshSerialPortsList();
@@ -105,6 +160,15 @@ class RfenvCompanionFirmwareConfigCard {
     render(config) {
         this._portUsage = this._buildPortUsageMap(config);
         this._renderFirmwareDevicePicker();
+
+        // Live-command controls (WiFi/web password/reboot) only make
+        // sense while a companion is actually connected over serial --
+        // config.rfenv_companion_status comes from GET /api/config
+        // (src/api/routes/config_routes.py's _rfenv_companion_status_entry),
+        // null when no companion is configured/running at all.
+        const liveSection = this._root.querySelector('[data-rfenv-live-section]');
+        const status = config && config.rfenv_companion_status;
+        if (liveSection) liveSection.hidden = !(status && status.connected);
     }
 
     /** Maps every currently-configured serial_port value (across Serial,
@@ -290,6 +354,113 @@ class RfenvCompanionFirmwareConfigCard {
         compileBtn.disabled = false;
         flashBtn.disabled = false;
         if (success) await this._api.refresh();
+    }
+
+    /** Set the companion's web dashboard login password over its live
+     * serial connection (PUT /api/config/rfenv-companion/web-password)
+     * -- mirrors pocsag_serial_card.js's own identical control. Never
+     * cached/echoed anywhere on this side; the field is cleared
+     * immediately after a send, success or not. */
+    async _saveWebPassword() {
+        const input = this._root.querySelector('[data-rfenv-web-password-input]');
+        const status = this._root.querySelector('[data-rfenv-web-password-status]');
+        const button = this._root.querySelector('[data-rfenv-web-password-save]');
+        if (!input || !status) return;
+
+        const password = input.value || '';
+        input.value = ''; // never leave it sitting in the DOM, success or not
+        if (!password) {
+            status.dataset.kind = 'error';
+            status.textContent = 'Enter a password.';
+            return;
+        }
+
+        button.disabled = true;
+        status.dataset.kind = 'pending';
+        status.textContent = 'Sending to companion…';
+
+        const result = await this._api.put('/api/config/rfenv-companion/web-password', { password });
+
+        if (result) {
+            status.dataset.kind = 'success';
+            status.textContent = 'Password updated on the companion.';
+            this._api.toast('Web dashboard password updated');
+        } else {
+            status.dataset.kind = 'error';
+            status.textContent = 'Save failed.';
+        }
+        button.disabled = false;
+    }
+
+    /** WiFi SSID/password, deliberately its own separate control with an
+     * explicit confirm step and a save-then-optionally-reboot flow --
+     * unlike the web password above, this takes the companion off its
+     * current network until it reboots with the new credentials. Same
+     * shape as pocsag_serial_card.js's own /wifi control. */
+    async _saveWifi() {
+        const ssidInput = this._root.querySelector('[data-rfenv-wifi-ssid-input]');
+        const passwordInput = this._root.querySelector('[data-rfenv-wifi-password-input]');
+        const status = this._root.querySelector('[data-rfenv-wifi-status]');
+        const button = this._root.querySelector('[data-rfenv-wifi-save]');
+        if (!ssidInput || !status) return;
+
+        const ssid = (ssidInput.value || '').trim();
+        const password = passwordInput.value || '';
+        passwordInput.value = ''; // never leave it sitting in the DOM, success or not
+        if (!ssid) {
+            status.dataset.kind = 'error';
+            status.textContent = 'Enter an SSID.';
+            return;
+        }
+
+        const ok = await window.confirmModal({
+            label: 'Save new WiFi credentials',
+            description: `Save "${ssid}" as this companion's WiFi network? It will `
+                + 'stay on its CURRENT network (or offline) until you reboot it -- '
+                + 'you\'ll be offered that as a next step.',
+        });
+        if (!ok) return;
+
+        button.disabled = true;
+        status.dataset.kind = 'pending';
+        status.textContent = 'Sending to companion…';
+
+        const result = await this._api.put('/api/config/rfenv-companion/wifi', { ssid, password });
+
+        if (result) {
+            status.dataset.kind = 'success';
+            status.textContent = `Saved. Reboot now to connect to "${result.ssid}"?`;
+            ssidInput.value = '';
+            button.disabled = false;
+            const rebootNow = await window.confirmModal({
+                label: 'Reboot companion now?',
+                description: 'Apply the new WiFi credentials immediately? The companion '
+                    + 'will restart -- its USB-serial link to Meshpoint may briefly drop, '
+                    + 'and a service restart may be needed afterward if it doesn\'t '
+                    + 'reconnect on its own.',
+            });
+            if (rebootNow) {
+                await this._rebootCompanion();
+            }
+        } else {
+            status.dataset.kind = 'error';
+            status.textContent = 'Save failed.';
+            button.disabled = false;
+        }
+    }
+
+    async _rebootCompanion() {
+        const status = this._root.querySelector('[data-rfenv-wifi-status]');
+        const result = await this._api.post('/api/config/rfenv-companion/reboot', {});
+        if (result) {
+            status.dataset.kind = 'success';
+            status.textContent = 'Rebooting…';
+            this._api.toast('Companion rebooting with new WiFi credentials');
+        } else {
+            status.dataset.kind = 'error';
+            status.textContent = 'Reboot command failed -- saved credentials will still '
+                + 'apply next time it reboots some other way.';
+        }
     }
 
     _esc(str) {
