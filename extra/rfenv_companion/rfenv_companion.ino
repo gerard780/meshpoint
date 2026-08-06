@@ -175,8 +175,8 @@
 // antenna/RF matching network built for that band) used purely as a
 // standalone handheld scanner -- it can never usefully feed a
 // 868/915-band Meshpoint's own RF Environment page.
-//#define BAND_EU868
-#define BAND_70CM
+#define BAND_EU868
+//#define BAND_70CM
 
 #if defined(BAND_EU868) && defined(BAND_70CM)
   #error "Uncomment only ONE band in the BAND SELECT block above"
@@ -188,14 +188,25 @@
 // same idea as pocsag_companion.ino's own BOARD_NAME_STR.
 #if defined(BAND_70CM)
   #define BAND_NAME_STR "70cm"
-  #define DEFAULT_FREQ_MHZ 433.500f
+  #define DEFAULT_FREQ_MHZ 439.9875f
   #define BAND_START_MHZ 430.0f
   #define BAND_END_MHZ   440.0f
+  // Pre-fills the web dashboard's Channel Histogram frequency input --
+  // DAPNET/POCSAG's real German transmitter frequency (same constant
+  // extra/pocsag_companion.ino uses), a genuinely fixed real-world
+  // standard, not a guess.
+  #define WEB_SCAN_DEFAULT_MHZ 439.9875f
 #else
   #define BAND_NAME_STR "eu868"
   #define DEFAULT_FREQ_MHZ 869.525f
   #define BAND_START_MHZ 863.0f
   #define BAND_END_MHZ   870.0f
+  // Same shared Meshtastic/MeshCore-area anchor DEFAULT_FREQ_MHZ
+  // already uses -- this firmware has no live knowledge of a
+  // deployment's own actual MeshCore frequency (region/config-specific,
+  // resolved by Meshpoint itself at runtime, not a fixed constant
+  // anywhere in this codebase) -- freely editable in the web UI either way.
+  #define WEB_SCAN_DEFAULT_MHZ 869.525f
 #endif
 
 #include <Arduino.h>
@@ -283,6 +294,11 @@ String wifiPass = WIFI_PASSWORD;
 
 bool webScanPending = false;
 bool webSweepPending = false;
+// 0 = use runLocalHistScan()'s own default-frequency logic (whatever
+// Meshpoint last requested, or DEFAULT_FREQ_MHZ); non-zero = scan at
+// exactly this frequency instead, set by the web dashboard's own
+// frequency input next to "Scan Now".
+uint32_t webScanFrequencyHz = 0;
 
 // ---------- Histogram bin scheme (see header comment) ----------
 #define NB_LEVELS 35
@@ -398,10 +414,11 @@ static bool longPressFired = false;
 #define DEBOUNCE_MS 30
 #define LONG_PRESS_MS 700
 
-void runLocalHistScan() {
-  uint32_t freqHz = lastRequestedFrequencyHz != 0
-      ? lastRequestedFrequencyHz
-      : (uint32_t)(DEFAULT_FREQ_MHZ * 1e6f);
+// Shared by the button-triggered scan (runLocalHistScan(), below) and
+// the web dashboard's frequency-input-driven scan (queueWebScan()/
+// checkWebScanPending()) -- same scan, just an explicit target
+// frequency instead of the button's own last-requested-or-default logic.
+void runLocalHistScanAt(uint32_t freqHz) {
   if (runHistogramScan(freqHz, LOCAL_SCAN_NB_SCAN, localHistCounts)) {
     localHistFrequencyHz = freqHz;
     hasLocalHist = true;
@@ -409,6 +426,13 @@ void runLocalHistScan() {
   }
   currentScreen = SCREEN_LOCAL_HIST;
   drawCurrentScreen();
+}
+
+void runLocalHistScan() {
+  uint32_t freqHz = lastRequestedFrequencyHz != 0
+      ? lastRequestedFrequencyHz
+      : (uint32_t)(DEFAULT_FREQ_MHZ * 1e6f);
+  runLocalHistScanAt(freqHz);
 }
 
 // Sweeps the same BAND_STEPS frequency plan the live-scan view uses,
@@ -478,9 +502,12 @@ void setWifiCredentials(const String &ssid, const String &pass) {
 // comment for why a web handler can't just call runHistogramScan()/
 // runBandSpectrumSweep() directly) ----------
 
-void queueWebScan() {
+// freqHz: 0 = use runLocalHistScan()'s own default logic; non-zero =
+// scan at exactly this frequency (the web dashboard's frequency input).
+void queueWebScan(uint32_t freqHz) {
   xSemaphoreTake(stateMutex, portMAX_DELAY);
   webScanPending = true;
+  webScanFrequencyHz = freqHz;
   xSemaphoreGive(stateMutex);
 }
 
@@ -495,9 +522,13 @@ void queueWebSweep() {
 void checkWebScanPending() {
   xSemaphoreTake(stateMutex, portMAX_DELAY);
   bool run = webScanPending;
+  uint32_t freqHz = webScanFrequencyHz;
   webScanPending = false;
+  webScanFrequencyHz = 0;
   xSemaphoreGive(stateMutex);
-  if (run) runLocalHistScan();
+  if (!run) return;
+  if (freqHz != 0) runLocalHistScanAt(freqHz);
+  else runLocalHistScan();
 }
 
 void checkWebSweepPending() {
@@ -699,6 +730,79 @@ void sendStatusReply() {
   if (currentScreen == SCREEN_STATUS) drawCurrentScreen();
 }
 
+// ---------- Serial-provisioned WiFi/web credentials (mirrors
+// pocsag_companion.ino's own set_wifi/set_web_password/reboot commands
+// exactly, same reply shapes) ----------
+// Lets a board flashed with an all-placeholder secrets.h get real WiFi
+// credentials without ever touching that file or recompiling -- the
+// USB-serial connection this device is polled over already works
+// regardless of WiFi state, so it doubles as the provisioning channel.
+
+// Saves new WiFi credentials for the NEXT reboot -- setupWifiOta() only
+// ever runs once, in setup(), so this alone does not reconnect; pair
+// with {"cmd":"reboot"} below to actually apply it. SSID is echoed back
+// on success (not sensitive, unlike a password); the password itself
+// never is.
+void handleSetWifiCommand(JsonDocument &doc) {
+  String ssid = doc["ssid"] | "";
+  String pass = doc["password"] | ""; // empty is valid -- open networks have no password
+  ssid.trim();
+
+  JsonDocument out;
+  out["type"] = "set_wifi_result";
+
+  if (ssid.length() == 0) {
+    out["ok"] = false;
+    out["error"] = "ssid is required";
+  } else {
+    setWifiCredentials(ssid, pass);
+    prefs.putString("wifi_ssid", ssid);
+    prefs.putString("wifi_pass", pass);
+    out["ok"] = true;
+    out["ssid"] = ssid;
+  }
+
+  serializeJson(out, Serial);
+  Serial.println();
+}
+
+void handleSetWebPasswordCommand(JsonDocument &doc) {
+  String pw = doc["password"] | "";
+
+  JsonDocument out;
+  out["type"] = "set_web_password_result";
+
+  if (pw.length() == 0) {
+    out["ok"] = false;
+    out["error"] = "password is required";
+  } else {
+    setWebPassword(pw);
+    prefs.putString("web_password", pw);
+    out["ok"] = true;
+  }
+
+  serializeJson(out, Serial);
+  Serial.println();
+}
+
+// Lets Meshpoint (or a manual serial session) trigger a reboot without
+// needing the web dashboard's own Reboot button -- the whole point:
+// bad/unset WiFi credentials could otherwise make the web dashboard
+// unreachable, while USB serial keeps working regardless of WiFi
+// state. Same delayed-restart mechanism /api/reboot already uses: send
+// the reply first, let loop() call ESP.restart() a little later
+// (REBOOT_DELAY_MS), so this reply actually reaches the other end
+// before the reboot happens.
+void handleRebootCommand() {
+  JsonDocument out;
+  out["type"] = "reboot_result";
+  out["ok"] = true;
+  serializeJson(out, Serial);
+  Serial.println();
+  rebootRequested = true;
+  rebootRequestedAt = millis();
+}
+
 // ---------- Serial input: line accumulation + JSON dispatch ----------
 // Same line-accumulation approach already verified in pocsag_companion.ino.
 String serialLineBuf;
@@ -714,6 +818,9 @@ void handleSerialJsonLine(const String &line) {
   if (cmd == "status") { sendStatusReply(); return; }
   if (cmd == "scan") { handleScanCommand(doc); return; }
   if (cmd == "sweep") { handleSweepCommand(doc); return; }
+  if (cmd == "set_wifi") { handleSetWifiCommand(doc); return; }
+  if (cmd == "set_web_password") { handleSetWebPasswordCommand(doc); return; }
+  if (cmd == "reboot") { handleRebootCommand(); return; }
   Serial.print("[serial] unrecognised cmd: \""); Serial.print(cmd); Serial.println("\"");
 }
 
@@ -1092,6 +1199,8 @@ const char INDEX_HTML[] = R"HTMLPAGE(
         <span>Median <b id="histMedian">--</b> dBm</span>
         <span id="histAge">no scan yet</span>
       </div>
+      <label for="scanFreq">Scan frequency (MHz)</label>
+      <input type="text" id="scanFreq" inputmode="decimal" autocomplete="off" spellcheck="false" placeholder="e.g. 869.525">
       <button onclick="scanNow()">Scan Now</button>
       <div class="result" id="scanResult"></div>
     </div>
@@ -1240,9 +1349,17 @@ function drawLines(canvas, median, p95, startMhz, endMhz) {
   ctx.stroke();
 }
 
+let scanFreqPrefilled = false;
+
 async function pollStatus() {
   let d;
   try { d = await apiGet('/api/status'); } catch (e) { return null; }
+
+  if (!scanFreqPrefilled && d.web_scan_default_mhz) {
+    const freqInput = document.getElementById('scanFreq');
+    if (freqInput && !freqInput.value) freqInput.value = d.web_scan_default_mhz;
+    scanFreqPrefilled = true;
+  }
 
   document.getElementById('hostname').textContent = d.hostname + '.local';
   document.getElementById('pollStatus').textContent = d.ever_polled
@@ -1280,11 +1397,11 @@ async function pollStatus() {
 // "Sweeping…" stuck on screen forever even once the real result had
 // long since landed -- nothing was ever clearing it). Gives up after
 // maxTries (12s @ 1s each) as a fallback if something's actually stuck.
-async function runAndAwaitFresh(triggerUrl, resultEl, verb, hasFreshResult) {
+async function runAndAwaitFresh(triggerUrl, resultEl, verb, hasFreshResult, body) {
   resultEl.className = 'result ok';
   resultEl.textContent = verb + '…';
   try {
-    await apiPost(triggerUrl);
+    await apiPost(triggerUrl, body);
   } catch (e) {
     resultEl.className = 'result err';
     resultEl.textContent = 'Failed';
@@ -1303,8 +1420,11 @@ async function runAndAwaitFresh(triggerUrl, resultEl, verb, hasFreshResult) {
 }
 
 function scanNow() {
+  const freqInput = document.getElementById('scanFreq');
+  const mhz = freqInput ? parseFloat(freqInput.value) : NaN;
+  const body = (!isNaN(mhz) && mhz > 0) ? { frequency_mhz: mhz } : {};
   runAndAwaitFresh('/api/scan', document.getElementById('scanResult'), 'Scanning',
-    (d) => d.hist.has && d.hist.age_s <= 2);
+    (d) => d.hist.has && d.hist.age_s <= 2, body);
 }
 
 function sweepNow() {
@@ -1366,6 +1486,7 @@ void setupWebServer() {
     doc["hostname"] = MDNS_HOSTNAME;
     doc["board"] = "heltec_v3_rfenv";
     doc["band"] = BAND_NAME_STR;
+    doc["web_scan_default_mhz"] = WEB_SCAN_DEFAULT_MHZ;
     doc["uptime_ms"] = millis();
     doc["ever_polled"] = everPolled;
     doc["last_poll_ago_s"] = everPolled ? (millis() - lastPollAtMs) / 1000 : 0;
@@ -1408,10 +1529,23 @@ void setupWebServer() {
 
   // Neither of these touches `radio` directly -- they only stage a
   // request for loop() to run (see queueWebScan()/queueWebSweep()'s own
-  // comment for why).
+  // comment for why). /api/scan takes an optional JSON body
+  // ({"frequency_mhz": ...}, the dashboard's frequency input) -- same
+  // request/body-callback split AsyncWebServer needs for a POST body,
+  // matching /api/wifi below. An absent/zero/invalid frequency_mhz
+  // falls back to runLocalHistScan()'s own default-frequency logic.
   server.on("/api/scan", HTTP_POST, [](AsyncWebServerRequest *request) {
+  }, nullptr, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total) {
     if (!checkAuth(request)) return;
-    queueWebScan();
+    uint32_t freqHz = 0;
+    if (len > 0) {
+      JsonDocument doc;
+      if (!deserializeJson(doc, data, len)) {
+        double mhz = doc["frequency_mhz"] | 0.0;
+        if (mhz > 0.0) freqHz = (uint32_t)(mhz * 1e6);
+      }
+    }
+    queueWebScan(freqHz);
     request->send(202, "application/json", "{\"ok\":true}");
   });
   server.on("/api/sweep", HTTP_POST, [](AsyncWebServerRequest *request) {
