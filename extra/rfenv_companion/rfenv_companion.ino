@@ -263,7 +263,10 @@ Adafruit_SSD1306 display(OLED_WIDTH, OLED_HEIGHT, &Wire, OLED_RST_PIN);
 // pocsag_companion.ino's own WiFi/OTA/web-dashboard section --
 // mechanism only, not its paging-specific content (no callsign, no
 // page-send form/log -- this device has neither concept).
-#define MDNS_HOSTNAME "rfenv-companion"
+// Band-suffixed (not just "rfenv-companion") so two boards on the same
+// LAN -- one EU868, one 70cm -- get distinct .local names instead of
+// colliding: "rfenv-companion-eu868.local" / "rfenv-companion-70cm.local".
+#define MDNS_HOSTNAME "rfenv-companion-" BAND_NAME_STR
 #define WIFI_CONNECT_TIMEOUT_MS 10000UL
 #define PREFS_NAMESPACE "rfenv"
 #define REBOOT_DELAY_MS 500UL
