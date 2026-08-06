@@ -67,3 +67,6 @@ extra/pocsag_companion/secrets.h
 
 # WiFi/OTA credentials for the pager_client Arduino sketch -- never commit
 extra/pager_client/secrets.h
+
+# WiFi/OTA credentials for the rfenv_companion Arduino sketch -- never commit
+extra/rfenv_companion/secrets.h
