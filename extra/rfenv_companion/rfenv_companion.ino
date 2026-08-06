@@ -998,7 +998,8 @@ const char INDEX_HTML[] = R"HTMLPAGE(
   @media (max-width: 700px) { .grid { grid-template-columns: 1fr; } }
   .card { background: var(--bg-card); border:1px solid var(--border); border-radius: var(--radius); padding:14px; }
   .card.wide { grid-column: 1 / -1; }
-  .card h2 { font-size:13px; text-transform:uppercase; letter-spacing:1px; color: var(--text-secondary); margin:0 0 10px 0; }
+  .card h2 { font-size:13px; text-transform:uppercase; letter-spacing:1px; color: var(--text-secondary); margin:0 0 4px 0; }
+  .card-desc { font-size:11px; color: var(--text-muted); margin:0 0 10px 0; line-height:1.4; }
   label { font-size:11px; color: var(--text-secondary); display:block; margin-bottom:4px; margin-top:10px; }
   input[type=text], input[type=password] {
     width:100%; background: var(--bg-primary); border:1px solid var(--border); color: var(--text-primary);
@@ -1081,6 +1082,10 @@ const char INDEX_HTML[] = R"HTMLPAGE(
 
     <div class="card wide">
       <h2>Channel Histogram</h2>
+      <p class="card-desc">RSSI level distribution at ONE fixed frequency (shown below the
+        chart) — not multiple channels. The x-axis is signal strength (dBm), not frequency;
+        a tall bar means many samples landed at that noise/signal level. For a per-frequency
+        view across a band, see Band Spectrum below instead.</p>
       <div class="chartwrap"><canvas id="histCanvas"></canvas></div>
       <div class="readout">
         <span>Floor <b id="histFloor">--</b> dBm</span>
@@ -1093,6 +1098,10 @@ const char INDEX_HTML[] = R"HTMLPAGE(
 
     <div class="card wide">
       <h2>Band Spectrum</h2>
+      <p class="card-desc">Median and peak (p95) RSSI swept across the whole band (x-axis =
+        frequency in MHz) — the dashed markers in Meshpoint's own Band Spectrum card show
+        LoRaWAN/Meshtastic/MeshCore/Pager channel positions on a concentrator; this board has
+        no channel plan of its own, so it's a plain frequency sweep with no markers.</p>
       <div class="chartwrap"><canvas id="sweepCanvas"></canvas></div>
       <div class="legend">
         <span><i style="background:#06b6d4"></i>Median</span>
