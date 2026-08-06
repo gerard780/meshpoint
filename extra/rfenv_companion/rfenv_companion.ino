@@ -1233,7 +1233,7 @@ function drawLines(canvas, median, p95, startMhz, endMhz) {
 
 async function pollStatus() {
   let d;
-  try { d = await apiGet('/api/status'); } catch (e) { return; }
+  try { d = await apiGet('/api/status'); } catch (e) { return null; }
 
   document.getElementById('hostname').textContent = d.hostname + '.local';
   document.getElementById('pollStatus').textContent = d.ever_polled
@@ -1262,24 +1262,45 @@ async function pollStatus() {
     sweepAge.textContent = fmtAgo(d.sweep.age_s) + ' · ' + d.sweep.start_mhz + '-' + d.sweep.end_mhz + ' MHz';
     sweepAge.className = d.sweep.age_s > 300 ? 'stale' : '';
   }
+  return d;
 }
 
-async function scanNow() {
-  const r = document.getElementById('scanResult');
+// Shared by scanNow()/sweepNow(): posts the trigger, then polls until
+// the relevant result's age_s comes back genuinely fresh (not just a
+// fire-and-forget single re-poll, which previously left "Scanning…"/
+// "Sweeping…" stuck on screen forever even once the real result had
+// long since landed -- nothing was ever clearing it). Gives up after
+// maxTries (12s @ 1s each) as a fallback if something's actually stuck.
+async function runAndAwaitFresh(triggerUrl, resultEl, verb, hasFreshResult) {
+  resultEl.className = 'result ok';
+  resultEl.textContent = verb + '…';
   try {
-    await apiPost('/api/scan');
-    r.className = 'result ok'; r.textContent = 'Scanning…';
-    setTimeout(pollStatus, 1500);
-  } catch (e) { r.className = 'result err'; r.textContent = 'Failed'; }
+    await apiPost(triggerUrl);
+  } catch (e) {
+    resultEl.className = 'result err';
+    resultEl.textContent = 'Failed';
+    return;
+  }
+  let tries = 0;
+  const timer = setInterval(async () => {
+    tries += 1;
+    const d = await pollStatus();
+    const fresh = d && hasFreshResult(d);
+    if (fresh || tries >= 12) {
+      clearInterval(timer);
+      resultEl.textContent = fresh ? 'Done.' : 'Still running? refresh the page to check.';
+    }
+  }, 1000);
 }
 
-async function sweepNow() {
-  const r = document.getElementById('sweepResult');
-  try {
-    await apiPost('/api/sweep');
-    r.className = 'result ok'; r.textContent = 'Sweeping…';
-    setTimeout(pollStatus, 2000);
-  } catch (e) { r.className = 'result err'; r.textContent = 'Failed'; }
+function scanNow() {
+  runAndAwaitFresh('/api/scan', document.getElementById('scanResult'), 'Scanning',
+    (d) => d.hist.has && d.hist.age_s <= 2);
+}
+
+function sweepNow() {
+  runAndAwaitFresh('/api/sweep', document.getElementById('sweepResult'), 'Sweeping',
+    (d) => d.sweep.has && d.sweep.age_s <= 2);
 }
 
 async function saveWifi() {
