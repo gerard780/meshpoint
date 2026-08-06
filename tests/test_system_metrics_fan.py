@@ -15,6 +15,12 @@ class FakeFanController:
         self.previous_duty = previous_duty
 
 
+class FakeTempSampler:
+    def __init__(self, poll_interval_s: float, history):
+        self.poll_interval_s = poll_interval_s
+        self.history = history
+
+
 class SystemMetricsFanFieldsTest(unittest.TestCase):
     def tearDown(self):
         system_metrics.reset_routes()
@@ -47,24 +53,46 @@ class SystemMetricsThermalsTest(unittest.TestCase):
     def tearDown(self):
         system_metrics.reset_routes()
 
-    def test_no_fan_controller_reports_unavailable(self):
+    def test_nothing_sampling_reports_unavailable(self):
         system_metrics.init_routes(None)
         result = asyncio.run(system_metrics.thermals())
-        self.assertEqual(result, {"available": False, "points": []})
+        self.assertEqual(result, {"available": False, "fan_available": False, "points": []})
 
-    def test_history_serialized_as_points(self):
+    def test_history_serialized_as_points_with_fan(self):
         fan = FakeFanController(current_duty=0.41, previous_duty=0.36)
         fan.poll_interval_s = 10.0
         fan.history = [(1000.9, 45.26, 0.36), (1010.9, 46.74, 0.41)]
         system_metrics.init_routes(fan)
         result = asyncio.run(system_metrics.thermals())
         self.assertTrue(result["available"])
+        self.assertTrue(result["fan_available"])
         self.assertEqual(result["poll_interval_s"], 10.0)
         self.assertEqual(
             result["points"],
             [
                 {"ts": 1000, "temp_c": 45.3, "duty": 0.36},
                 {"ts": 1010, "temp_c": 46.7, "duty": 0.41},
+            ],
+        )
+
+    def test_temp_only_sampler_reports_available_without_fan(self):
+        """RAK V2-style board: no fan, but CPU temp still gets sampled and
+        charted -- this is the exact bug fixed here, where the Thermals
+        card used to hide entirely without a configured fan."""
+        sampler = FakeTempSampler(
+            poll_interval_s=10.0,
+            history=[(1000.9, 45.26), (1010.9, 46.74)],
+        )
+        system_metrics.init_routes(temp_sampler=sampler)
+        result = asyncio.run(system_metrics.thermals())
+        self.assertTrue(result["available"])
+        self.assertFalse(result["fan_available"])
+        self.assertEqual(result["poll_interval_s"], 10.0)
+        self.assertEqual(
+            result["points"],
+            [
+                {"ts": 1000, "temp_c": 45.3},
+                {"ts": 1010, "temp_c": 46.7},
             ],
         )
 

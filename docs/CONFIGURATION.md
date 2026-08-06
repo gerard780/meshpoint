@@ -956,6 +956,8 @@ Disabled by default: this fan/GPIO wiring is specific to the SenseCap M1 carrier
 
 Requires `gpiozero` and `lgpio` in the Meshpoint **venv** specifically (both in `requirements.txt`, but a venv doesn't share Raspberry Pi OS's system-wide packages, so an existing install needs these added by hand — see `docs/TROUBLESHOOTING.md` for the full command chain, since `lgpio` builds a C extension and needs `python3-dev`/`swig`/`liblgpio-dev` first). Without `lgpio` (or `RPi.GPIO`/`pigpio`), gpiozero falls back to a pure-Python pin factory that refuses PWM on this board's repurposed GPIO13 (`PinPWMUnsupported`), even though it's a real PWM-capable pin on the Pi 4 SoC.
 
+**`fan.enabled: false` does not hide CPU temperature.** The Radio/Hardware page's Thermals chart always shows a CPU temperature history — reading the SoC's own thermal zone has nothing to do with whether a PWM fan is physically wired up. With `fan.enabled: false` (RAK V2/Chameleon/DIY), a lightweight `CpuTempSampler` (`src/hardware/fan_control.py`) samples temperature on the same cadence a real `FanController` would, without touching GPIO at all; the chart's fan-duty panel simply doesn't render since there's no fan to report on. Only actual PWM driving (and the stat-bar Fan card) require `fan.enabled: true` on a board that has the hardware.
+
 ---
 
 ## Status LED (SenseCap M1)

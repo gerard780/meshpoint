@@ -137,6 +137,8 @@ _dab_listener: DabListener | None = None
 _adsb_listener: AdsbListener | None = None
 _fan_controller_task = None
 _fan_controller = None
+_temp_sampler_task = None
+_temp_sampler = None
 _led_controller_task = None
 _led_controller = None
 _button_controller_task = None
@@ -296,7 +298,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         # companion only ever backs this when the real service is None).
         spectrum_routes.init_routes(_spectral_scan_service or _rfenv_companion_service)
 
-        global _fan_controller_task, _fan_controller
+        global _fan_controller_task, _fan_controller, _temp_sampler_task, _temp_sampler
         if config.fan.enabled:
             from src.hardware.fan_control import FanController, FanCurve
 
@@ -313,7 +315,18 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             _fan_controller_task = asyncio.get_running_loop().create_task(
                 _fan_controller.run()
             )
-        system_metrics.init_routes(_fan_controller)
+            system_metrics.init_routes(fan_controller=_fan_controller)
+        else:
+            # No fan hardware configured (e.g. RAK V2) -- still worth
+            # sampling+charting CPU temperature, which has nothing to do
+            # with whether a PWM fan is wired up.
+            from src.hardware.fan_control import CpuTempSampler
+
+            _temp_sampler = CpuTempSampler()
+            _temp_sampler_task = asyncio.get_running_loop().create_task(
+                _temp_sampler.run()
+            )
+            system_metrics.init_routes(temp_sampler=_temp_sampler)
 
         global _led_controller_task, _led_controller
         if config.led.enabled:
@@ -419,6 +432,12 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             _fan_controller_task.cancel()
             try:
                 await _fan_controller_task
+            except BaseException:
+                pass
+        if _temp_sampler_task is not None:
+            _temp_sampler_task.cancel()
+            try:
+                await _temp_sampler_task
             except BaseException:
                 pass
         if _led_controller_task is not None:

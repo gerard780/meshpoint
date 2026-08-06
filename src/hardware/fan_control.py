@@ -180,3 +180,49 @@ class FanController:
         self._on = duty > 0.0
         self.current_duty = duty
         self.history.append((time.time(), temp, duty))
+
+
+class CpuTempSampler:
+    """Polls CPU temperature and keeps an in-memory history -- runs
+    regardless of whether fan control (GPIO PWM) is enabled, since
+    reading the SoC's own thermal zone has nothing to do with whether a
+    PWM fan happens to be wired up (e.g. RAK V2 boards have no fan at
+    all, but still have a CPU worth showing a temperature history for).
+
+    Used in place of ``FanController`` on boards where
+    ``config.fan.enabled`` is False, so the Hardware page's Thermals
+    chart still gets a temperature series -- just without a fan-duty
+    panel, since ``FanController`` is what would otherwise be the only
+    thing sampling this.
+    """
+
+    def __init__(
+        self,
+        temp_fn: Callable[[], Optional[float]] = read_cpu_temp_c,
+        poll_interval_s: float = 10.0,
+    ):
+        self._temp_fn = temp_fn
+        self._poll_interval_s = poll_interval_s
+        # (unix_ts, temp_c) per poll; oldest samples fall off. Same
+        # window/sizing as FanController.history, just without a duty column.
+        self.history: deque[tuple[float, float]] = deque(
+            maxlen=max(1, int(HISTORY_HOURS * 3600 / poll_interval_s)),
+        )
+
+    @property
+    def poll_interval_s(self) -> float:
+        return self._poll_interval_s
+
+    async def run(self) -> None:
+        logger.info(
+            "CPU temperature sampling started (no fan configured, poll every %.0fs)",
+            self._poll_interval_s,
+        )
+        try:
+            while True:
+                temp = self._temp_fn()
+                if temp is not None:
+                    self.history.append((time.time(), temp))
+                await asyncio.sleep(self._poll_interval_s)
+        except asyncio.CancelledError:
+            pass

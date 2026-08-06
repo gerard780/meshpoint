@@ -5,9 +5,13 @@
  * (the fan controller's in-memory ring buffer, one sample per poll).
  * Two stacked Chart.js panels sharing the time window — temperature in
  * °C on top, fan duty in % below — rather than one dual-axis chart, so
- * each panel keeps a single honest scale. Card hides itself when fan
- * control is disabled (``available: false``), matching the stat-bar
- * Fan card.
+ * each panel keeps a single honest scale. The card itself hides only
+ * when nothing is sampling temperature at all (``available: false``);
+ * the fan-duty panel independently hides when there's no fan
+ * configured (``fan_available: false``, e.g. RAK V2 boards) — CPU
+ * temperature has nothing to do with whether a fan is wired up, so it
+ * always shows when obtainable, matching the stat-bar Fan card only
+ * for the duty half of this picture.
  */
 class RadioThermalsCard {
     static TEMP_COLOR = '#f97316';   // matches "Temp" series in node drawer
@@ -33,13 +37,13 @@ class RadioThermalsCard {
             <div class="thermals-empty" data-th-empty hidden>
                 Collecting data — first samples arrive within a minute.
             </div>
-            <div class="thermals-panel">
+            <div class="thermals-panel" data-th-temp-panel>
                 <div class="thermals-panel__label">CPU temp (&deg;C)</div>
                 <div class="thermals-panel__plot">
                     <canvas data-th-temp></canvas>
                 </div>
             </div>
-            <div class="thermals-panel">
+            <div class="thermals-panel" data-th-duty-panel>
                 <div class="thermals-panel__label">Fan duty (%)</div>
                 <div class="thermals-panel__plot">
                     <canvas data-th-duty></canvas>
@@ -63,7 +67,7 @@ class RadioThermalsCard {
                 return;
             }
             this._root.style.display = '';
-            this._draw(data.points || []);
+            this._draw(data.points || [], !!data.fan_available);
         } catch (e) {
             console.error('Thermals load failed:', e);
         }
@@ -79,12 +83,17 @@ class RadioThermalsCard {
         }, 60000);
     }
 
-    _draw(points) {
+    _draw(points, hasFan) {
         const empty = this._root.querySelector('[data-th-empty]');
-        const panels = this._root.querySelectorAll('.thermals-panel');
+        const tempPanel = this._root.querySelector('[data-th-temp-panel]');
+        const dutyPanel = this._root.querySelector('[data-th-duty-panel]');
         const tooFew = points.length < 2 || !window.Chart;
         empty.hidden = !tooFew;
-        panels.forEach((p) => { p.hidden = tooFew; });
+        tempPanel.hidden = tooFew;
+        // No fan configured (e.g. RAK V2) -- there's nothing to chart
+        // here, independent of whether temperature itself has enough
+        // points yet.
+        dutyPanel.hidden = tooFew || !hasFan;
         if (tooFew) return;
 
         const rows = this._downsample(points, RadioThermalsCard.MAX_DRAW_POINTS);
@@ -102,10 +111,12 @@ class RadioThermalsCard {
                     minX, maxX, span,
                     suggestedMin: 40, suggestedMax: 60,
                     fmt: (v) => window.MeshpointDisplayUnits?.formatTemperature(v),
-                    hideXTicks: true,
+                    hideXTicks: hasFan,
                 },
             ),
-            this._panelChart(
+        ];
+        if (hasFan) {
+            this._charts.push(this._panelChart(
                 this._root.querySelector('[data-th-duty]'),
                 rows.map((r) => ({ x: r.ts * 1000, y: r.duty * 100 })),
                 RadioThermalsCard.DUTY_COLOR,
@@ -115,13 +126,16 @@ class RadioThermalsCard {
                     fmt: (v) => `${v.toFixed(0)}%`,
                     hideXTicks: false,
                 },
-            ),
-        ];
+            ));
+        }
 
         const meta = this._root.querySelector('[data-th-meta]');
         const last = rows[rows.length - 1];
-        meta.textContent =
-            `${window.MeshpointDisplayUnits?.formatTemperature(last.temp_c) ?? last.temp_c.toFixed(1) + '°C'} · fan ${(last.duty * 100).toFixed(0)}%`;
+        const tempText = window.MeshpointDisplayUnits?.formatTemperature(last.temp_c)
+            ?? `${last.temp_c.toFixed(1)}°C`;
+        meta.textContent = hasFan
+            ? `${tempText} · fan ${(last.duty * 100).toFixed(0)}%`
+            : tempText;
     }
 
     _panelChart(canvas, data, color, opts) {

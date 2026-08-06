@@ -12,21 +12,31 @@ from src.api.auth.dependencies import require_auth
 from src.api.auth.metrics_api_key import require_session_or_metrics_key
 
 if TYPE_CHECKING:
-    from src.hardware.fan_control import FanController
+    from src.hardware.fan_control import CpuTempSampler, FanController
 
 router = APIRouter(prefix="/api/device", tags=["device"])
 
 _fan_controller: Optional["FanController"] = None
+# Whatever is actually sampling CPU temperature history right now --
+# the real FanController when fan.enabled, otherwise a plain
+# CpuTempSampler (temp reading isn't tied to whether a fan is wired
+# up). None only if somehow neither was started.
+_temp_sampler: Optional["CpuTempSampler"] = None
 
 
-def init_routes(fan_controller: Optional["FanController"] = None) -> None:
-    global _fan_controller
+def init_routes(
+    fan_controller: Optional["FanController"] = None,
+    temp_sampler: Optional["CpuTempSampler"] = None,
+) -> None:
+    global _fan_controller, _temp_sampler
     _fan_controller = fan_controller
+    _temp_sampler = temp_sampler or fan_controller
 
 
 def reset_routes() -> None:
-    global _fan_controller
+    global _fan_controller, _temp_sampler
     _fan_controller = None
+    _temp_sampler = None
 
 
 def _read_cpu_temp() -> float | None:
@@ -88,19 +98,36 @@ async def system_metrics():
 
 @router.get("/thermals", dependencies=[Depends(require_auth)])
 async def thermals():
-    """CPU temperature + fan duty history for the Hardware Thermals chart.
+    """CPU temperature (+ fan duty, when a fan is actually configured)
+    history for the Hardware Thermals chart.
 
-    Sampled by the fan controller's poll loop, so it only exists when fan
-    control is enabled; ``available: false`` hides the card. In-memory
-    ring buffer -- cleared on restart, no database involvement.
+    Temperature is always sampled (``CpuTempSampler``, or the fuller
+    ``FanController`` when ``fan.enabled``) -- reading the SoC's own
+    thermal zone has nothing to do with whether a PWM fan happens to be
+    wired up, so boards with no fan (e.g. RAK V2) still get a
+    temperature history. ``fan_available`` tells the frontend whether
+    to also render the fan-duty panel; each point's ``duty`` key is
+    only present when it does. ``available: false`` only when
+    literally nothing is sampling temperature at all. In-memory ring
+    buffer -- cleared on restart, no database involvement.
     """
-    if _fan_controller is None:
-        return {"available": False, "points": []}
-    return {
-        "available": True,
-        "poll_interval_s": _fan_controller.poll_interval_s,
-        "points": [
+    if _temp_sampler is None:
+        return {"available": False, "fan_available": False, "points": []}
+
+    has_fan = _fan_controller is not None
+    if has_fan:
+        points = [
             {"ts": int(ts), "temp_c": round(temp, 1), "duty": duty}
             for ts, temp, duty in _fan_controller.history
-        ],
+        ]
+    else:
+        points = [
+            {"ts": int(ts), "temp_c": round(temp, 1)}
+            for ts, temp in _temp_sampler.history
+        ]
+    return {
+        "available": True,
+        "fan_available": has_fan,
+        "poll_interval_s": _temp_sampler.poll_interval_s,
+        "points": points,
     }
