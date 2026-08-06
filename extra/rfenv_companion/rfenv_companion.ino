@@ -697,20 +697,35 @@ void drawCurrentScreen() {
   else drawLocalHistScreen();
 }
 
+// Same three-line centered layout as pager_client.ino's own
+// drawBootScreen() (title / capcode / frequency) -- no capcode analog
+// here, so title / "Companion" / anchor frequency instead. Centering
+// uses getTextBounds() (measures the real glyph box) rather than
+// pager_client's manual "N chars * fixed glyph width" math -- more
+// robust, and this file already had the helper in scope here.
 void drawBootScreen() {
   display.clearDisplay();
-  display.setTextSize(2);
   int16_t x1, y1;
   uint16_t w, h;
+
+  display.setTextSize(2);
   const char *title = "RF Env";
   display.getTextBounds(title, 0, 0, &x1, &y1, &w, &h);
-  display.setCursor((OLED_WIDTH - w) / 2, 16);
+  display.setCursor((OLED_WIDTH - w) / 2, 8);
   display.println(title);
+
   display.setTextSize(1);
   const char *sub = "Companion";
   display.getTextBounds(sub, 0, 0, &x1, &y1, &w, &h);
-  display.setCursor((OLED_WIDTH - w) / 2, 40);
+  display.setCursor((OLED_WIDTH - w) / 2, 30);
   display.println(sub);
+
+  char freqBuf[24];
+  snprintf(freqBuf, sizeof(freqBuf), "%.4f MHz", (double)DEFAULT_FREQ_MHZ);
+  display.getTextBounds(freqBuf, 0, 0, &x1, &y1, &w, &h);
+  display.setCursor((OLED_WIDTH - w) / 2, 46);
+  display.println(freqBuf);
+
   display.display();
   delay(1200);
 }
