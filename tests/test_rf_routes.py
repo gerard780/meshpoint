@@ -74,7 +74,7 @@ class TestRfRoutes(unittest.TestCase):
         scan = client.get("/api/rf/status").json()["spectral_scan"]
         self.assertTrue(scan["fleet_expected_fallback"])
         self.assertIn("RAK V2", scan["message"])
-        self.assertIn("packet fallback", scan["message"])
+        self.assertIn("Packet fallback", scan["message"])
 
     def test_histogram_exposed_after_scan(self) -> None:
         wrapper = _FakeWrapper()
