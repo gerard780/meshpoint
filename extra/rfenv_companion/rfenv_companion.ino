@@ -17,7 +17,8 @@
   on the Meshpoint side; this firmware is polled, it never speaks first):
 
     {"cmd":"status"}
-      -> {"type":"status","board":"heltec_v3_rfenv","uptime_ms":<uint32>}
+      -> {"type":"status","board":"heltec_v3_rfenv","band":"eu868"|"70cm",
+          "uptime_ms":<uint32>}
 
     {"cmd":"scan","frequency_hz":<uint32>,"nb_scan":<uint16>}
       -> {"type":"scan_result","frequency_hz":<uint32>,"nb_scan":<uint16>,
@@ -129,10 +130,45 @@
   Hardware pins are the exact ones already verified on this same board
   in extra/pager_client/pager_client.ino -- copied, not re-derived.
 
-  Status: compile-verified only (arduino-cli compile --fqbn
-  esp32:esp32:heltec_wifi_lora_32_V3 --warnings all). No physical board
-  flashed yet for this specific sketch.
+  Status: LIVE-CONFIRMED on real hardware (histogram, sweep, OLED text
+  after the setTextColor fix) via Configuration -> Firmware's compile/
+  flash card.
 */
+
+// ==== BAND SELECT ====
+// Uncomment exactly one before compiling. Same source-level toggle +
+// regex-rewrite mechanism as pocsag_companion.ino's own BOARD SELECT
+// block (see src/api/routes/rfenv_companion_firmware_routes.py's
+// _select_band_define()) -- Configuration -> Firmware's Band picker
+// rewrites this automatically, no need to hand-edit for the normal
+// dashboard-driven flow. EU868 matches this board's primary use case
+// (feeding Meshpoint's RF Environment page, tied to the concentrator's
+// own band); 70CM is for a second, physically distinct board (its own
+// antenna/RF matching network built for that band) used purely as a
+// standalone handheld scanner -- it can never usefully feed a
+// 868/915-band Meshpoint's own RF Environment page.
+#define BAND_EU868
+//#define BAND_70CM
+
+#if defined(BAND_EU868) && defined(BAND_70CM)
+  #error "Uncomment only ONE band in the BAND SELECT block above"
+#elif !defined(BAND_EU868) && !defined(BAND_70CM)
+  #error "Uncomment exactly ONE band in the BAND SELECT block above"
+#endif
+
+// Short band identifier, reported in the {"cmd":"status"} reply --
+// same idea as pocsag_companion.ino's own BOARD_NAME_STR.
+#if defined(BAND_70CM)
+  #define BAND_NAME_STR "70cm"
+  #define DEFAULT_FREQ_MHZ 433.500f
+  #define BAND_START_MHZ 430.0f
+  #define BAND_END_MHZ   440.0f
+#else
+  #define BAND_NAME_STR "eu868"
+  #define DEFAULT_FREQ_MHZ 869.525f
+  #define BAND_START_MHZ 863.0f
+  #define BAND_END_MHZ   870.0f
+#endif
 
 #include <Arduino.h>
 #include <SPI.h>
@@ -180,9 +216,9 @@ Adafruit_SSD1306 display(OLED_WIDTH, OLED_HEIGHT, &Wire, OLED_RST_PIN);
 #define SAMPLE_DELAY_MS 2
 #define RETUNE_SETTLE_MS 5
 
-#define DEFAULT_FREQ_MHZ 869.525f // used both for radio.begin() and as the
-                                   // local button-triggered scan's anchor
-                                   // until Meshpoint has actually polled once
+// DEFAULT_FREQ_MHZ (used both for radio.begin() and as the local
+// button-triggered scan's anchor until Meshpoint has actually polled
+// once) is derived from the BAND SELECT block near the top of the file.
 
 // Button-triggered local scan (see header comment) -- fewer samples than
 // the serial-triggered default since a human is standing there watching
@@ -196,11 +232,9 @@ Adafruit_SSD1306 display(OLED_WIDTH, OLED_HEIGHT, &Wire, OLED_RST_PIN);
 #define SWEEP_MAX_POINTS 128 // safety cap on the incoming frequencies_hz array
 
 // ---------- Standalone live band-scan (see header comment) ----------
-// Default EU868 -- adjust to the deployment's own region if reused
-// elsewhere; this is a firmware-local convenience view, not something
-// Meshpoint coordinates or depends on.
-#define BAND_START_MHZ 863.0f
-#define BAND_END_MHZ   870.0f
+// BAND_START_MHZ/BAND_END_MHZ are derived from the BAND SELECT block
+// near the top of the file -- this is a firmware-local convenience
+// view either way, not something Meshpoint coordinates or depends on.
 #define BAND_STEPS 32 // -> 4px-wide columns on a 128px-wide screen
 #define BAND_REDRAW_EVERY_N_STEPS 1 // 32 steps is few enough to redraw every hop
 
@@ -489,6 +523,7 @@ void sendStatusReply() {
   JsonDocument out;
   out["type"] = "status";
   out["board"] = "heltec_v3_rfenv";
+  out["band"] = BAND_NAME_STR;
   out["uptime_ms"] = millis();
   serializeJson(out, Serial);
   Serial.println();
@@ -773,7 +808,7 @@ void setup() {
   pinMode(BUTTON_GPIO, INPUT_PULLUP);
 
   SPI.begin(LORA_SCK, LORA_MISO, LORA_MOSI, LORA_CS);
-  int state = radio.begin(869.525, 125.0, 9, 7, RADIOLIB_SX126X_SYNC_WORD_PRIVATE, 10, 8);
+  int state = radio.begin(DEFAULT_FREQ_MHZ, 125.0, 9, 7, RADIOLIB_SX126X_SYNC_WORD_PRIVATE, 10, 8);
   if (state != RADIOLIB_ERR_NONE) {
     Serial.printf("[!] Radio init failed: %d\n", state);
     display.clearDisplay();

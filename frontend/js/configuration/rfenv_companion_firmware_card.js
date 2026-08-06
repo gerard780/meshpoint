@@ -3,13 +3,15 @@
  *
  * Drives src/api/routes/rfenv_companion_firmware_routes.py's
  * compile/flash-stream endpoints -- same arduino-cli mechanism as the
- * Pager/POCSAG cards. Closer to pager_firmware_card.js in shape (single
- * board, Heltec V3 only, no board picker) since rfenv_companion.ino has
- * no BOARD_* toggle either -- but unlike the pager, there's no
- * compile-time field to fill in yet (no capcodes/frequency to inject;
- * the anchor frequency lives in RfEnvCompanionScanService at runtime,
- * not baked into the sketch -- a per-device override may be added here
- * later), so this card is just a device picker plus Compile/Flash.
+ * Pager/POCSAG cards. Single board (Heltec V3, no board picker -- the
+ * sketch has no BOARD_* toggle) but DOES have one compile-time choice:
+ * RF band (BAND_EU868 vs BAND_70CM, see rfenv_companion.ino's own "BAND
+ * SELECT" block) -- same auto-discovered-pulldown pattern
+ * pocsag_firmware_card.js uses for its Board picker, just for a Band
+ * picker instead. A 70cm-flashed board is a standalone handheld
+ * scanner -- it can't usefully feed a 868/915-band Meshpoint's own RF
+ * Environment page, so this is a second physical board's firmware, not
+ * an alternate mode for the one already configured as a companion.
  */
 
 class RfenvCompanionFirmwareConfigCard {
@@ -18,6 +20,7 @@ class RfenvCompanionFirmwareConfigCard {
         this._root = null;
         this._enumeratedPorts = [];
         this._portUsage = {};
+        this._bandTargets = [];
     }
 
     mount(root) {
@@ -31,9 +34,15 @@ class RfenvCompanionFirmwareConfigCard {
                             Build and flash extra/rfenv_companion straight from this
                             dashboard -- no Arduino IDE needed. Requires the arduino-cli
                             toolchain (installed automatically by scripts/install.sh).
-                            Heltec V3 only.
+                            Heltec V3 only. Pick 70cm to build a standalone handheld
+                            scanner on a second board -- it won't feed this box's own
+                            RF Environment page.
                         </p>
                     </header>
+                    <label class="cfg-field cfg-field--narrow">
+                        <span class="cfg-field__label">Band</span>
+                        <select class="cfg-field__input" data-firmware-band></select>
+                    </label>
                     <label class="cfg-field cfg-firmware-field cfg-firmware-board-field">
                         <span class="cfg-field__label">Device to flash</span>
                         <select class="cfg-field__input" data-firmware-device></select>
@@ -69,7 +78,28 @@ class RfenvCompanionFirmwareConfigCard {
         this._root.querySelector('[data-firmware-rescan-usb]')
             .addEventListener('click', (e) => this._rescanUsb(e.currentTarget));
 
+        this._loadFirmwareTargets();
         this._refreshSerialPortsList();
+    }
+
+    /** Band pulldown options, auto-populated from GET .../targets --
+     * whatever BAND_* toggles rfenv_companion.ino's own "BAND SELECT"
+     * block actually lists (see rfenv_companion_firmware_routes.py's
+     * _discover_band_targets()). Same pattern pocsag_firmware_card.js
+     * uses for its Board pulldown. */
+    async _loadFirmwareTargets() {
+        const select = this._root.querySelector('[data-firmware-band]');
+        if (!select) return;
+        const result = await this._api.get('/api/rfenv-companion/firmware/targets');
+        const bands = (result && Array.isArray(result.bands)) ? result.bands : [];
+        this._bandTargets = bands;
+        if (bands.length === 0) {
+            select.innerHTML = '<option value="">No bands found</option>';
+            return;
+        }
+        select.innerHTML = bands.map((b) => (
+            `<option value="${this._esc(b.macro)}">${this._esc(b.label)}</option>`
+        )).join('');
     }
 
     render(config) {
@@ -171,10 +201,20 @@ class RfenvCompanionFirmwareConfigCard {
     }
 
     async _compileFirmware() {
+        const bandSelect = this._root.querySelector('[data-firmware-band]');
+        const bandMacro = bandSelect?.value;
+        const status = this._root.querySelector('[data-firmware-status]');
+        if (!bandMacro) {
+            status.dataset.kind = 'error';
+            status.textContent = 'No band selected -- rescan or reload the page.';
+            return;
+        }
+        const bandLabel = bandSelect.options[bandSelect.selectedIndex]?.text || bandMacro;
+
         await this._runFirmwareStream(
             '/api/rfenv-companion/firmware/compile/stream',
-            {},
-            'Compiling for Heltec V3…',
+            { band_macro: bandMacro },
+            `Compiling for ${bandLabel}…`,
             'Compiled',
         );
     }
