@@ -15,6 +15,10 @@
 #                                               # toolchain (POCSAG/Pager/RF
 #                                               # Environment Compile+Flash);
 #                                               # otherwise prompted [y/N]
+#   sudo ./scripts/install.sh --skip-rtlsdr    # skip RTL-SDR support (FM/RDS,
+#                                               # P2000/Pagers/POCSAG, 433/868
+#                                               # sensors, ADS-B, DAB+);
+#                                               # otherwise prompted [y/N]
 #
 # After completion, reboot then run:  meshpoint setup
 #
@@ -113,6 +117,37 @@ if [ "$INSTALL_ARDUINO" = "1" ] && [ -t 0 ]; then
     case "$arduino_reply" in
         [yY]*) INSTALL_ARDUINO=1 ;;
         *) INSTALL_ARDUINO=0 ;;
+    esac
+fi
+
+# Sections 6-11 below are all downstream of one physical USB RTL-SDR
+# dongle: the rtl-sdr userspace library + kernel DVB blacklist, then
+# five decoders built/installed on top of it -- redsea (RDS), multimon-ng
+# (POCSAG/P2000/pager digital modes), rtl_433 (generic 433/868 OOK/FSK
+# sensors), dump1090 (ADS-B air traffic), and welle.io (DAB+). Every one
+# of them is dead weight without a dongle plugged in, and several are
+# from-source builds, so ask once for all six rather than six separate
+# prompts -- they're only ever used together on the Radio tab anyway.
+echo ""
+echo "Another optional piece: the Radio tab's RTL-SDR listeners (FM/RDS,"
+echo "P2000/Pagers/POCSAG, generic 433/868 sensors, ADS-B air traffic,"
+echo "DAB+) all need a physical USB RTL-SDR dongle -- without one,"
+echo "installing their decoders (several built from source) is just"
+echo "wasted time and disk space. Skip it now and re-run this installer"
+echo "later (without --skip-rtlsdr) to add it once you have a dongle."
+echo ""
+
+INSTALL_RTLSDR=1
+for arg in "$@"; do
+    case "$arg" in
+        --skip-rtlsdr) INSTALL_RTLSDR=0 ;;
+    esac
+done
+if [ "$INSTALL_RTLSDR" = "1" ] && [ -t 0 ]; then
+    read -r -p "Install RTL-SDR support now? [y/N] " rtlsdr_reply || rtlsdr_reply=""
+    case "$rtlsdr_reply" in
+        [yY]*) INSTALL_RTLSDR=1 ;;
+        *) INSTALL_RTLSDR=0 ;;
     esac
 fi
 
@@ -287,14 +322,15 @@ systemctl restart gpsd.socket 2>/dev/null || warn "Could not start gpsd.socket"
 # Idempotent: skips the kernel blacklist if already present, skips the
 # clone+build if librtlsdr is already installed.
 
-RTLSDR_BUILD_DIR="/opt/rtl-sdr"
-DVB_BLACKLIST_FILE="/etc/modprobe.d/blacklist-rtlsdr-dvb.conf"
+if [ "$INSTALL_RTLSDR" = "1" ]; then
+    RTLSDR_BUILD_DIR="/opt/rtl-sdr"
+    DVB_BLACKLIST_FILE="/etc/modprobe.d/blacklist-rtlsdr-dvb.conf"
 
-info "Blacklisting the kernel DVB-T stack (conflicts with rtl-sdr userspace tools)..."
-if [ -f "$DVB_BLACKLIST_FILE" ] && grep -q '^blacklist dvb_usb_rtl28xxu' "$DVB_BLACKLIST_FILE"; then
-    info "DVB-T stack already blacklisted"
-else
-    cat > "$DVB_BLACKLIST_FILE" <<'_DVB_BLACKLIST'
+    info "Blacklisting the kernel DVB-T stack (conflicts with rtl-sdr userspace tools)..."
+    if [ -f "$DVB_BLACKLIST_FILE" ] && grep -q '^blacklist dvb_usb_rtl28xxu' "$DVB_BLACKLIST_FILE"; then
+        info "DVB-T stack already blacklisted"
+    else
+        cat > "$DVB_BLACKLIST_FILE" <<'_DVB_BLACKLIST'
 # Managed by Meshpoint installer. The kernel's DVB-T driver stack
 # (usb bridge + demodulator + tuner-support modules) claims the
 # RTL2832U chip on boot, which then can't be opened by rtl-sdr's own
@@ -304,155 +340,158 @@ blacklist dvb_usb_rtl28xxu
 blacklist rtl_2832
 blacklist rtl_2830
 _DVB_BLACKLIST
-fi
-# Also unload them right now if a dongle was already plugged in this
-# boot -- the blacklist file alone only takes effect on the NEXT boot.
-# Unload order matters: the usb bridge module depends on the
-# demodulator modules, so it must go first or -r fails with "in use".
-modprobe -r dvb_usb_rtl28xxu 2>/dev/null || true
-modprobe -r rtl_2832 2>/dev/null || true
-modprobe -r rtl_2830 2>/dev/null || true
+    fi
+    # Also unload them right now if a dongle was already plugged in this
+    # boot -- the blacklist file alone only takes effect on the NEXT boot.
+    # Unload order matters: the usb bridge module depends on the
+    # demodulator modules, so it must go first or -r fails with "in use".
+    modprobe -r dvb_usb_rtl28xxu 2>/dev/null || true
+    modprobe -r rtl_2832 2>/dev/null || true
+    modprobe -r rtl_2830 2>/dev/null || true
 
-if ldconfig -p | grep -q librtlsdr; then
-    info "librtlsdr already installed, skipping RTL-SDR build"
+    if ldconfig -p | grep -q librtlsdr; then
+        info "librtlsdr already installed, skipping RTL-SDR build"
+    else
+        info "Cloning and building rtl-sdr..."
+        rm -rf "$RTLSDR_BUILD_DIR"
+        git clone --depth 1 git://git.osmocom.org/rtl-sdr.git "$RTLSDR_BUILD_DIR"
+        mkdir -p "${RTLSDR_BUILD_DIR}/build"
+        (
+            cd "${RTLSDR_BUILD_DIR}/build"
+            cmake ../ -DINSTALL_UDEV_RULES=ON
+            make -j"$(nproc)"
+            make install
+            ldconfig
+        )
+    fi
+
+    # ── 7. Install redsea (RTL-SDR RDS decoder) ───────────────────────
+    #
+    # Decodes RDS (station name, radio text, PI code) out of FM broadcast
+    # capture, on top of the librtlsdr built in 3c. Built from source
+    # (windytan/redsea upstream) via meson, same rationale as rtl-sdr:
+    # no distro package tracks upstream closely enough.
+    #
+    # Idempotent: skips the clone+build if the redsea binary already exists.
+
+    REDSEA_BUILD_DIR="/opt/redsea"
+
+    if command -v redsea &>/dev/null; then
+        info "redsea already installed, skipping build"
+    else
+        info "Cloning and building redsea..."
+        rm -rf "$REDSEA_BUILD_DIR"
+        git clone --depth 1 https://github.com/windytan/redsea.git "$REDSEA_BUILD_DIR"
+        (
+            cd "$REDSEA_BUILD_DIR"
+            meson setup build
+            cd build
+            meson compile
+            meson install
+            ldconfig
+        )
+    fi
+
+    # ── 8. Install multimon-ng (RTL-SDR digital mode decoder) ─────────
+    #
+    # Decodes POCSAG/AFSK/DTMF/etc out of demodulated audio, fed from
+    # `rtl_fm` piped in. Built from source (EliasOenal/multimon-ng
+    # upstream) via CMake -- the project dropped its old qt4-qmake build
+    # system entirely, so no Qt4 packages are needed (and qt4-qmake isn't
+    # even in current Raspberry Pi OS repos anymore).
+    #
+    # Idempotent: skips the clone+build if the multimon-ng binary already
+    # exists.
+
+    MULTIMON_BUILD_DIR="/opt/multimon-ng"
+
+    if command -v multimon-ng &>/dev/null; then
+        info "multimon-ng already installed, skipping build"
+    else
+        info "Cloning and building multimon-ng..."
+        rm -rf "$MULTIMON_BUILD_DIR"
+        git clone --depth 1 https://github.com/EliasOenal/multimon-ng.git "$MULTIMON_BUILD_DIR"
+        (
+            cd "$MULTIMON_BUILD_DIR"
+            cmake -S . -B build
+            cmake --build build --parallel "$(nproc)"
+            cmake --install build
+            ldconfig
+        )
+    fi
+
+    # ── 9. Install rtl_433 (RTL-SDR generic OOK/FSK decoder) ──────────
+    #
+    # Decodes a broad range of 433/315/868 MHz OOK/FSK devices (weather
+    # stations, TPMS, remote sensors, etc.) from the RTL-SDR dongle --
+    # wider device coverage than the P2000/Pagers/POCSAG multimon-ng
+    # pipelines above, which only cover FLEX/POCSAG paging protocols.
+    # Installed via apt (unlike rtl-sdr/redsea/multimon-ng above, which
+    # are built from source because their distro packages lag upstream
+    # too far) -- the Raspberry Pi OS `rtl-433` package is small (~500 KB)
+    # and current enough for this. --no-install-recommends skips the
+    # optional soapysdr module packages, which nothing here uses.
+    #
+    # Idempotent: skips the apt install if the rtl_433 binary already exists.
+
+    if command -v rtl_433 &>/dev/null; then
+        info "rtl_433 already installed, skipping"
+    else
+        info "Installing rtl_433..."
+        apt-get install -y -qq --no-install-recommends rtl-433
+    fi
+
+    # ── 10. Install dump1090 (RTL-SDR ADS-B air traffic decoder) ─────
+    #
+    # Decodes 1090ES ADS-B squitters from aircraft transponders off the
+    # RTL-SDR dongle, on top of the librtlsdr built in section 6. Built
+    # from source (MalcolmRobb/dump1090 fork -- adds interactive mode and
+    # network output on top of the original antirez/dump1090). Upstream's
+    # Makefile has no `install` target, so the binaries are copied to
+    # /usr/local/bin by hand after the build. EXTRACFLAGS=-fcommon works
+    # around this 2016-era codebase's tentative global definitions (Modes,
+    # tDF, etc. declared without `extern` in dump1090.h) hitting multiple
+    # definition link errors under GCC 10+, which defaults to -fno-common.
+    #
+    # Idempotent: skips the clone+build if the dump1090 binary already
+    # exists.
+
+    DUMP1090_BUILD_DIR="/opt/dump1090"
+
+    if command -v dump1090 &>/dev/null; then
+        info "dump1090 already installed, skipping build"
+    else
+        info "Cloning and building dump1090..."
+        rm -rf "$DUMP1090_BUILD_DIR"
+        git clone --depth 1 https://github.com/MalcolmRobb/dump1090.git "$DUMP1090_BUILD_DIR"
+        (
+            cd "$DUMP1090_BUILD_DIR"
+            make -j"$(nproc)" EXTRACFLAGS=-fcommon
+            install -m 755 dump1090 view1090 /usr/local/bin/
+        )
+    fi
+
+    # ── 11. Install welle.io (DAB+ tab) ───────────────────────────────
+    #
+    # The Debian/Raspberry Pi OS `welle.io` package ships both the GUI
+    # app and the headless `welle-cli` binary Meshpoint's DAB+ tab
+    # actually drives (src/audio/dab_listener.py spawns
+    # `welle-cli -c <channel> -w <port>` and talks to its embedded
+    # webserver) -- confirmed live on this hardware, not assumed.
+    # --no-install-recommends skips the Qt/QML GUI dependency chain that
+    # only the GUI app needs (~87 MB installed otherwise); welle-cli
+    # itself has no GUI dependencies.
+    #
+    # Idempotent: skips the apt install if welle-cli already exists.
+
+    if command -v welle-cli &>/dev/null; then
+        info "welle.io (welle-cli) already installed, skipping"
+    else
+        info "Installing welle.io (DAB+)..."
+        apt-get install -y -qq --no-install-recommends welle.io
+    fi
 else
-    info "Cloning and building rtl-sdr..."
-    rm -rf "$RTLSDR_BUILD_DIR"
-    git clone --depth 1 git://git.osmocom.org/rtl-sdr.git "$RTLSDR_BUILD_DIR"
-    mkdir -p "${RTLSDR_BUILD_DIR}/build"
-    (
-        cd "${RTLSDR_BUILD_DIR}/build"
-        cmake ../ -DINSTALL_UDEV_RULES=ON
-        make -j"$(nproc)"
-        make install
-        ldconfig
-    )
-fi
-
-# ── 7. Install redsea (RTL-SDR RDS decoder) ───────────────────────
-#
-# Decodes RDS (station name, radio text, PI code) out of FM broadcast
-# capture, on top of the librtlsdr built in 3c. Built from source
-# (windytan/redsea upstream) via meson, same rationale as rtl-sdr:
-# no distro package tracks upstream closely enough.
-#
-# Idempotent: skips the clone+build if the redsea binary already exists.
-
-REDSEA_BUILD_DIR="/opt/redsea"
-
-if command -v redsea &>/dev/null; then
-    info "redsea already installed, skipping build"
-else
-    info "Cloning and building redsea..."
-    rm -rf "$REDSEA_BUILD_DIR"
-    git clone --depth 1 https://github.com/windytan/redsea.git "$REDSEA_BUILD_DIR"
-    (
-        cd "$REDSEA_BUILD_DIR"
-        meson setup build
-        cd build
-        meson compile
-        meson install
-        ldconfig
-    )
-fi
-
-# ── 8. Install multimon-ng (RTL-SDR digital mode decoder) ─────────
-#
-# Decodes POCSAG/AFSK/DTMF/etc out of demodulated audio, fed from
-# `rtl_fm` piped in. Built from source (EliasOenal/multimon-ng
-# upstream) via CMake -- the project dropped its old qt4-qmake build
-# system entirely, so no Qt4 packages are needed (and qt4-qmake isn't
-# even in current Raspberry Pi OS repos anymore).
-#
-# Idempotent: skips the clone+build if the multimon-ng binary already
-# exists.
-
-MULTIMON_BUILD_DIR="/opt/multimon-ng"
-
-if command -v multimon-ng &>/dev/null; then
-    info "multimon-ng already installed, skipping build"
-else
-    info "Cloning and building multimon-ng..."
-    rm -rf "$MULTIMON_BUILD_DIR"
-    git clone --depth 1 https://github.com/EliasOenal/multimon-ng.git "$MULTIMON_BUILD_DIR"
-    (
-        cd "$MULTIMON_BUILD_DIR"
-        cmake -S . -B build
-        cmake --build build --parallel "$(nproc)"
-        cmake --install build
-        ldconfig
-    )
-fi
-
-# ── 9. Install rtl_433 (RTL-SDR generic OOK/FSK decoder) ──────────
-#
-# Decodes a broad range of 433/315/868 MHz OOK/FSK devices (weather
-# stations, TPMS, remote sensors, etc.) from the RTL-SDR dongle --
-# wider device coverage than the P2000/Pagers/POCSAG multimon-ng
-# pipelines above, which only cover FLEX/POCSAG paging protocols.
-# Installed via apt (unlike rtl-sdr/redsea/multimon-ng above, which
-# are built from source because their distro packages lag upstream
-# too far) -- the Raspberry Pi OS `rtl-433` package is small (~500 KB)
-# and current enough for this. --no-install-recommends skips the
-# optional soapysdr module packages, which nothing here uses.
-#
-# Idempotent: skips the apt install if the rtl_433 binary already exists.
-
-if command -v rtl_433 &>/dev/null; then
-    info "rtl_433 already installed, skipping"
-else
-    info "Installing rtl_433..."
-    apt-get install -y -qq --no-install-recommends rtl-433
-fi
-
-# ── 10. Install dump1090 (RTL-SDR ADS-B air traffic decoder) ─────
-#
-# Decodes 1090ES ADS-B squitters from aircraft transponders off the
-# RTL-SDR dongle, on top of the librtlsdr built in section 6. Built
-# from source (MalcolmRobb/dump1090 fork -- adds interactive mode and
-# network output on top of the original antirez/dump1090). Upstream's
-# Makefile has no `install` target, so the binaries are copied to
-# /usr/local/bin by hand after the build. EXTRACFLAGS=-fcommon works
-# around this 2016-era codebase's tentative global definitions (Modes,
-# tDF, etc. declared without `extern` in dump1090.h) hitting multiple
-# definition link errors under GCC 10+, which defaults to -fno-common.
-#
-# Idempotent: skips the clone+build if the dump1090 binary already
-# exists.
-
-DUMP1090_BUILD_DIR="/opt/dump1090"
-
-if command -v dump1090 &>/dev/null; then
-    info "dump1090 already installed, skipping build"
-else
-    info "Cloning and building dump1090..."
-    rm -rf "$DUMP1090_BUILD_DIR"
-    git clone --depth 1 https://github.com/MalcolmRobb/dump1090.git "$DUMP1090_BUILD_DIR"
-    (
-        cd "$DUMP1090_BUILD_DIR"
-        make -j"$(nproc)" EXTRACFLAGS=-fcommon
-        install -m 755 dump1090 view1090 /usr/local/bin/
-    )
-fi
-
-# ── 11. Install welle.io (DAB+ tab) ───────────────────────────────
-#
-# The Debian/Raspberry Pi OS `welle.io` package ships both the GUI
-# app and the headless `welle-cli` binary Meshpoint's DAB+ tab
-# actually drives (src/audio/dab_listener.py spawns
-# `welle-cli -c <channel> -w <port>` and talks to its embedded
-# webserver) -- confirmed live on this hardware, not assumed.
-# --no-install-recommends skips the Qt/QML GUI dependency chain that
-# only the GUI app needs (~87 MB installed otherwise); welle-cli
-# itself has no GUI dependencies.
-#
-# Idempotent: skips the apt install if welle-cli already exists.
-
-if command -v welle-cli &>/dev/null; then
-    info "welle.io (welle-cli) already installed, skipping"
-else
-    info "Installing welle.io (DAB+)..."
-    apt-get install -y -qq --no-install-recommends welle.io
+    info "Skipping RTL-SDR support (sections 6-11) -- re-run without --skip-rtlsdr, or answer Y next time, to add it later"
 fi
 
 # ── 12. Install Meshtastic and MeshCore CLI tools ─────────────────
