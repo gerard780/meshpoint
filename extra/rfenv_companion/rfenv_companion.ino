@@ -762,6 +762,12 @@ void setup() {
     Serial.println("[!] OLED init failed");
   }
   display.setRotation(0);
+  // Set once, applies to every subsequent print()/println() for the
+  // rest of the program -- without this, text silently never rendered
+  // (drawFastHLine()/fillRect() always pass their color explicitly so
+  // those drew fine regardless; only text relies on this state). Same
+  // call pager_client.ino's own confirmed-working boot screen makes.
+  display.setTextColor(SSD1306_WHITE);
   drawBootScreen();
 
   pinMode(BUTTON_GPIO, INPUT_PULLUP);
