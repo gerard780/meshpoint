@@ -58,6 +58,13 @@
         margin-left: 14px;
     }
     button:hover { border-color: var(--accent); }
+    .cluster-toggle-btn {
+        background: var(--panel); color: var(--text);
+        border: 1px solid var(--border); border-radius: 6px;
+        padding: 6px 10px; font-family: inherit; font-size: 12px;
+        cursor: pointer; margin: 0; box-shadow: 0 1px 4px rgba(0,0,0,0.4);
+    }
+    .cluster-toggle-btn:hover { border-color: var(--accent); }
 
     .stats-row {
         display: grid;
@@ -670,12 +677,40 @@ const markerGroup = L.markerClusterGroup({
         });
     },
 });
-map.addLayer(markerGroup);
+// Plain (unclustered) alternative to markerGroup -- every node marker
+// shown individually regardless of zoom, for when a "20" cluster badge
+// is hiding exactly the node you're looking for. Only one of the two is
+// ever attached to the map at once; renderMap() populates whichever is
+// currently active.
+const flatGroup = L.layerGroup();
+let clusteringEnabled = localStorage.getItem('meshradar_clustering') !== '0';
+(clusteringEnabled ? markerGroup : flatGroup).addTo(map);
+
+const ClusterToggleControl = L.Control.extend({
+    options: { position: 'topright' },
+    onAdd() {
+        const btn = L.DomUtil.create('button', 'cluster-toggle-btn');
+        btn.textContent = clusteringEnabled ? 'Clustered' : 'Unclustered';
+        btn.title = 'Toggle whether nearby nodes cluster into a count badge';
+        L.DomEvent.disableClickPropagation(btn);
+        L.DomEvent.on(btn, 'click', () => {
+            map.removeLayer(clusteringEnabled ? markerGroup : flatGroup);
+            clusteringEnabled = !clusteringEnabled;
+            localStorage.setItem('meshradar_clustering', clusteringEnabled ? '1' : '0');
+            btn.textContent = clusteringEnabled ? 'Clustered' : 'Unclustered';
+            map.addLayer(clusteringEnabled ? markerGroup : flatGroup);
+            renderMap(lastDevicesRendered, lastNodesRendered);
+        });
+        return btn;
+    },
+});
+map.addControl(new ClusterToggleControl());
 
 let hasFitBounds = false;
 let deviceMarkers = {};
 let nodeMarkers = {};
 let lastHeardByKey = {};
+let lastDevicesRendered = [];
 
 // (0, 0) -- "Null Island" -- is config.py's/default.yaml's actual default
 // for an unset device.latitude/longitude, and some GPS modules report it
@@ -749,6 +784,8 @@ function renderMap(devices, nodes) {
     deviceMarkers = {};
     nodeMarkers = {};
     markerGroup.clearLayers();
+    flatGroup.clearLayers();
+    const activeGroup = clusteringEnabled ? markerGroup : flatGroup;
 
     const deviceNameById = {};
     for (const d of devices) deviceNameById[d.device_id] = d.device_name;
@@ -768,7 +805,7 @@ function renderMap(devices, nodes) {
     for (const n of nodes) {
         if (!n.has_position || !isValidPosition(n.latitude, n.longitude)) continue;
         const marker = nodeMarkerFor(n, deviceNameById[n.device_id]);
-        markerGroup.addLayer(marker);
+        activeGroup.addLayer(marker);
         nodeMarkers[n.node_id] = marker;
         // Still plotted (visible if you pan there manually), but a node
         // not heard from in ages -- e.g. a joke/test node picked up by a
@@ -1409,6 +1446,7 @@ async function loadAll() {
 
         renderMap(devices, nodes);
         triggerLiveEffects(packets, nodes);
+        lastDevicesRendered = devices;
         lastNodesRendered = nodes;
         lastPacketsRendered = packets;
         hopByNode = latestHopCountBySource(packets);
