@@ -43,6 +43,9 @@ logger = logging.getLogger("local_meshradar")
 
 VIEWER_HTML_PATH = Path(__file__).parent / "viewer.html"
 DASHBOARD_HTML_PATH = Path(__file__).parent / "dashboard.html"
+MANIFEST_PATH = Path(__file__).parent / "manifest.json"
+ASSETS_DIR = Path(__file__).parent / "assets"
+_ASSET_CONTENT_TYPES = {".png": "image/png", ".svg": "image/svg+xml"}
 
 
 def _now() -> str:
@@ -504,6 +507,15 @@ def make_http_handler(db_path: str, ws_port: int):
             self.end_headers()
             self.wfile.write(body)
 
+        def _send_file(self, path: Path, content_type: str) -> None:
+            body = path.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "public, max-age=86400")
+            self.end_headers()
+            self.wfile.write(body)
+
         def _send_html(self, path: Path, inject_ws_port: bool = False) -> None:
             text = path.read_text(encoding="utf-8")
             if inject_ws_port:
@@ -531,6 +543,19 @@ def make_http_handler(db_path: str, ws_port: int):
                     self._send_html(DASHBOARD_HTML_PATH, inject_ws_port=True)
                 elif parsed.path in ("/viewer", "/viewer.html"):
                     self._send_html(VIEWER_HTML_PATH)
+                elif parsed.path == "/manifest.json":
+                    self._send_file(MANIFEST_PATH, "application/manifest+json")
+                elif parsed.path.startswith("/assets/"):
+                    # Strip to a bare filename before touching the filesystem --
+                    # this is the only place a request path reaches disk, and it
+                    # must never be able to escape ASSETS_DIR (e.g. "../server.py").
+                    name = Path(parsed.path).name
+                    suffix = Path(name).suffix.lower()
+                    asset_path = ASSETS_DIR / name
+                    if name and suffix in _ASSET_CONTENT_TYPES and asset_path.is_file():
+                        self._send_file(asset_path, _ASSET_CONTENT_TYPES[suffix])
+                    else:
+                        self._send_json({"error": "not found"}, status=404)
                 elif parsed.path == "/api/stats":
                     devices = conn.execute("SELECT COUNT(*) FROM devices").fetchone()[0]
                     nodes_unique = conn.execute(
