@@ -43,7 +43,7 @@ Two listeners start:
   tabs also connect here, at `ws://.../live`, for real-time dashboard
   updates (see below) — same port, different path, nothing to configure
   separately.
-- `http://0.0.0.0:8766` — the dashboard/viewer pages and their JSON API
+- `http://0.0.0.0:8080` — the dashboard/viewer pages and their JSON API
   (`/api/devices`, `/api/nodes`, `/api/packets?limit=N`, `/api/stats`).
 
 Useful flags: `--ws-port`, `--http-port`, `--db <path>` (default
@@ -51,7 +51,7 @@ Useful flags: `--ws-port`, `--http-port`, `--db <path>` (default
 
 Two pages:
 
-- `http://<this-machine>:8766/` — the main dashboard, same theme (colors,
+- `http://<this-machine>:8080/` — the main dashboard, same theme (colors,
   fonts) as the real Meshpoint dashboard (`frontend/css/dashboard.css`):
   - Stat tiles + a Leaflet map (same CARTO dark tile layer, marker styling,
     and clustering as `frontend/js/components/node_map.js`), plotting every
@@ -77,7 +77,7 @@ Two pages:
     reconnect-with-backoff pattern. A 30s poll still runs underneath as a
     safety net in case the live socket is ever silently down.
   - Also reachable at `/dashboard` (kept as an alias).
-- `http://<this-machine>:8766/viewer` — the original plain-tables page
+- `http://<this-machine>:8080/viewer` — the original plain-tables page
   (Devices / Nodes / Recent packets, no map), still there as the simplest
   way to eyeball raw data landing without any of the above.
 
@@ -176,5 +176,5 @@ repeatable sync. Always `--dry-run` first if unsure.
   `{"type": "command", ...}` — this receiver never does. Fully optional;
   add it later if remote control turns out to matter.
 - **No auth enforcement.** This is meant for a trusted local network. Don't
-  expose port 8765/8766 to the public internet without adding real auth in
+  expose port 8765/8080 to the public internet without adding real auth in
   front of it (a reverse proxy with basic auth, a VPN, etc.).

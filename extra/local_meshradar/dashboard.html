@@ -798,10 +798,10 @@ function focusOn(lat, lon) {
 // CSS box-shadow (what the node-pulse class uses) doesn't reliably apply
 // to those. Independent of the marker layer's own render lifecycle, so
 // it survives a renderMap() rebuild happening mid-animation.
-function pulseAt(lat, lon) {
+function pulseAt(lat, lon, color = '#00ff88') {
     let radius = 6, opacity = 0.9;
     const ring = L.circleMarker([lat, lon], {
-        radius, color: '#00ff88', weight: 2, fillOpacity: 0, opacity,
+        radius, color, weight: 2, fillOpacity: 0, opacity,
     }).addTo(map);
     const interval = setInterval(() => {
         radius += 1.5;
@@ -818,9 +818,9 @@ function pulseAt(lat, lon) {
 
 // Fading dashed line from a node's position to the device that heard it,
 // mirroring the main dashboard's own _drawPacketLine in node_map.js.
-function drawPacketLine(fromLatLon, toLatLon) {
+function drawPacketLine(fromLatLon, toLatLon, color = '#00e5a0') {
     const line = L.polyline([fromLatLon, toLatLon], {
-        color: '#00e5a0', weight: 2, opacity: 0.8, dashArray: '6, 4',
+        color, weight: 2, opacity: 0.8, dashArray: '6, 4',
     }).addTo(map);
     let opacity = 0.8;
     const fade = setInterval(() => {
@@ -1041,9 +1041,12 @@ function triggerLiveEffects(packets, nodes) {
         const device = deviceById[p.device_id];
         if (!nodePos) continue;
 
-        pulseAt(nodePos[0], nodePos[1]);
+        // Purple for MeshCore, green for everything else -- matches the
+        // same split PROTOCOL_COLORS already uses for badges elsewhere.
+        const effectColor = p.protocol === 'meshcore' ? '#a855f7' : '#00e5a0';
+        pulseAt(nodePos[0], nodePos[1], effectColor);
         if (device && isValidPosition(device.latitude, device.longitude)) {
-            drawPacketLine(nodePos, [device.latitude, device.longitude]);
+            drawPacketLine(nodePos, [device.latitude, device.longitude], effectColor);
         }
     }
     lastSeenPacketId = maxId;
