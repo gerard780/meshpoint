@@ -816,6 +816,23 @@ function pulseAt(lat, lon, color = '#00ff88') {
     }, 60);
 }
 
+// A Traceroute (Meshtastic portnum 70) response packet's decoded_payload
+// carries a real route: [node_id, ...] -- the actual hops the probe
+// travelled, unlike ordinary packets which only ever expose a hop COUNT
+// (see triggerLiveEffects' plain source->device line below). Draws one
+// fading segment per known-position leg of source -> ...route -> dest,
+// skipping any hop whose position we don't know rather than guessing.
+function drawTraceroutePath(hopIds, nodePosById, color) {
+    const positions = hopIds
+        .filter((id) => id && id !== '^all')
+        .map((id) => nodePosById[stripBang(id)])
+        .filter(Boolean);
+    for (let i = 0; i + 1 < positions.length; i++) {
+        drawPacketLine(positions[i], positions[i + 1], color);
+    }
+    for (const pos of positions) pulseAt(pos[0], pos[1], color);
+}
+
 // Fading dashed line from a node's position to the device that heard it,
 // mirroring the main dashboard's own _drawPacketLine in node_map.js.
 function drawPacketLine(fromLatLon, toLatLon, color = '#00e5a0') {
@@ -1044,6 +1061,14 @@ function triggerLiveEffects(packets, nodes) {
         // Purple for MeshCore, green for everything else -- matches the
         // same split PROTOCOL_COLORS already uses for badges elsewhere.
         const effectColor = p.protocol === 'meshcore' ? '#a855f7' : '#00e5a0';
+
+        if (p.packet_type === 'traceroute') {
+            const payload = parseJsonSafe(p.decoded_payload_json);
+            const hopIds = [p.source_id, ...(payload?.route || []), p.destination_id];
+            drawTraceroutePath(hopIds, nodePosById, effectColor);
+            continue;
+        }
+
         pulseAt(nodePos[0], nodePos[1], effectColor);
         if (device && isValidPosition(device.latitude, device.longitude)) {
             drawPacketLine(nodePos, [device.latitude, device.longitude], effectColor);
