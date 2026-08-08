@@ -35,7 +35,6 @@ class RadioConcentratorCard {
                 : (ch.spreading_factor ? `SF${ch.spreading_factor}` : 'SF7–12');
             const proto = ch.protocol === 'meshtastic' ? 'Meshtastic'
                 : ch.protocol === 'pager' ? 'Pager'
-                : ch.protocol === 'reticulum' ? 'Reticulum'
                 : 'LoRaWAN';
             const stateClass = ch.enabled
                 ? 'ch-table__pill ch-table__pill--on'

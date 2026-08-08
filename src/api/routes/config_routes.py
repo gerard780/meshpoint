@@ -122,7 +122,7 @@ def _concentrator_status(config: AppConfig) -> dict:
             "bandwidth_khz": ch.bandwidth_khz,
             "spreading_factor": ch.spreading_factor,  # 0 = multi-SF
             "syncword": "0x34",
-            "protocol": ch.protocol,
+            "protocol": "lorawan",
             "rf_chain": _rf_chain(ch.frequency_hz),
             "enabled": ch.enabled,
         })
