@@ -114,6 +114,9 @@
         border-radius: 8px;
         background: var(--panel);
     }
+    #map:fullscreen, #map:-webkit-full-screen {
+        width: 100vw; height: 100vh; border-radius: 0;
+    }
     .nodes-section { grid-area: nodes; display: flex; flex-direction: column; min-height: 0; }
     .packets-section { grid-area: packets; }
     @media (max-width: 900px) {
@@ -705,6 +708,37 @@ const ClusterToggleControl = L.Control.extend({
     },
 });
 map.addControl(new ClusterToggleControl());
+
+// Native Fullscreen API rather than the leaflet.fullscreen plugin -- one
+// less CDN dependency for something this simple. requestFullscreen only
+// works on the #map element itself (not the whole page), so on exit its
+// size snaps back to whatever the CSS grid gave it; either way Leaflet
+// needs an explicit invalidateSize() nudge after the transition or the
+// tile layer keeps rendering at the old (pre-toggle) container size.
+const FullscreenControl = L.Control.extend({
+    options: { position: 'topright' },
+    onAdd() {
+        const mapEl = document.getElementById('map');
+        const btn = L.DomUtil.create('button', 'cluster-toggle-btn');
+        const setLabel = () => { btn.textContent = document.fullscreenElement ? 'Exit fullscreen' : 'Fullscreen'; };
+        setLabel();
+        btn.title = 'Toggle fullscreen map';
+        L.DomEvent.disableClickPropagation(btn);
+        L.DomEvent.on(btn, 'click', () => {
+            if (document.fullscreenElement) {
+                document.exitFullscreen().catch(() => {});
+            } else if (mapEl.requestFullscreen) {
+                mapEl.requestFullscreen().catch(() => {});
+            }
+        });
+        document.addEventListener('fullscreenchange', () => {
+            setLabel();
+            setTimeout(() => map.invalidateSize(), 50);
+        });
+        return btn;
+    },
+});
+if (document.fullscreenEnabled) map.addControl(new FullscreenControl());
 
 let hasFitBounds = false;
 let deviceMarkers = {};
