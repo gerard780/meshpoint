@@ -171,11 +171,22 @@ class ConcentratorChannelPlan:
           ch2  868.300 MHz  125 kHz  SF7–12  LoRaWAN  RF0  IF       0
           ch3  868.500 MHz  125 kHz  SF7–12  LoRaWAN  RF0  IF +200 000
           ch4  868.700 MHz  125 kHz  SF7–12  LoRaWAN  RF0  IF +400 000
-          ch5–ch7  (disabled — RF1 multi-SF can't reach anything useful)
+          ch5–ch6  (disabled — RF1 multi-SF can't reach anything LoRaWAN-useful)
+          ch7  869.463 MHz  125 kHz  SF5–12  Reticulum RF1 IF  –62 000
           ch8  869.525 MHz  250 kHz  SF11    Meshtastic RF1 IF       0
 
         TTN channels covered: 868.1, 868.3, 868.5 (3 mandatory) + 867.9, 868.7.
         TTN channels out of reach: 867.1, 867.3, 867.5, 867.7 (too far from RF0).
+
+        ch7 is reserved for reticulumnet.nl's mandated LoRa parameters
+        (869.463 MHz / BW125 / SF8 / CR5, chosen by that project specifically
+        to sit clear of Meshtastic/MeshCore) -- comfortably within RF1's
+        ±490 kHz IF range, and a multi-SF channel's default 125 kHz BW /
+        SF5-12 auto-scan already covers SF8 without needing an override.
+        Channel is enabled (receiving) now; no decoder exists yet for
+        Reticulum traffic landing here -- see project memory for the
+        Reticulum investigation and what's still needed on the software
+        side before this channel does anything useful.
 
         Sync word assignment (see sx1302_wrapper.py):
           ch0–ch7 multi-SF: LoRaWAN 0x34  (set by lorawan_public=True at start)
@@ -197,10 +208,11 @@ class ConcentratorChannelPlan:
             ChannelConfig(frequency_hz=868_300_000),
             ChannelConfig(frequency_hz=868_500_000),
             ChannelConfig(frequency_hz=868_700_000),
-            # ch5–ch7: disabled — nothing LoRaWAN-useful within ±490 kHz of RF1
+            # ch5–ch6: disabled — nothing LoRaWAN-useful within ±490 kHz of RF1
             ChannelConfig(frequency_hz=869_525_000, enabled=False),
             ChannelConfig(frequency_hz=869_525_000, enabled=False),
-            ChannelConfig(frequency_hz=869_525_000, enabled=False),
+            # ch7: reserved for Reticulum (869.463 MHz) -- see docstring above
+            ChannelConfig(frequency_hz=869_463_000),
         ]
         return plan
 

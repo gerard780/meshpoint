@@ -3,6 +3,18 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<script>
+// Applied synchronously, before the stylesheet below paints anything --
+// otherwise a stored "light" preference would flash dark for one frame
+// on every load. "auto" stores no attribute at all and lets the
+// prefers-color-scheme media query below decide.
+(function () {
+    var saved = localStorage.getItem('meshradar_theme');
+    if (saved === 'light' || saved === 'dark') {
+        document.documentElement.setAttribute('data-theme', saved);
+    }
+})();
+</script>
 <title>PD2EMC Meshradar &mdash; Dashboard</title>
 <link rel="manifest" href="/manifest.json">
 <link rel="icon" type="image/png" href="/assets/favicon.png">
@@ -33,6 +45,43 @@
         --accent-purple: #a855f7;
         --accent-amber: #f59e0b;
         --accent-red: #ef4444;
+        --overlay-soft: rgba(255,255,255,0.04);
+    }
+    /* "Auto" (no data-theme attribute at all) follows the OS -- these
+       kick in only when nothing has been explicitly chosen. An explicit
+       choice sets data-theme and always wins over the media query below,
+       via the plain :root[data-theme="light"] block further down. */
+    @media (prefers-color-scheme: light) {
+        :root:not([data-theme]) {
+            color-scheme: light;
+            --bg: #f4f6fb;
+            --panel: #ffffff;
+            --border: #dbe1ec;
+            --text: #1a2233;
+            --dim: #64748a;
+            --accent: #0891b2;
+            --accent-green: #059669;
+            --accent-cyan: #0891b2;
+            --accent-purple: #9333ea;
+            --accent-amber: #b45309;
+            --accent-red: #dc2626;
+            --overlay-soft: rgba(0,0,0,0.04);
+        }
+    }
+    :root[data-theme="light"] {
+        color-scheme: light;
+        --bg: #f4f6fb;
+        --panel: #ffffff;
+        --border: #dbe1ec;
+        --text: #1a2233;
+        --dim: #64748a;
+        --accent: #0891b2;
+        --accent-green: #059669;
+        --accent-cyan: #0891b2;
+        --accent-purple: #9333ea;
+        --accent-amber: #b45309;
+        --accent-red: #dc2626;
+        --overlay-soft: rgba(0,0,0,0.04);
     }
     * { box-sizing: border-box; }
     body {
@@ -85,7 +134,7 @@
     .device-pill {
         display: flex; align-items: center; gap: 6px;
         font-size: 11px; color: var(--text);
-        background: rgba(255,255,255,0.04);
+        background: var(--overlay-soft);
         border: 1px solid var(--border);
         border-radius: 999px;
         padding: 3px 10px;
@@ -262,7 +311,7 @@
     .badge-row { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; align-items: center; }
     .badge {
         font-size: 10px; padding: 2px 6px; border-radius: 4px;
-        background: rgba(255,255,255,0.04); color: var(--dim);
+        background: var(--overlay-soft); color: var(--dim);
         border: 1px solid var(--border);
     }
     .badge.quality-good { color: #00e5a0; border-color: rgba(0,229,160,0.4); }
@@ -404,6 +453,7 @@
         <div>
             <a href="/viewer">Simple viewer &rarr;</a>
             <button onclick="loadAll()">Refresh now</button>
+            <button id="theme-toggle-btn">Theme</button>
         </div>
     </div>
 
@@ -583,6 +633,28 @@ function latestActivityByNode(nodes, packets) {
     return result;
 }
 
+// Same idea as latestActivityByNode, but keyed per (device_id, node_id)
+// instead of node_id alone -- that one is deliberately cross-device (it
+// answers "when was this node last heard, by anyone," for the card
+// header), but a per-device row needs its OWN freshness. Reusing the
+// cross-device lookup there previously leaked one device's fresh packet
+// timestamp onto every other device's row for the same node, making a
+// stale row look as current as the one that actually just fired.
+function latestActivityByDeviceNode(nodes, packets) {
+    const result = {};
+    for (const n of nodes) result[`${n.device_id}:${n.node_id}`] = n.last_heard || null;
+    for (const p of packets) {
+        const t = p.received_at || p.timestamp;
+        if (!t || !p.device_id) continue;
+        const key = `${p.device_id}:${stripBang(p.source_id)}`;
+        const current = result[key];
+        if (!current || new Date(t) > new Date(current)) {
+            result[key] = t;
+        }
+    }
+    return result;
+}
+
 // node_id -> display name, so packet cards/modals can show "PD2EMC TAG2"
 // instead of the raw "3dbda079a456" -- packets only ever carry the raw
 // id, the name only exists on the node record from the heartbeat roster.
@@ -657,11 +729,25 @@ function packetDetails(p) {
 // before that (or if nothing has a position yet).
 const map = L.map('map', { zoomControl: true, scrollWheelZoom: true }).setView([52.2, 5.3], 8);
 
-L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-    attribution: '&copy; CARTO',
-    subdomains: 'abcd',
-    maxZoom: 19,
-}).addTo(map);
+function isDarkThemeActive() {
+    const explicit = document.documentElement.getAttribute('data-theme');
+    if (explicit === 'light') return false;
+    if (explicit === 'dark') return true;
+    return window.matchMedia('(prefers-color-scheme: dark)').matches;
+}
+
+let tileLayer = L.tileLayer(
+    `https://{s}.basemaps.cartocdn.com/${isDarkThemeActive() ? 'dark_all' : 'light_all'}/{z}/{x}/{y}{r}.png`,
+    { attribution: '&copy; CARTO', subdomains: 'abcd', maxZoom: 19 },
+).addTo(map);
+
+function refreshTileLayer() {
+    map.removeLayer(tileLayer);
+    tileLayer = L.tileLayer(
+        `https://{s}.basemaps.cartocdn.com/${isDarkThemeActive() ? 'dark_all' : 'light_all'}/{z}/{x}/{y}{r}.png`,
+        { attribution: '&copy; CARTO', subdomains: 'abcd', maxZoom: 19 },
+    ).addTo(map);
+}
 
 const markerGroup = L.markerClusterGroup({
     maxClusterRadius: 50,
@@ -739,6 +825,44 @@ const FullscreenControl = L.Control.extend({
     },
 });
 if (document.fullscreenEnabled) map.addControl(new FullscreenControl());
+
+function updateThemeColorMeta() {
+    const bg = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim();
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (bg && meta) meta.setAttribute('content', bg);
+}
+updateThemeColorMeta();
+
+// Lives next to "Refresh now" in the header rather than as a map
+// control -- it affects the whole page's theme, not just the map, so it
+// doesn't belong grouped with the map-only Cluster/Fullscreen buttons.
+const themeBtn = document.getElementById('theme-toggle-btn');
+const themeLabelFor = (mode) => `Theme: ${mode[0].toUpperCase()}${mode.slice(1)}`;
+const currentThemeMode = () => localStorage.getItem('meshradar_theme') || 'auto';
+function applyTheme(mode) {
+    if (mode === 'auto') document.documentElement.removeAttribute('data-theme');
+    else document.documentElement.setAttribute('data-theme', mode);
+    localStorage.setItem('meshradar_theme', mode);
+    themeBtn.textContent = themeLabelFor(mode);
+    refreshTileLayer();
+    updateThemeColorMeta();
+}
+themeBtn.textContent = themeLabelFor(currentThemeMode());
+themeBtn.title = 'Cycle dashboard theme: dark / light / auto (follows system)';
+themeBtn.addEventListener('click', () => {
+    const order = ['dark', 'light', 'auto'];
+    applyTheme(order[(order.indexOf(currentThemeMode()) + 1) % order.length]);
+});
+
+// In auto mode the CSS variables already re-resolve on their own via the
+// prefers-color-scheme media query -- only the tile layer URL and the
+// theme-color meta tag need an explicit nudge to follow a live OS switch.
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+    if (!document.documentElement.getAttribute('data-theme')) {
+        refreshTileLayer();
+        updateThemeColorMeta();
+    }
+});
 
 let hasFitBounds = false;
 let deviceMarkers = {};
@@ -928,6 +1052,7 @@ let lastNodesRendered = [];
 let lastPacketsRendered = [];
 let hopByNode = {};
 let lastActivityByNode = {};
+let lastActivityByDeviceNode = {};
 let nodeNameById = {};
 let toolbarState = { sort: 'last_heard', hopFilter: 'all', favOnly: false, search: '' };
 
@@ -1026,13 +1151,21 @@ function renderNodeList() {
         if (telemetry?.battery_level != null) extraBadges.push(`<span class="badge">&#128267;${Math.round(telemetry.battery_level)}%</span>`);
         extraBadges.push(`<span class="badge">${esc(g.key)}</span>`);
 
+        // The card header only shows the single newest "X ago" across all
+        // members -- easy to misread as "both devices just heard this,"
+        // when really one row can be sitting on a signal reading from
+        // days ago while the other just updated. Each device needs its
+        // own timestamp so a stale row doesn't look as fresh as the card
+        // header implies.
         const deviceRows = members.map((m) => {
             const signal = parseJsonSafe(m.latest_signal_json);
             const rssi = round1(signal?.rssi);
             const snr = round1(signal?.snr);
+            const heardAt = lastActivityByDeviceNode[`${m.device_id}:${m.node_id}`] || m.last_heard;
             return `
                 <div class="badge-row node-card__device-row">
                     <span class="badge badge--device">${esc(deviceNameById[m.device_id] || m.device_id)}</span>
+                    <span class="badge">${relTime(heardAt)}</span>
                     ${signalBarsHtml(rssi)}
                     <span class="badge">${rssi != null ? rssi + ' dBm' : '--'}</span>
                     ${snr != null ? `<span class="badge">SNR ${snr} dB</span>` : ''}
@@ -1288,7 +1421,7 @@ function openNodeDrawer(n) {
             { label: 'Heard via', value: heardViaValue },
             { label: 'Packets', value: n.packet_count },
             { label: 'First seen', value: n.first_seen ? relTime(n.first_seen) : null },
-            { label: 'Last heard', value: relTime(lastActivityByNode[n.node_id] || n.last_heard) },
+            { label: 'Last heard', value: relTime(lastActivityByDeviceNode[`${n.device_id}:${n.node_id}`] || n.last_heard) },
         ])}
         ${ndSection('Signal', [
             { label: 'RSSI', value: rssi != null ? `${rssi} dBm` : null },
@@ -1485,6 +1618,7 @@ async function loadAll() {
         lastPacketsRendered = packets;
         hopByNode = latestHopCountBySource(packets);
         lastActivityByNode = latestActivityByNode(nodes, packets);
+        lastActivityByDeviceNode = latestActivityByDeviceNode(nodes, packets);
         nodeNameById = nodeNameLookup(nodes);
         renderNodeList();
         renderPacketFeed();
