@@ -45,6 +45,7 @@ class ChannelConfig:
     bandwidth_khz: int = 125
     spreading_factor: int = 0
     enabled: bool = True
+    protocol: str = "lorawan"
 
 
 @dataclass
@@ -212,7 +213,7 @@ class ConcentratorChannelPlan:
             ChannelConfig(frequency_hz=869_525_000, enabled=False),
             ChannelConfig(frequency_hz=869_525_000, enabled=False),
             # ch7: reserved for Reticulum (869.463 MHz) -- see docstring above
-            ChannelConfig(frequency_hz=869_463_000),
+            ChannelConfig(frequency_hz=869_463_000, protocol="reticulum"),
         ]
         return plan
 
