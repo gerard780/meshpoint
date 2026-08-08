@@ -1,0 +1,180 @@
+# Local Meshradar
+
+A self-hosted, receive-only stand-in for the `wss://api.meshradar.io` upstream
+endpoint that Meshpoint's own `UpstreamClient` (`src/api/upstream_client.py`)
+already knows how to talk to. Point one or more Meshpoint units at this
+server instead of (or in addition to testing) the real cloud, and their
+node/packet/stats data lands in a local SQLite database you can browse from
+a plain web page.
+
+**Unofficial dev tooling. Not affiliated with or endorsed by meshradar.io.**
+Nothing here is a general-purpose Meshradar server implementation — it only
+handles what Meshpoint's own client actually sends.
+
+## Why this works
+
+Meshpoint's upstream client sends `register` (once per connection), `packet`
+(per decoded packet), and `heartbeat` (every 9 minutes, with rolled-up stats
+and a roster of nodes that changed) as plain JSON text frames over a
+WebSocket. It never waits for or requires a response to any of them — the
+only thing it reacts to from the server is an inbound
+`{"type": "command", ...}` message, which this receiver never sends. A
+server that only ever *receives* is a complete, valid implementation of the
+half of the protocol Meshpoint actually depends on.
+
+The `Authorization: Bearer <token>` / `X-Device-Id` headers are logged on
+connect for visibility only — this server never validates the token (it
+can't; only meshradar.io holds the private key that signs real tokens).
+Meshpoint itself validates its own token once at startup
+(`src/activation.py`, an offline Ed25519 signature check) before it will
+even try to connect anywhere — that check has nothing to do with which
+server `upstream.url` actually points at.
+
+## Run it
+
+```bash
+pip install -r requirements.txt
+python3 server.py
+```
+
+Two listeners start:
+
+- `ws://0.0.0.0:8765` — the ingest endpoint Meshpoint connects to. Browser
+  tabs also connect here, at `ws://.../live`, for real-time dashboard
+  updates (see below) — same port, different path, nothing to configure
+  separately.
+- `http://0.0.0.0:8766` — the dashboard/viewer pages and their JSON API
+  (`/api/devices`, `/api/nodes`, `/api/packets?limit=N`, `/api/stats`).
+
+Useful flags: `--ws-port`, `--http-port`, `--db <path>` (default
+`local_meshradar.db` next to the script), `--verbose`.
+
+Two pages:
+
+- `http://<this-machine>:8766/` — the main dashboard, same theme (colors,
+  fonts) as the real Meshpoint dashboard (`frontend/css/dashboard.css`):
+  - Stat tiles + a Leaflet map (same CARTO dark tile layer, marker styling,
+    and clustering as `frontend/js/components/node_map.js`), plotting every
+    device and positioned node.
+  - **Node list**: search, sort (last heard / packets / RSSI), a
+    direct/relayed filter (from each node's most recent hop count),
+    favorites (star, persisted in your browser's localStorage), signal
+    bars + SNR quality badge, role icon (Router/Sensor/Client/etc, from
+    Meshtastic's node role), voltage/battery/altitude badges when that
+    telemetry is actually present. Click a card to open its **detail
+    drawer** (slide-in panel, styled after `frontend/js/node_drawer.js`) —
+    full node info, signal, position, device metrics, and its most recent
+    packets.
+  - **Packet feed**: card-based, filterable by type / protocol / mesh
+    point, with a per-type decoded summary line (position → lat/lon/alt,
+    telemetry → battery, text → preview) and protocol-colored badges.
+    Click a card to open its **detail modal** (styled after
+    `frontend/js/packet_detail_modal.js`) — RF/Mesh/Payload/Capture
+    layers, same shape as the real packet detail view.
+  - **Live updates**: the dashboard opens its own WebSocket connection
+    (`ws://.../live`) and refreshes the instant the server sees new data,
+    instead of polling — mirrors `frontend/js/websocket_client.js`'s
+    reconnect-with-backoff pattern. A 30s poll still runs underneath as a
+    safety net in case the live socket is ever silently down.
+  - Also reachable at `/dashboard` (kept as an alias).
+- `http://<this-machine>:8766/viewer` — the original plain-tables page
+  (Devices / Nodes / Recent packets, no map), still there as the simplest
+  way to eyeball raw data landing without any of the above.
+
+  Needs outbound internet for the map tiles, the Leaflet CDN assets, and
+  the Google Fonts (Inter/JetBrains Mono) used to match the real
+  dashboard's look; everything else (your actual node data, and all live
+  updates) stays fully local.
+
+## Point Meshpoint at it
+
+On each Meshpoint unit, in `config/local.yaml`:
+
+```yaml
+upstream:
+  enabled: true
+  url: "ws://<this-machine-ip>:8765"
+  auth_token: "mr1_...your real meshradar.io key..."
+```
+
+Restart the Meshpoint service. Every unit is identified by its own
+`device_id`, so multiple units (e.g. several fixed spots around a city) can
+all point at the same receiver — the Devices/Nodes/Packets tables are all
+keyed by `device_id`, nothing collides.
+
+## Running persistently (e.g. on a Proxmox VM)
+
+Copy this directory to the VM (e.g. `/opt/local_meshradar`), install
+`requirements.txt`, then use the included `local-meshradar.service`:
+
+```bash
+sudo cp local-meshradar.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now local-meshradar
+```
+
+Adjust `WorkingDirectory`/`ExecStart` in the unit file if you installed it
+somewhere other than `/opt/local_meshradar`, or if `python3` needs to be a
+venv path instead of the system interpreter.
+
+## Data model
+
+SQLite (`local_meshradar.db`), four tables:
+
+- `devices` — one row per Meshpoint unit, upserted from each `register`.
+- `nodes` — one row per `(device_id, node_id)`, upserted from every
+  `heartbeat.nodes[]` entry — this is "latest known state," not history.
+- `packets` — one row per decoded packet ever received, append-only.
+- `heartbeats` — one row per heartbeat, raw `stats` blob kept as JSON —
+  append-only, useful for later charting packet-rate/RSSI trends over time.
+
+Nothing here prunes old rows. For long-running deployments, `packets` and
+`heartbeats` will grow indefinitely — add your own retention job if that
+matters to you (see `scripts/` in the main Meshpoint repo for the pattern
+its own SQLite retention sweep uses).
+
+## Backfilling history from a real Meshpoint's own database
+
+Live data only starts flowing from the moment `upstream.enabled: true`
+takes effect — it doesn't include whatever that unit already captured
+before then. `import_concentrator_db.py` backfills that: it reads a real
+Meshpoint's own `concentrator.db` directly (stdlib `sqlite3` only, no
+Meshpoint dependency, same as `server.py` itself) and writes matching rows
+into this tool's database, preserving real historical timestamps.
+
+```bash
+python3 import_concentrator_db.py \
+    --source /path/to/concentrator.db \
+    --device-id <the real Meshpoint's device_id, from its config/local.yaml> \
+    --dry-run   # reports counts only first, writes nothing
+
+python3 import_concentrator_db.py \
+    --source /path/to/concentrator.db \
+    --device-id <same device_id>
+```
+
+The `--device-id` must match the value already in that Meshpoint's own
+`config/local.yaml` (`device: device_id: ...`) so the backfilled history
+folds into the *same* device already showing up live here, not a
+duplicate. Copy `concentrator.db` (default path `data/concentrator.db` on
+the real Meshpoint) to wherever you run this script — it's read-only
+against the source, so nothing on the real install is touched.
+
+**Re-running this against the same target duplicates every packet row** —
+there's no reliable unique key to de-dupe real mesh traffic against over
+long capture windows, so this is meant to be a one-time backfill, not a
+repeatable sync. Always `--dry-run` first if unsure.
+
+## What's deliberately not built
+
+- **No relay to the real meshradar.io.** This is receive-only; if you also
+  want the real cloud to see the same data, that's a second, separate
+  `upstream.enabled` connection Meshpoint doesn't currently support running
+  in parallel — not something this server can add on its own.
+- **No command support.** Meshpoint's client can execute remote commands
+  (`ping`, `get_status`, `restart_service`, etc.) if the server sends
+  `{"type": "command", ...}` — this receiver never does. Fully optional;
+  add it later if remote control turns out to matter.
+- **No auth enforcement.** This is meant for a trusted local network. Don't
+  expose port 8765/8766 to the public internet without adding real auth in
+  front of it (a reverse proxy with basic auth, a VPN, etc.).

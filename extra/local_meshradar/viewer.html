@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Local Meshradar</title>
+<style>
+    :root {
+        color-scheme: dark;
+        --bg: #0b0e14;
+        --panel: #12161f;
+        --border: #232838;
+        --text: #d7dbe4;
+        --dim: #7d8598;
+        --accent: #5ec8f2;
+    }
+    * { box-sizing: border-box; }
+    body {
+        margin: 0;
+        font-family: ui-monospace, "SF Mono", Consolas, monospace;
+        background: var(--bg);
+        color: var(--text);
+        padding: 24px;
+    }
+    h1 { font-size: 18px; margin: 0 0 4px; }
+    .sub { color: var(--dim); font-size: 12px; margin-bottom: 20px; }
+    .grid { display: grid; grid-template-columns: 1fr; gap: 20px; }
+    section {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 14px 16px;
+        overflow-x: auto;
+    }
+    section h2 {
+        font-size: 13px;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--accent);
+        margin: 0 0 10px;
+    }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; white-space: nowrap; }
+    th, td { text-align: left; padding: 4px 10px; border-bottom: 1px solid var(--border); }
+    th { color: var(--dim); font-weight: normal; }
+    tr:last-child td { border-bottom: none; }
+    .empty { color: var(--dim); font-style: italic; padding: 8px 0; }
+    button {
+        background: var(--panel);
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 6px 12px;
+        font-family: inherit;
+        font-size: 12px;
+        cursor: pointer;
+    }
+    button:hover { border-color: var(--accent); }
+    .top-row { display: flex; justify-content: space-between; align-items: baseline; }
+</style>
+</head>
+<body>
+    <div class="top-row">
+        <div>
+            <h1>Local Meshradar</h1>
+            <div class="sub">Self-hosted receiver &mdash; not affiliated with meshradar.io. Auto-refreshes every 5s.</div>
+        </div>
+        <div>
+            <a href="/" style="color:var(--accent); text-decoration:none; margin-right:14px;">&larr; Dashboard</a>
+            <button onclick="loadAll()">Refresh now</button>
+        </div>
+    </div>
+
+    <div class="grid">
+        <section>
+            <h2>Devices</h2>
+            <div id="devices"></div>
+        </section>
+        <section>
+            <h2>Nodes</h2>
+            <div id="nodes"></div>
+        </section>
+        <section>
+            <h2>Recent packets (last 50)</h2>
+            <div id="packets"></div>
+        </section>
+    </div>
+
+<script>
+function esc(v) {
+    if (v === null || v === undefined) return '';
+    return String(v).replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+}
+
+function table(rows, columns) {
+    if (!rows.length) return '<p class="empty">Nothing yet.</p>';
+    const head = columns.map(c => `<th>${esc(c.label)}</th>`).join('');
+    const body = rows.map(r => {
+        const cells = columns.map(c => `<td>${esc(c.render ? c.render(r) : r[c.key])}</td>`).join('');
+        return `<tr>${cells}</tr>`;
+    }).join('');
+    return `<table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
+}
+
+// register only ever fires once per WebSocket connection, so
+// devices.last_seen is really "connected since," not a live heartbeat --
+// this derives an actual "last heard" per device from the newest packet
+// we've actually received from it, same idea as the dashboard's
+// lastActivityByNode.
+function latestActivityByDevice(packets) {
+    const result = {};
+    for (const p of packets) {
+        const t = p.received_at || p.timestamp;
+        if (!t || !p.device_id) continue;
+        if (!result[p.device_id] || new Date(t) > new Date(result[p.device_id])) {
+            result[p.device_id] = t;
+        }
+    }
+    return result;
+}
+
+async function loadAll() {
+    try {
+        const [devices, nodes, packets] = await Promise.all([
+            fetch('/api/devices').then(r => r.json()),
+            fetch('/api/nodes').then(r => r.json()),
+            fetch('/api/packets?limit=50').then(r => r.json()),
+        ]);
+
+        const deviceActivity = latestActivityByDevice(packets);
+        document.getElementById('devices').innerHTML = table(devices, [
+            { key: 'device_id', label: 'Device ID' },
+            { key: 'device_name', label: 'Name' },
+            { key: 'hardware_description', label: 'Hardware' },
+            { key: 'firmware_version', label: 'Firmware' },
+            { key: 'last_seen', label: 'Connected since' },
+            { key: 'last_heard', label: 'Last heard', render: (r) => deviceActivity[r.device_id] || '--' },
+        ]);
+
+        document.getElementById('nodes').innerHTML = table(nodes, [
+            { key: 'device_id', label: 'Via device' },
+            { key: 'display_name', label: 'Node' },
+            { key: 'protocol', label: 'Protocol' },
+            { key: 'role', label: 'Role' },
+            { key: 'packet_count', label: 'Packets' },
+            {
+                key: 'latest_signal_json', label: 'RSSI/SNR', render: (r) => {
+                    try {
+                        const s = JSON.parse(r.latest_signal_json);
+                        if (s && s.rssi != null) return `${s.rssi} / ${s.snr}`;
+                    } catch (_) {}
+                    return '--';
+                },
+            },
+            { key: 'last_heard', label: 'Last heard' },
+        ]);
+
+        document.getElementById('packets').innerHTML = table(packets, [
+            { key: 'received_at', label: 'Received' },
+            { key: 'device_id', label: 'Via device' },
+            { key: 'protocol', label: 'Protocol' },
+            { key: 'packet_type', label: 'Type' },
+            { key: 'source_id', label: 'Source' },
+            { key: 'destination_id', label: 'Dest' },
+            { key: 'rssi', label: 'RSSI' },
+            { key: 'snr', label: 'SNR' },
+        ]);
+    } catch (e) {
+        console.error('Refresh failed', e);
+    }
+}
+
+loadAll();
+setInterval(loadAll, 5000);
+</script>
+</body>
+</html>

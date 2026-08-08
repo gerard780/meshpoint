@@ -1,0 +1,1395 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>PD2EMC Meshradar &mdash; Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+<style>
+    /* Same theme variables as frontend/css/dashboard.css, so this looks
+       like a real page of the main Meshpoint dashboard rather than a
+       one-off tool with its own visual identity. */
+    :root {
+        color-scheme: dark;
+        --bg: #0a0e17;
+        --panel: #162033;
+        --border: #233049;
+        --text: #e2e8f0;
+        --dim: #94a3b8;
+        --accent: #06b6d4;
+        --accent-green: #00e5a0;
+        --accent-cyan: #06b6d4;
+        --accent-purple: #a855f7;
+        --accent-amber: #f59e0b;
+        --accent-red: #ef4444;
+    }
+    * { box-sizing: border-box; }
+    body {
+        margin: 0;
+        font-family: 'JetBrains Mono', ui-monospace, "SF Mono", Consolas, monospace;
+        background: var(--bg);
+        color: var(--text);
+        padding: 24px;
+    }
+    h1 { font-size: 18px; margin: 0 0 4px; }
+    .sub { color: var(--dim); font-size: 12px; }
+    .top-row { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 18px; }
+    .top-row a { color: var(--accent); text-decoration: none; }
+    button {
+        background: var(--panel);
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 6px 12px;
+        font-family: inherit;
+        font-size: 12px;
+        cursor: pointer;
+        margin-left: 14px;
+    }
+    button:hover { border-color: var(--accent); }
+
+    .stats-row {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 12px;
+        margin-bottom: 18px;
+    }
+    .stat-tile {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 12px 14px;
+    }
+    .stat-tile .label { color: var(--dim); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
+    .stat-tile .value { font-size: 22px; margin-top: 4px; }
+    .stat-tile__row { display: flex; align-items: center; gap: 14px; }
+    .device-pills { display: flex; flex-direction: column; gap: 4px; }
+    .device-pill {
+        display: flex; align-items: center; gap: 6px;
+        font-size: 11px; color: var(--text);
+        background: rgba(255,255,255,0.04);
+        border: 1px solid var(--border);
+        border-radius: 999px;
+        padding: 3px 10px;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .device-pill__dot {
+        width: 6px; height: 6px; border-radius: 50%; flex: none;
+        background: var(--accent-green);
+    }
+
+    /* Same layout as the real Meshpoint dashboard: map + node list side
+       by side, packet feed full-width underneath. */
+    .dashboard-layout {
+        display: grid;
+        grid-template-columns: 2fr 1fr;
+        grid-template-rows: 640px auto;
+        grid-template-areas:
+            "map nodes"
+            "packets packets";
+        gap: 18px;
+        margin-bottom: 18px;
+    }
+    #map {
+        grid-area: map;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--panel);
+    }
+    .nodes-section { grid-area: nodes; display: flex; flex-direction: column; min-height: 0; }
+    .packets-section { grid-area: packets; }
+    @media (max-width: 900px) {
+        .dashboard-layout {
+            grid-template-columns: 1fr;
+            grid-template-rows: 400px auto auto;
+            grid-template-areas: "map" "nodes" "packets";
+        }
+    }
+    section {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 14px 16px;
+        overflow-x: auto;
+    }
+    section h2 {
+        font-size: 13px;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: var(--accent);
+        margin: 0 0 10px;
+    }
+    .empty { color: var(--dim); font-style: italic; padding: 8px 0; }
+
+    /* -- markers, lifted straight from the main Meshpoint dashboard's
+       frontend/css/dashboard.css so this looks/behaves the same way -- */
+    .device-marker {
+        width: 16px; height: 16px;
+        background: var(--accent-green);
+        border: 2px solid #fff;
+        border-radius: 3px;
+        transform: rotate(45deg);
+        box-shadow: 0 0 10px var(--accent-green), 0 0 20px rgba(0, 229, 160, 0.3);
+    }
+    .node-marker__diamond {
+        width: 10px; height: 10px;
+        background: var(--accent-purple);
+        border: 1px solid var(--accent-purple);
+        border-radius: 2px;
+        transform: rotate(45deg);
+        opacity: 0.85;
+    }
+    .node-marker__diamond--recent {
+        border-color: #00ff88;
+        border-width: 2px;
+        animation: pulseRing 1.5s ease-out infinite;
+    }
+    .node-pulse { animation: pulseRing 1.5s ease-out infinite; }
+    @keyframes pulseRing {
+        0% { box-shadow: 0 0 0 0 rgba(6, 182, 212, 0.5); }
+        70% { box-shadow: 0 0 0 8px rgba(6, 182, 212, 0); }
+        100% { box-shadow: 0 0 0 0 rgba(6, 182, 212, 0); }
+    }
+    .marker-cluster div {
+        width: 30px; height: 30px;
+        margin-left: 5px; margin-top: 5px;
+        text-align: center; border-radius: 15px;
+        font: 12px sans-serif; font-weight: 600; color: #fff;
+    }
+    .marker-cluster span { line-height: 30px; }
+    .marker-cluster-small { background: rgba(6, 182, 212, 0.3); }
+    .marker-cluster-small div { background: rgba(6, 182, 212, 0.7); }
+    .marker-cluster-medium { background: rgba(168, 85, 247, 0.3); }
+    .marker-cluster-medium div { background: rgba(168, 85, 247, 0.7); }
+    .marker-cluster-large { background: rgba(0, 229, 160, 0.3); }
+    .marker-cluster-large div { background: rgba(0, 229, 160, 0.7); }
+
+    /* -- Node list (card style, mirroring the main dashboard's node cards) -- */
+    .nodes-toolbar {
+        display: flex; align-items: center; gap: 8px;
+        margin-bottom: 10px; flex-wrap: wrap;
+    }
+    .nodes-search {
+        background: var(--bg);
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 5px 10px;
+        font-family: inherit;
+        font-size: 12px;
+        flex: 1;
+        min-width: 100px;
+    }
+    .nodes-search:focus { outline: none; border-color: var(--accent); }
+    select.nodes-sort {
+        background: var(--bg);
+        color: var(--text);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 5px 8px;
+        font-family: inherit;
+        font-size: 12px;
+    }
+    .filter-pills { display: flex; gap: 4px; }
+    .filter-pill {
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 5px 10px;
+        font-size: 11px;
+        cursor: pointer;
+        color: var(--dim);
+    }
+    .filter-pill.active { color: var(--accent); border-color: var(--accent); }
+    .fav-toggle {
+        cursor: pointer; font-size: 14px; color: var(--dim);
+        border: 1px solid var(--border); border-radius: 6px;
+        padding: 4px 8px; background: var(--bg);
+    }
+    .fav-toggle.active { color: #f59e0b; border-color: #f59e0b; }
+
+    /* #nodes is .nodes-section's flex-filling scroll area (the section
+       is as tall as the map beside it); .node-list itself is just a
+       plain column of cards inside that. */
+    #nodes { flex: 1; min-height: 0; overflow-y: auto; }
+    .node-list { display: flex; flex-direction: column; gap: 8px; }
+    .node-card {
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 8px 10px;
+        cursor: pointer;
+    }
+    .node-card:hover { border-color: var(--accent); }
+    .node-card__head { display: flex; align-items: center; gap: 8px; }
+    .node-avatar {
+        width: 30px; height: 30px; border-radius: 6px;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 10px; font-weight: 700; color: #071019;
+        flex-shrink: 0;
+    }
+    .node-card__title { flex: 1; min-width: 0; }
+    .node-card__name { font-size: 13px; display: flex; align-items: center; gap: 5px; }
+    .status-dot { width: 6px; height: 6px; border-radius: 50%; background: #00e5a0; display: inline-block; }
+    .node-card__time { font-size: 11px; color: var(--dim); }
+    .node-star { cursor: pointer; color: var(--dim); font-size: 13px; }
+    .node-star.active { color: #f59e0b; }
+    .proto-badge {
+        font-size: 10px; padding: 1px 5px; border-radius: 4px;
+        border: 1px solid var(--border); color: var(--dim);
+    }
+    .badge-row { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; align-items: center; }
+    .badge {
+        font-size: 10px; padding: 2px 6px; border-radius: 4px;
+        background: rgba(255,255,255,0.04); color: var(--dim);
+        border: 1px solid var(--border);
+    }
+    .badge.quality-good { color: #00e5a0; border-color: rgba(0,229,160,0.4); }
+    .badge.quality-fair { color: #f59e0b; border-color: rgba(245,158,11,0.4); }
+    .badge.quality-weak { color: #ef4444; border-color: rgba(239,68,68,0.4); }
+    .signal-bars { display: inline-flex; align-items: flex-end; gap: 1px; height: 10px; }
+    .signal-bars i { width: 3px; background: var(--border); display: block; }
+    .signal-bars i:nth-child(1) { height: 3px; }
+    .signal-bars i:nth-child(2) { height: 5px; }
+    .signal-bars i:nth-child(3) { height: 7px; }
+    .signal-bars i:nth-child(4) { height: 10px; }
+    .signal-bars i.on { background: var(--accent-cyan); }
+
+    .role-badge { font-size: 12px; }
+
+    /* -- Packet feed (cards), styled after meshradar.io's packet feed -- */
+    .packets-toolbar {
+        display: flex; align-items: center; gap: 8px;
+        margin-bottom: 10px; flex-wrap: wrap;
+    }
+    .packets-toolbar select {
+        background: var(--bg); color: var(--text);
+        border: 1px solid var(--border); border-radius: 6px;
+        padding: 5px 8px; font-family: inherit; font-size: 12px;
+    }
+    .packets-count {
+        background: rgba(0,229,160,0.12); color: var(--accent-green);
+        border-radius: 999px; padding: 3px 10px; font-size: 12px; font-weight: 600;
+        margin-left: auto;
+    }
+    .packet-feed { display: flex; flex-direction: column; gap: 8px; max-height: 480px; overflow-y: auto; }
+    .packet-card {
+        background: var(--bg);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 8px 10px;
+        cursor: pointer;
+    }
+    .packet-card:hover { border-color: var(--accent); }
+    .packet-card__head {
+        display: flex; align-items: center; justify-content: space-between; gap: 8px;
+        font-size: 12px; font-weight: 600;
+    }
+    .packet-card__head .src { color: var(--accent); }
+    .packet-card__detail {
+        color: var(--dim); font-size: 12px; margin-top: 4px;
+        white-space: normal; word-break: break-word;
+    }
+    .packet-card__foot {
+        display: flex; align-items: center; gap: 8px; margin-top: 6px; flex-wrap: wrap;
+        font-size: 11px; color: var(--dim);
+    }
+    .packet-card__foot .via { color: var(--accent-green); }
+    .packet-card__foot .badges { margin-left: auto; display: flex; gap: 4px; }
+    .pill {
+        font-size: 10px; padding: 2px 7px; border-radius: 4px;
+        border: 1px solid var(--border); font-weight: 600;
+    }
+
+    /* -- Node drawer, mirroring frontend/css/node_drawer.css: fixed
+       right-side slide-in panel + backdrop -- */
+    .nd-backdrop {
+        position: fixed; inset: 0; background: rgba(0,0,0,0.5);
+        opacity: 0; pointer-events: none; transition: opacity 0.2s ease;
+        z-index: 1999;
+    }
+    .nd-backdrop--open { opacity: 1; pointer-events: auto; }
+    .nd-drawer {
+        position: fixed; top: 0; right: 0; width: 380px; max-width: 100%; height: 100vh;
+        background: var(--panel); border-left: 1px solid var(--border);
+        transform: translateX(100%); transition: transform 0.25s ease;
+        z-index: 2000; overflow-y: auto; padding: 16px;
+    }
+    .nd-drawer--open { transform: translateX(0); }
+    .nd-header { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+    .nd-header__info { flex: 1; min-width: 0; }
+    .nd-header__name { font-size: 15px; font-weight: 600; }
+    .nd-header__id { font-size: 11px; color: var(--dim); }
+    .nd-close {
+        background: none; border: none; color: var(--dim); font-size: 20px;
+        cursor: pointer; margin: 0; padding: 0 4px; line-height: 1;
+    }
+    .nd-close:hover { color: var(--text); }
+    .nd-section { margin-bottom: 14px; }
+    .nd-section__title {
+        font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em;
+        color: var(--accent); margin-bottom: 6px;
+    }
+    .nd-row { display: flex; justify-content: space-between; gap: 10px; padding: 3px 0; font-size: 12px; }
+    .nd-row__label { color: var(--dim); }
+    .nd-row__value { text-align: right; word-break: break-word; }
+    .nd-packet-row { font-size: 11px; padding: 4px 0; border-bottom: 1px solid var(--border); color: var(--dim); }
+    .nd-packet-row:last-child { border-bottom: none; }
+    .nd-actions { display: flex; gap: 8px; margin-bottom: 14px; }
+    .nd-actions button { margin-left: 0; flex: 1; }
+
+    /* -- Packet detail modal, mirroring frontend/css/packet_detail_modal.css --*/
+    .pdm-overlay {
+        position: fixed; inset: 0; background: rgba(0,0,0,0.6);
+        display: flex; align-items: center; justify-content: center;
+        opacity: 0; pointer-events: none; transition: opacity 0.15s ease;
+        z-index: 2100;
+    }
+    .pdm-overlay--open { opacity: 1; pointer-events: auto; }
+    .pdm-modal {
+        background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+        width: min(560px, 92vw); max-height: min(85vh, 720px); overflow-y: auto;
+        padding: 16px;
+    }
+    .pdm-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; }
+    .pdm-title { font-size: 15px; font-weight: 600; margin: 0; }
+    .pdm-meta { font-size: 11px; color: var(--dim); margin-top: 2px; }
+    .pdm-close {
+        background: none; border: none; color: var(--dim); font-size: 20px;
+        cursor: pointer; margin: 0; padding: 0 4px; line-height: 1;
+    }
+    .pdm-close:hover { color: var(--text); }
+    .pdm-layer { margin-bottom: 14px; }
+    .pdm-layer__title {
+        font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em;
+        color: var(--accent); margin-bottom: 6px;
+    }
+    .pdm-row { display: grid; grid-template-columns: 7.5rem 1fr; gap: 8px; padding: 3px 0; font-size: 12px; }
+    .pdm-row__key { color: var(--dim); }
+    .pdm-row__val { word-break: break-word; }
+    .pdm-raw {
+        background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+        padding: 8px; font-size: 11px; white-space: pre-wrap; word-break: break-word;
+        margin-top: 6px;
+    }
+</style>
+</head>
+<body>
+    <div class="top-row">
+        <div>
+            <h1>Local Meshradar &mdash; Dashboard</h1>
+            <div class="sub">Self-hosted receiver &mdash; not affiliated with meshradar.io. Live updates via WebSocket.</div>
+        </div>
+        <div>
+            <a href="/viewer">Simple viewer &rarr;</a>
+            <button onclick="loadAll()">Refresh now</button>
+        </div>
+    </div>
+
+    <div class="stats-row">
+        <div class="stat-tile">
+            <div class="label">Devices</div>
+            <div class="stat-tile__row">
+                <div class="value" id="stat-devices">--</div>
+                <div class="device-pills" id="device-pills"></div>
+            </div>
+        </div>
+        <div class="stat-tile"><div class="label">Unique nodes</div><div class="value" id="stat-nodes">--</div></div>
+        <div class="stat-tile"><div class="label">Total packets</div><div class="value" id="stat-packets">--</div></div>
+        <div class="stat-tile"><div class="label">Packets / last hour</div><div class="value" id="stat-packets-hour">--</div></div>
+    </div>
+
+    <div class="dashboard-layout">
+        <div id="map"></div>
+        <section class="nodes-section">
+            <h2>Nodes</h2>
+            <div class="nodes-toolbar">
+                <select class="nodes-sort" id="node-sort">
+                    <option value="last_heard">Sort: Last heard</option>
+                    <option value="packet_count">Sort: Packets</option>
+                    <option value="rssi">Sort: RSSI</option>
+                </select>
+                <div class="fav-toggle" id="fav-toggle" title="Show favorites only">&#9733;</div>
+                <div class="filter-pills" id="hop-filter">
+                    <div class="filter-pill active" data-hop="all">ALL</div>
+                    <div class="filter-pill" data-hop="direct">DIRECT</div>
+                    <div class="filter-pill" data-hop="relayed">RELAYED</div>
+                </div>
+                <input class="nodes-search" id="node-search" placeholder="Search...">
+            </div>
+            <div id="nodes"></div>
+        </section>
+        <section class="packets-section">
+            <h2>Packet feed</h2>
+            <div class="packets-toolbar">
+                <select id="packet-filter-type"><option value="">All types</option></select>
+                <select id="packet-filter-protocol"><option value="">All protocols</option></select>
+                <select id="packet-filter-device"><option value="">All mesh points</option></select>
+                <span class="packets-count" id="packet-count">0</span>
+            </div>
+            <div id="packets"></div>
+        </section>
+    </div>
+
+    <div class="nd-backdrop" id="nd-backdrop"></div>
+    <div class="nd-drawer" id="nd-drawer"></div>
+
+    <div class="pdm-overlay" id="pdm-overlay">
+        <div class="pdm-modal" id="pdm-modal"></div>
+    </div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+<script>
+function esc(v) {
+    if (v === null || v === undefined) return '';
+    return String(v).replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+}
+
+function relTime(timestamp) {
+    if (!timestamp) return 'unknown';
+    const t = new Date(timestamp).getTime();
+    if (Number.isNaN(t)) return 'unknown';
+    const diffMs = Date.now() - t;
+    if (diffMs < 0) return 'just now';
+    const sec = Math.floor(diffMs / 1000);
+    if (sec < 60) return `${sec}s ago`;
+    const min = Math.floor(sec / 60);
+    if (min < 60) return `${min}m ago`;
+    const hr = Math.floor(min / 60);
+    if (hr < 24) return `${hr}h ago`;
+    return `${Math.floor(hr / 24)}d ago`;
+}
+
+function parseJsonSafe(s) {
+    try { return JSON.parse(s); } catch (_) { return null; }
+}
+
+function absTime(timestamp) {
+    if (!timestamp) return '--';
+    const d = new Date(timestamp);
+    if (Number.isNaN(d.getTime())) return '--';
+    return d.toTimeString().slice(0, 8);
+}
+
+// Signal/telemetry values round-trip through JSON as float32 -> float64,
+// so raw values like -87.39999389648438 are display noise, not real
+// precision -- round for display everywhere they're shown.
+function round1(v) { return v == null ? null : Math.round(v * 10) / 10; }
+
+// ── favorites (client-side only, localStorage) ───────────────────────
+
+const FAV_KEY = 'localMeshradar.favorites';
+function loadFavs() {
+    try { return new Set(JSON.parse(localStorage.getItem(FAV_KEY) || '[]')); }
+    catch (_) { return new Set(); }
+}
+function saveFavs(set) {
+    try { localStorage.setItem(FAV_KEY, JSON.stringify([...set])); } catch (_) {}
+}
+let favorites = loadFavs();
+// Favorites track the physical node, not "this device's sighting of it" --
+// keyed on the stripped node_id alone so a star survives regardless of
+// which device-row currently represents that node in the list.
+function nodeKey(n) { return stripBang(n.node_id); }
+
+// ── node card visuals ─────────────────────────────────────────────────
+
+const AVATAR_COLORS = ['#5ec8f2', '#a855f7', '#00e5a0', '#f59e0b', '#f472b6', '#60a5fa'];
+function colorFor(id) {
+    let hash = 0;
+    for (const ch of String(id)) hash = (hash * 31 + ch.charCodeAt(0)) & 0xffffffff;
+    return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
+}
+function initialsFor(name) {
+    return String(name || '?').replace(/^!/, '').slice(0, 4).toUpperCase();
+}
+
+function signalBarsHtml(rssi) {
+    let level = 1;
+    if (rssi != null) {
+        if (rssi >= -70) level = 4;
+        else if (rssi >= -85) level = 3;
+        else if (rssi >= -100) level = 2;
+        else level = 1;
+    }
+    let html = '<span class="signal-bars">';
+    for (let i = 1; i <= 4; i++) html += `<i class="${i <= level ? 'on' : ''}"></i>`;
+    return html + '</span>';
+}
+
+function snrQualityBadge(snr) {
+    if (snr == null) return '';
+    let cls = 'quality-weak', label = 'POOR';
+    if (snr >= 5) { cls = 'quality-good'; label = 'GOOD'; }
+    else if (snr >= -5) { cls = 'quality-fair'; label = 'FAIR'; }
+    return `<span class="badge ${cls}">${label}</span>`;
+}
+
+// Most recent hop_count per node, derived from the packets feed we already
+// fetch -- there's no separate per-node hop field in /api/nodes, but every
+// packet row carries its own hop_count, so the latest one per source_id is
+// a reasonable "is this node currently direct or relayed" signal.
+function latestHopCountBySource(packets) {
+    const result = {};
+    for (const p of packets) {
+        const key = stripBang(p.source_id);
+        if (result[key] === undefined && p.hop_count != null) {
+            result[key] = p.hop_count;
+        }
+    }
+    return result;
+}
+
+// A node's nodes-table last_heard only moves on the next heartbeat
+// (every 9 min from the real Meshpoint client) -- a node that just sent
+// a packet looks stale until then. This takes whichever is actually more
+// recent: the heartbeat-sourced last_heard, or that node's newest packet
+// in the feed we already have. Used for both sort order and the
+// displayed "X ago" so a just-arrived packet is reflected immediately.
+function latestActivityByNode(nodes, packets) {
+    const result = {};
+    for (const n of nodes) result[n.node_id] = n.last_heard || null;
+    for (const p of packets) {
+        const t = p.received_at || p.timestamp;
+        if (!t) continue;
+        const key = stripBang(p.source_id);
+        const current = result[key];
+        if (!current || new Date(t) > new Date(current)) {
+            result[key] = t;
+        }
+    }
+    return result;
+}
+
+// node_id -> display name, so packet cards/modals can show "PD2EMC TAG2"
+// instead of the raw "3dbda079a456" -- packets only ever carry the raw
+// id, the name only exists on the node record from the heartbeat roster.
+//
+// Keyed with a leading "!" stripped: the real Meshpoint app formats
+// packet source_id/destination_id WITH a "!" prefix but nodes.node_id
+// WITHOUT one, for the exact same physical node -- an exact-match lookup
+// silently failed for every single packet until this was normalized.
+function stripBang(id) {
+    return id && id.startsWith('!') ? id.slice(1) : id;
+}
+function nodeNameLookup(nodes) {
+    const result = {};
+    for (const n of nodes) result[stripBang(n.node_id)] = n.display_name || n.node_id;
+    return result;
+}
+function resolveNodeName(id) {
+    if (!id) return id;
+    return nodeNameById[stripBang(id)] || id;
+}
+
+const PROTOCOL_COLORS = {
+    meshtastic: 'var(--accent-cyan)',
+    meshcore: 'var(--accent-purple)',
+    lorawan: 'var(--accent-amber)',
+    dapnet: '#f472b6',
+    pager: 'var(--accent-green)',
+};
+function protocolColor(p) { return PROTOCOL_COLORS[p] || 'var(--dim)'; }
+
+// Meshtastic node roles -- see meshtastic.protobuf.config_pb2.Config.DeviceConfig.Role.
+const ROLE_ICONS = {
+    ROUTER: '&#8593;', ROUTER_CLIENT: '&#8593;', ROUTER_LATE: '&#8593;',
+    REPEATER: '&#8596;',
+    TRACKER: '&#9678;', TAK_TRACKER: '&#9678;',
+    SENSOR: '&#127777;',
+    CLIENT: '&#128241;', CLIENT_MUTE: '&#128241;', CLIENT_HIDDEN: '&#128241;', CLIENT_BASE: '&#127968;',
+    TAK: '&#9873;',
+    LOST_AND_FOUND: '&#10067;',
+};
+function roleIcon(role) {
+    if (!role) return '';
+    const icon = ROLE_ICONS[role];
+    return icon ? `<span class="role-badge" title="${esc(role)}">${icon}</span>` : '';
+}
+
+function packetDetails(p) {
+    const payload = parseJsonSafe(p.decoded_payload_json);
+    if (!payload) return '--';
+    switch (p.packet_type) {
+        case 'position':
+            if (payload.lat != null && payload.lon != null) {
+                const alt = payload.alt != null ? `, alt ${payload.alt}m` : '';
+                return `${payload.lat}, ${payload.lon}${alt}`;
+            }
+            return '--';
+        case 'text':
+            return payload.text ? String(payload.text).slice(0, 60) : '--';
+        case 'nodeinfo':
+            return [payload.long_name, payload.short_name].filter(Boolean).join(' ') || '--';
+        case 'telemetry':
+            return payload.battery_level != null ? `battery ${Math.round(payload.battery_level)}%` : '--';
+        default:
+            return '--';
+    }
+}
+
+// ── map, styled/behaving like the main Meshpoint dashboard's node_map.js ──
+
+// Roughly centered on the Netherlands -- overridden by fitBounds below
+// once real device/node positions load, this is just the sane default
+// before that (or if nothing has a position yet).
+const map = L.map('map', { zoomControl: true, scrollWheelZoom: true }).setView([52.2, 5.3], 8);
+
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    attribution: '&copy; CARTO',
+    subdomains: 'abcd',
+    maxZoom: 19,
+}).addTo(map);
+
+const markerGroup = L.markerClusterGroup({
+    maxClusterRadius: 50,
+    disableClusteringAtZoom: 13,
+    spiderfyOnMaxZoom: true,
+    showCoverageOnHover: false,
+    iconCreateFunction: (cluster) => {
+        const count = cluster.getChildCount();
+        let size = 'small';
+        if (count > 50) size = 'large';
+        else if (count > 10) size = 'medium';
+        return L.divIcon({
+            html: `<div><span>${count}</span></div>`,
+            className: `marker-cluster marker-cluster-${size}`,
+            iconSize: L.point(40, 40),
+        });
+    },
+});
+map.addLayer(markerGroup);
+
+let hasFitBounds = false;
+let deviceMarkers = {};
+let nodeMarkers = {};
+let lastHeardByKey = {};
+
+// (0, 0) -- "Null Island" -- is config.py's/default.yaml's actual default
+// for an unset device.latitude/longitude, and some GPS modules report it
+// before getting a real fix too. It's a valid non-null number either way,
+// so nothing else filters it out on its own; treat it the same as "no
+// position" everywhere a position would otherwise be plotted or fed into
+// fitBounds -- one bad (0,0) row was enough to drag the whole map's
+// default view out to the middle of the Atlantic.
+function isValidPosition(lat, lon) {
+    if (lat == null || lon == null) return false;
+    if (lat === 0 && lon === 0) return false;
+    return lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180;
+}
+
+const NODE_BOUNDS_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+
+function deviceMarkerFor(device) {
+    return L.marker([device.latitude, device.longitude], {
+        icon: L.divIcon({
+            html: '<div class="device-marker"></div>',
+            className: '', iconSize: [16, 16], iconAnchor: [8, 8],
+        }),
+        zIndexOffset: 1000,
+    }).bindPopup(
+        `<strong>${esc(device.device_name || device.device_id)}</strong><br>` +
+        `Meshpoint unit<br>` +
+        `Hardware: ${esc(device.hardware_description || '--')}<br>` +
+        `Firmware: ${esc(device.firmware_version || '--')}<br>` +
+        `Last seen: ${relTime(device.last_seen)}`
+    );
+}
+
+function nodeMarkerFor(node, deviceName) {
+    const isMeshtastic = (node.protocol || 'meshtastic') === 'meshtastic';
+    const protoColor = isMeshtastic ? '#06b6d4' : '#a855f7';
+    const key = `${node.device_id}:${node.node_id}`;
+    const justHeard = lastHeardByKey[key] && lastHeardByKey[key] !== node.last_heard;
+    lastHeardByKey[key] = node.last_heard;
+
+    let marker;
+    if (isMeshtastic) {
+        marker = L.circleMarker([node.latitude, node.longitude], {
+            radius: 6,
+            fillColor: protoColor, fillOpacity: 0.8,
+            color: protoColor, weight: 1,
+            className: justHeard ? 'node-pulse' : '',
+        });
+    } else {
+        marker = L.marker([node.latitude, node.longitude], {
+            icon: L.divIcon({
+                html: `<div class="node-marker__diamond${justHeard ? ' node-marker__diamond--recent' : ''}"></div>`,
+                className: '', iconSize: [12, 12], iconAnchor: [6, 6],
+            }),
+        });
+    }
+
+    const signal = parseJsonSafe(node.latest_signal_json);
+    const rssi = signal && signal.rssi != null ? `${round1(signal.rssi)} dBm` : '--';
+    marker.bindPopup(
+        `<strong>${esc(node.display_name || node.node_id)}</strong><br>` +
+        `Protocol: ${esc(node.protocol || '--')}<br>` +
+        `RSSI: ${rssi}<br>` +
+        `Last heard: ${relTime(node.last_heard)}<br>` +
+        `Heard by: ${esc(deviceName || node.device_id)}`
+    );
+    return marker;
+}
+
+function renderMap(devices, nodes) {
+    for (const m of Object.values(deviceMarkers)) map.removeLayer(m);
+    deviceMarkers = {};
+    nodeMarkers = {};
+    markerGroup.clearLayers();
+
+    const deviceNameById = {};
+    for (const d of devices) deviceNameById[d.device_id] = d.device_name;
+
+    const bounds = [];
+
+    for (const d of devices) {
+        if (!isValidPosition(d.latitude, d.longitude)) continue;
+        const marker = deviceMarkerFor(d);
+        marker.addTo(map);
+        deviceMarkers[d.device_id] = marker;
+        const seenMs = d.last_seen ? new Date(d.last_seen).getTime() : 0;
+        if (Date.now() - seenMs > NODE_BOUNDS_MAX_AGE_MS) continue;
+        bounds.push([d.latitude, d.longitude]);
+    }
+
+    for (const n of nodes) {
+        if (!n.has_position || !isValidPosition(n.latitude, n.longitude)) continue;
+        const marker = nodeMarkerFor(n, deviceNameById[n.device_id]);
+        markerGroup.addLayer(marker);
+        nodeMarkers[n.node_id] = marker;
+        // Still plotted (visible if you pan there manually), but a node
+        // not heard from in ages -- e.g. a joke/test node picked up by a
+        // concentrator.db backfill, last_heard actually 788 days old --
+        // shouldn't get to drag today's default auto-zoom out to
+        // wherever it happens to claim it's sitting.
+        const heardMs = n.last_heard ? new Date(n.last_heard).getTime() : 0;
+        if (Date.now() - heardMs <= NODE_BOUNDS_MAX_AGE_MS) {
+            bounds.push([n.latitude, n.longitude]);
+        }
+    }
+
+    if (!hasFitBounds && bounds.length > 0) {
+        if (bounds.length > 1) map.fitBounds(bounds, { padding: [40, 40], maxZoom: 14 });
+        else map.setView(bounds[0], 13);
+        hasFitBounds = true;
+    }
+}
+
+function focusOn(lat, lon) {
+    map.flyTo([lat, lon], 15);
+}
+
+// Expanding-ring "ping" on a node's real position when a new packet from
+// it arrives -- driven by JS (setRadius/setStyle) rather than a CSS
+// keyframe animation, since Leaflet's circleMarker is an SVG path and
+// CSS box-shadow (what the node-pulse class uses) doesn't reliably apply
+// to those. Independent of the marker layer's own render lifecycle, so
+// it survives a renderMap() rebuild happening mid-animation.
+function pulseAt(lat, lon) {
+    let radius = 6, opacity = 0.9;
+    const ring = L.circleMarker([lat, lon], {
+        radius, color: '#00ff88', weight: 2, fillOpacity: 0, opacity,
+    }).addTo(map);
+    const interval = setInterval(() => {
+        radius += 1.5;
+        opacity -= 0.08;
+        if (opacity <= 0) {
+            clearInterval(interval);
+            map.removeLayer(ring);
+            return;
+        }
+        ring.setRadius(radius);
+        ring.setStyle({ opacity });
+    }, 60);
+}
+
+// Fading dashed line from a node's position to the device that heard it,
+// mirroring the main dashboard's own _drawPacketLine in node_map.js.
+function drawPacketLine(fromLatLon, toLatLon) {
+    const line = L.polyline([fromLatLon, toLatLon], {
+        color: '#00e5a0', weight: 2, opacity: 0.8, dashArray: '6, 4',
+    }).addTo(map);
+    let opacity = 0.8;
+    const fade = setInterval(() => {
+        opacity -= 0.1;
+        if (opacity <= 0) {
+            clearInterval(fade);
+            map.removeLayer(line);
+        } else {
+            line.setStyle({ opacity });
+        }
+    }, 200);
+}
+
+// ── data load / render ──────────────────────────────────────────────
+
+let lastNodesRendered = [];
+let lastPacketsRendered = [];
+let hopByNode = {};
+let lastActivityByNode = {};
+let nodeNameById = {};
+let toolbarState = { sort: 'last_heard', hopFilter: 'all', favOnly: false, search: '' };
+
+function renderNodeList() {
+    const el = document.getElementById('nodes');
+    let nodes = lastNodesRendered.slice();
+
+    // Nodes are keyed by (device_id, node_id) -- a node heard by two
+    // Meshpoint units legitimately gets two rows here, one per receiver.
+    // Grouped against the full (unfiltered) set so the count is accurate
+    // regardless of whatever search/hop filter is currently applied.
+    const nodesByStrippedId = {};
+    for (const n of lastNodesRendered) {
+        const key = stripBang(n.node_id);
+        (nodesByStrippedId[key] ||= []).push(n);
+    }
+
+    if (toolbarState.search) {
+        const q = toolbarState.search.toLowerCase();
+        nodes = nodes.filter((n) =>
+            (n.display_name || '').toLowerCase().includes(q)
+            || (n.node_id || '').toLowerCase().includes(q));
+    }
+    if (toolbarState.favOnly) {
+        nodes = nodes.filter((n) => favorites.has(nodeKey(n)));
+    }
+    if (toolbarState.hopFilter !== 'all') {
+        nodes = nodes.filter((n) => {
+            const hops = hopByNode[n.node_id];
+            if (hops == null) return true; // unknown -- don't hide, we just can't classify it yet
+            return toolbarState.hopFilter === 'direct' ? hops === 0 : hops > 0;
+        });
+    }
+
+    nodes.sort((a, b) => {
+        if (toolbarState.sort === 'packet_count') return (b.packet_count || 0) - (a.packet_count || 0);
+        if (toolbarState.sort === 'rssi') {
+            const ra = parseJsonSafe(a.latest_signal_json)?.rssi ?? -999;
+            const rb = parseJsonSafe(b.latest_signal_json)?.rssi ?? -999;
+            return rb - ra;
+        }
+        const ta = lastActivityByNode[a.node_id] || a.last_heard || 0;
+        const tb = lastActivityByNode[b.node_id] || b.last_heard || 0;
+        return new Date(tb) - new Date(ta);
+    });
+
+    if (!nodes.length) { el.innerHTML = '<p class="empty">Nothing yet.</p>'; return; }
+
+    // Collapse to one card per physical node_id. A node heard by two
+    // Meshpoint units is two rows in the DB (keyed by device_id+node_id)
+    // but visually one thing -- pick whichever member actually resolved a
+    // name/hardware/telemetry rather than showing per-device gaps as if
+    // they were missing data.
+    const seenGroup = new Set();
+    const groups = [];
+    for (const n of nodes) {
+        const key = stripBang(n.node_id);
+        if (seenGroup.has(key)) continue;
+        seenGroup.add(key);
+        const members = (nodesByStrippedId[key] || [n]).slice().sort((a, b) => {
+            const ra = parseJsonSafe(a.latest_signal_json)?.rssi ?? -999;
+            const rb = parseJsonSafe(b.latest_signal_json)?.rssi ?? -999;
+            return rb - ra;
+        });
+        groups.push({ key, members });
+    }
+
+    const isRealName = (m) => m.display_name && m.display_name !== `!${m.node_id}` && m.display_name !== m.node_id;
+    const pick = (members, field) => members.find((m) => m[field] != null && m[field] !== '')?.[field] ?? null;
+
+    el.innerHTML = '<div class="node-list">' + groups.map((g, i) => {
+        const members = g.members;
+        const named = members.find(isRealName);
+        const displayName = named ? named.display_name : (members[0].display_name || g.key);
+        const shortName = pick(members, 'short_name');
+        const role = pick(members, 'role');
+        const hardwareModel = pick(members, 'hardware_model');
+        const hasPosition = members.some((m) => m.has_position);
+        const altitude = pick(members, 'altitude');
+        const isFav = favorites.has(g.key);
+        const color = colorFor(g.key);
+        const hops = hopByNode[g.key];
+        const newestHeard = members.reduce(
+            (best, m) => {
+                const t = lastActivityByNode[m.node_id] || m.last_heard;
+                return !best || new Date(t) > new Date(best) ? t : best;
+            }, null,
+        );
+
+        const telemetry = members.map((m) => parseJsonSafe(m.latest_telemetry_json)).find(Boolean);
+
+        const extraBadges = [];
+        if (hardwareModel) extraBadges.push(`<span class="badge">${esc(hardwareModel)}</span>`);
+        if (hasPosition && altitude != null) extraBadges.push(`<span class="badge">&#9650; ${Math.round(altitude)}m</span>`);
+        if (telemetry?.voltage != null) extraBadges.push(`<span class="badge">&#9889;${round1(telemetry.voltage)}V</span>`);
+        if (telemetry?.battery_level != null) extraBadges.push(`<span class="badge">&#128267;${Math.round(telemetry.battery_level)}%</span>`);
+        extraBadges.push(`<span class="badge">${esc(g.key)}</span>`);
+
+        const deviceRows = members.map((m) => {
+            const signal = parseJsonSafe(m.latest_signal_json);
+            const rssi = round1(signal?.rssi);
+            const snr = round1(signal?.snr);
+            return `
+                <div class="badge-row node-card__device-row">
+                    <span class="badge badge--device">${esc(deviceNameById[m.device_id] || m.device_id)}</span>
+                    ${signalBarsHtml(rssi)}
+                    <span class="badge">${rssi != null ? rssi + ' dBm' : '--'}</span>
+                    ${snr != null ? `<span class="badge">SNR ${snr} dB</span>` : ''}
+                    ${snrQualityBadge(snr)}
+                    ${hops ? `<span class="badge">${hops} hops</span>` : ''}
+                    ${signal?.frequency_mhz != null ? `<span class="badge">${round1(signal.frequency_mhz)} MHz</span>` : ''}
+                </div>`;
+        }).join('');
+
+        return `
+            <div class="node-card" data-group-index="${i}">
+                <div class="node-card__head">
+                    <div class="node-avatar" style="background:${color}">${esc(initialsFor(shortName || displayName))}</div>
+                    <div class="node-card__title">
+                        <div class="node-card__name">
+                            <span class="status-dot"></span>${esc(displayName)}${roleIcon(role)}
+                        </div>
+                        <div class="node-card__time">${relTime(newestHeard)}</div>
+                    </div>
+                    <span class="node-star ${isFav ? 'active' : ''}" data-node-key="${esc(g.key)}">&#9733;</span>
+                    <span class="proto-badge" style="color:${protocolColor(members[0].protocol)}; border-color:${protocolColor(members[0].protocol)}">${members[0].protocol === 'meshtastic' ? 'MT' : (members[0].protocol || '').slice(0, 2).toUpperCase()}</span>
+                </div>
+                ${deviceRows}
+                <div class="badge-row">${extraBadges.join('')}</div>
+            </div>`;
+    }).join('') + '</div>';
+
+    el.querySelectorAll('.node-card').forEach((card) => {
+        card.addEventListener('click', (e) => {
+            if (e.target.classList.contains('node-star')) return;
+            const g = groups[Number(card.dataset.groupIndex)];
+            if (g) openNodeDrawer(g.members.find(isRealName) || g.members[0]);
+        });
+    });
+    el.querySelectorAll('.node-star').forEach((star) => {
+        star.addEventListener('click', () => {
+            const key = star.dataset.nodeKey;
+            if (favorites.has(key)) favorites.delete(key); else favorites.add(key);
+            saveFavs(favorites);
+            renderNodeList();
+        });
+    });
+}
+
+document.getElementById('node-search').addEventListener('input', (e) => {
+    toolbarState.search = e.target.value;
+    renderNodeList();
+});
+document.getElementById('node-sort').addEventListener('change', (e) => {
+    toolbarState.sort = e.target.value;
+    renderNodeList();
+});
+document.getElementById('fav-toggle').addEventListener('click', (e) => {
+    toolbarState.favOnly = !toolbarState.favOnly;
+    e.target.classList.toggle('active', toolbarState.favOnly);
+    renderNodeList();
+});
+document.getElementById('hop-filter').addEventListener('click', (e) => {
+    const pill = e.target.closest('.filter-pill');
+    if (!pill) return;
+    document.querySelectorAll('#hop-filter .filter-pill').forEach((p) => p.classList.remove('active'));
+    pill.classList.add('active');
+    toolbarState.hopFilter = pill.dataset.hop;
+    renderNodeList();
+});
+
+// ── packet feed (cards, filters) ──────────────────────────────────────
+
+let packetFilterState = { type: '', protocol: '', device: '' };
+let deviceNameById = {};
+let deviceById = {};
+let lastSeenPacketId = 0;
+let isFirstLoad = true;
+
+// For every packet newer than the last render, ping the source node's
+// position (if known) and draw a fading line to whichever device heard
+// it -- skipped on the very first load, which would otherwise replay a
+// pulse for the entire last-100 backlog at once rather than just new
+// activity.
+function triggerLiveEffects(packets, nodes) {
+    const nodePosById = {};
+    for (const n of nodes) {
+        if (n.has_position && isValidPosition(n.latitude, n.longitude)) {
+            nodePosById[n.node_id] = [n.latitude, n.longitude];
+        }
+    }
+
+    let maxId = lastSeenPacketId;
+    for (const p of packets) {
+        if (p.id > maxId) maxId = p.id;
+        if (isFirstLoad || p.id <= lastSeenPacketId) continue;
+
+        const nodePos = nodePosById[stripBang(p.source_id)];
+        const device = deviceById[p.device_id];
+        if (!nodePos) continue;
+
+        pulseAt(nodePos[0], nodePos[1]);
+        if (device && isValidPosition(device.latitude, device.longitude)) {
+            drawPacketLine(nodePos, [device.latitude, device.longitude]);
+        }
+    }
+    lastSeenPacketId = maxId;
+    isFirstLoad = false;
+}
+
+function populateSelect(el, values, current) {
+    const existing = new Set(Array.from(el.options).map((o) => o.value));
+    for (const v of values) {
+        if (!existing.has(v)) {
+            const opt = document.createElement('option');
+            opt.value = v;
+            opt.textContent = v;
+            el.appendChild(opt);
+        }
+    }
+    if (current && el.querySelector(`option[value="${current}"]`)) el.value = current;
+}
+
+function renderPacketFeed() {
+    const typeSel = document.getElementById('packet-filter-type');
+    const protoSel = document.getElementById('packet-filter-protocol');
+    const deviceSel = document.getElementById('packet-filter-device');
+
+    populateSelect(typeSel, [...new Set(lastPacketsRendered.map((p) => p.packet_type).filter(Boolean))].sort(), packetFilterState.type);
+    populateSelect(protoSel, [...new Set(lastPacketsRendered.map((p) => p.protocol).filter(Boolean))].sort(), packetFilterState.protocol);
+    populateSelect(deviceSel, [...new Set(lastPacketsRendered.map((p) => p.device_id).filter(Boolean))].sort(), packetFilterState.device);
+
+    let packets = lastPacketsRendered.filter((p) =>
+        (!packetFilterState.type || p.packet_type === packetFilterState.type)
+        && (!packetFilterState.protocol || p.protocol === packetFilterState.protocol)
+        && (!packetFilterState.device || p.device_id === packetFilterState.device));
+
+    document.getElementById('packet-count').textContent = packets.length;
+
+    const el = document.getElementById('packets');
+    if (!packets.length) { el.innerHTML = '<p class="empty">Nothing yet.</p>'; return; }
+
+    el.innerHTML = '<div class="packet-feed">' + packets.map((p, i) => {
+        const color = protocolColor(p.protocol);
+        const via = deviceNameById[p.device_id] || p.device_id;
+        const freq = p.frequency_mhz != null ? `${p.frequency_mhz} MHz` : '';
+        const sf = p.spreading_factor != null ? `SF${p.spreading_factor}` : '';
+        const rssiPart = p.rssi != null ? `${round1(p.rssi)}${signalBarsHtml(p.rssi)}` : '';
+        return `
+            <div class="packet-card" data-packet-index="${i}">
+                <div class="packet-card__head">
+                    <span>
+                        <span style="color:${color}">${esc((p.protocol || '').toUpperCase())}</span>
+                        &middot; ${esc((p.packet_type || '').toUpperCase())}
+                        &middot; <span class="src">${esc(resolveNodeName(p.source_id))}</span>
+                    </span>
+                    <span>${rssiPart}</span>
+                </div>
+                <div class="packet-card__detail">${esc(packetDetails(p))}</div>
+                <div class="packet-card__foot">
+                    <span>${absTime(p.received_at)}</span>
+                    <span class="via">${esc(via)}</span>
+                    <span>${[freq, sf].filter(Boolean).join(' · ')}</span>
+                    <span class="badges">
+                        <span class="pill" style="color:${color}; border-color:${color}">${esc((p.protocol || '').toUpperCase())}</span>
+                        <span class="pill" style="color:var(--dim)">${esc((p.packet_type || '').toUpperCase())}</span>
+                    </span>
+                </div>
+            </div>`;
+    }).join('') + '</div>';
+
+    el.querySelectorAll('.packet-card').forEach((card) => {
+        card.addEventListener('click', () => {
+            const p = packets[Number(card.dataset.packetIndex)];
+            if (p) openPacketModal(p);
+        });
+    });
+}
+
+['packet-filter-type', 'packet-filter-protocol', 'packet-filter-device'].forEach((id) => {
+    document.getElementById(id).addEventListener('change', (e) => {
+        const key = id.replace('packet-filter-', '');
+        packetFilterState[key] = e.target.value;
+        renderPacketFeed();
+    });
+});
+
+// ── node detail drawer (mirrors frontend/js/node_drawer.js) ──────────
+
+function ndSection(title, rows) {
+    const shown = rows.filter((r) => r.value != null && r.value !== '');
+    if (!shown.length) return '';
+    return `
+        <div class="nd-section">
+            <div class="nd-section__title">${esc(title)}</div>
+            ${shown.map((r) => `
+                <div class="nd-row">
+                    <span class="nd-row__label">${esc(r.label)}</span>
+                    <span class="nd-row__value">${r.value}</span>
+                </div>`).join('')}
+        </div>`;
+}
+
+function openNodeDrawer(n) {
+    const signal = parseJsonSafe(n.latest_signal_json);
+    const telemetry = parseJsonSafe(n.latest_telemetry_json);
+    const rssi = round1(signal?.rssi);
+    const snr = round1(signal?.snr);
+    const hops = hopByNode[n.node_id];
+    const color = colorFor(n.node_id);
+    const isFav = favorites.has(nodeKey(n));
+    const hasPos = n.has_position && isValidPosition(n.latitude, n.longitude);
+
+    const recentPackets = lastPacketsRendered
+        .filter((p) => stripBang(p.source_id) === n.node_id)
+        .slice(0, 10);
+
+    // Nodes are keyed by (device_id, node_id) -- if this same node_id is
+    // also reported by another device, that's a second receiver hearing
+    // the same physical node, not a data bug. Surface it here so it
+    // doesn't read as an unexplained duplicate elsewhere on the dashboard.
+    const otherDevices = lastNodesRendered
+        .filter((o) => o !== n && stripBang(o.node_id) === stripBang(n.node_id))
+        .map((o) => deviceNameById[o.device_id] || o.device_id);
+    const heardViaValue = esc(deviceNameById[n.device_id] || n.device_id)
+        + (otherDevices.length ? ` <span class="badge">also via ${esc(otherDevices.join(', '))}</span>` : '');
+
+    const drawer = document.getElementById('nd-drawer');
+    drawer.innerHTML = `
+        <div class="nd-header">
+            <div class="node-avatar" style="background:${color}">${esc(initialsFor(n.short_name || n.display_name))}</div>
+            <div class="nd-header__info">
+                <div class="nd-header__name">${esc(n.display_name || n.node_id)}${roleIcon(n.role)}</div>
+                <div class="nd-header__id">${esc(n.node_id)}</div>
+            </div>
+            <span class="node-star ${isFav ? 'active' : ''}" id="nd-fav" data-node-key="${esc(nodeKey(n))}">&#9733;</span>
+            <button class="nd-close" id="nd-close-btn">&times;</button>
+        </div>
+        <div class="nd-actions">
+            ${hasPos ? '<button id="nd-view-map">View on map</button>' : ''}
+        </div>
+        ${ndSection('Node Info', [
+            { label: 'Protocol', value: esc(n.protocol) },
+            { label: 'Role', value: n.role ? esc(n.role) : null },
+            { label: 'Hardware', value: n.hardware_model ? esc(n.hardware_model) : null },
+            { label: 'Firmware', value: n.firmware_version ? esc(n.firmware_version) : null },
+            { label: 'Heard via', value: heardViaValue },
+            { label: 'Packets', value: n.packet_count },
+            { label: 'First seen', value: n.first_seen ? relTime(n.first_seen) : null },
+            { label: 'Last heard', value: relTime(lastActivityByNode[n.node_id] || n.last_heard) },
+        ])}
+        ${ndSection('Signal', [
+            { label: 'RSSI', value: rssi != null ? `${rssi} dBm` : null },
+            { label: 'SNR', value: snr != null ? `${snr} dB ${snrQualityBadge(snr)}` : null },
+            { label: 'Frequency', value: signal?.frequency_mhz != null ? `${round1(signal.frequency_mhz)} MHz` : null },
+            { label: 'Spread factor', value: signal?.spreading_factor != null ? `SF${signal.spreading_factor}` : null },
+            { label: 'Hops', value: hops || null },
+        ])}
+        ${hasPos ? ndSection('Position', [
+            { label: 'Latitude', value: n.latitude },
+            { label: 'Longitude', value: n.longitude },
+            { label: 'Altitude', value: n.altitude != null ? `${Math.round(n.altitude)} m` : null },
+        ]) : ''}
+        ${telemetry ? ndSection('Device Metrics', [
+            { label: 'Battery', value: telemetry.battery_level != null ? `${Math.round(telemetry.battery_level)}%` : null },
+            { label: 'Voltage', value: telemetry.voltage != null ? `${round1(telemetry.voltage)} V` : null },
+            { label: 'Channel util', value: telemetry.channel_utilization != null ? `${round1(telemetry.channel_utilization)}%` : null },
+            { label: 'Air util TX', value: telemetry.air_util_tx != null ? `${round1(telemetry.air_util_tx)}%` : null },
+            { label: 'Uptime', value: telemetry.uptime_seconds != null ? `${Math.round(telemetry.uptime_seconds / 3600)}h` : null },
+        ]) : ''}
+        <div class="nd-section">
+            <div class="nd-section__title">Recent Packets</div>
+            ${recentPackets.length
+                ? recentPackets.map((p) => `
+                    <div class="nd-packet-row">
+                        ${absTime(p.received_at)} &middot; ${esc((p.packet_type || '').toUpperCase())}
+                        ${p.rssi != null ? `&middot; ${round1(p.rssi)} dBm` : ''}
+                    </div>`).join('')
+                : '<p class="empty">No recent packets from this node.</p>'}
+        </div>
+    `;
+
+    document.getElementById('nd-close-btn').addEventListener('click', closeNodeDrawer);
+    document.getElementById('nd-fav').addEventListener('click', (e) => {
+        const key = e.target.dataset.nodeKey;
+        if (favorites.has(key)) favorites.delete(key); else favorites.add(key);
+        saveFavs(favorites);
+        e.target.classList.toggle('active');
+        renderNodeList();
+    });
+    const viewMapBtn = document.getElementById('nd-view-map');
+    if (viewMapBtn) viewMapBtn.addEventListener('click', () => {
+        closeNodeDrawer();
+        focusOn(n.latitude, n.longitude);
+    });
+
+    drawer.classList.add('nd-drawer--open');
+    document.getElementById('nd-backdrop').classList.add('nd-backdrop--open');
+}
+
+function closeNodeDrawer() {
+    document.getElementById('nd-drawer').classList.remove('nd-drawer--open');
+    document.getElementById('nd-backdrop').classList.remove('nd-backdrop--open');
+}
+document.getElementById('nd-backdrop').addEventListener('click', closeNodeDrawer);
+
+// ── packet detail modal (mirrors frontend/js/packet_detail_modal.js) ──
+
+function pdmLayer(title, rows) {
+    const shown = rows.filter((r) => r.value != null && r.value !== '');
+    if (!shown.length) return '';
+    return `
+        <div class="pdm-layer">
+            <div class="pdm-layer__title">${esc(title)}</div>
+            ${shown.map((r) => `
+                <div class="pdm-row">
+                    <span class="pdm-row__key">${esc(r.label)}</span>
+                    <span class="pdm-row__val">${r.value}</span>
+                </div>`).join('')}
+        </div>`;
+}
+
+function openPacketModal(p) {
+    const payload = parseJsonSafe(p.decoded_payload_json);
+    const via = deviceNameById[p.device_id] || p.device_id;
+
+    const modal = document.getElementById('pdm-modal');
+    modal.innerHTML = `
+        <div class="pdm-header">
+            <div>
+                <h2 class="pdm-title">Packet detail</h2>
+                <div class="pdm-meta">${absTime(p.received_at)} &middot; ${esc((p.packet_type || '').toUpperCase())}</div>
+            </div>
+            <button class="pdm-close" id="pdm-close-btn">&times;</button>
+        </div>
+        ${pdmLayer('RF', [
+            { label: 'Frequency', value: p.frequency_mhz != null ? `${round1(p.frequency_mhz)} MHz` : null },
+            { label: 'Modem', value: [p.spreading_factor != null ? `SF${p.spreading_factor}` : null,
+                                       p.bandwidth_khz != null ? `${p.bandwidth_khz} kHz` : null,
+                                       p.coding_rate || null].filter(Boolean).join(' / ') || null },
+            { label: 'RSSI', value: p.rssi != null ? `${round1(p.rssi)} dBm` : null },
+            { label: 'SNR', value: p.snr != null ? `${round1(p.snr)} dB` : null },
+            { label: 'Quality', value: p.signal_quality_percent != null ? `${round1(p.signal_quality_percent)}%` : null },
+        ])}
+        ${pdmLayer('Mesh', [
+            { label: 'Protocol', value: esc(p.protocol) },
+            { label: 'Type', value: esc(p.packet_type) },
+            { label: 'Source', value: esc(resolveNodeName(p.source_id)) },
+            { label: 'Destination', value: p.destination_id ? esc(resolveNodeName(p.destination_id)) : null },
+            { label: 'Hops', value: (p.hop_count != null) ? `${p.hop_count} (limit ${p.hop_limit}, start ${p.hop_start})` : null },
+            { label: 'Want ACK', value: p.want_ack ? 'Yes' : null },
+            { label: 'Via MQTT', value: p.via_mqtt ? 'Yes' : null },
+            { label: 'Channel hash', value: p.channel_hash != null ? `0x${Number(p.channel_hash).toString(16)}` : null },
+            { label: 'Relay node', value: p.relay_node || null },
+        ])}
+        ${pdmLayer('Payload', [
+            { label: 'Decrypted', value: p.decrypted ? 'Yes' : 'No / not applicable' },
+            { label: 'Summary', value: esc(packetDetails(p)) },
+        ])}
+        ${payload ? `<div class="pdm-layer">
+            <div class="pdm-layer__title">Raw decoded payload</div>
+            <div class="pdm-raw">${esc(JSON.stringify(payload, null, 2))}</div>
+        </div>` : ''}
+        ${pdmLayer('Capture', [
+            { label: 'Packet ID', value: p.packet_id ? esc(p.packet_id) : null },
+            { label: 'Capture source', value: p.capture_source ? esc(p.capture_source) : null },
+            { label: 'Heard via', value: esc(via) },
+            { label: 'Timestamp', value: p.timestamp ? esc(p.timestamp) : null },
+        ])}
+    `;
+    document.getElementById('pdm-close-btn').addEventListener('click', closePacketModal);
+    document.getElementById('pdm-overlay').classList.add('pdm-overlay--open');
+}
+
+function closePacketModal() {
+    document.getElementById('pdm-overlay').classList.remove('pdm-overlay--open');
+}
+document.getElementById('pdm-overlay').addEventListener('click', (e) => {
+    if (e.target.id === 'pdm-overlay') closePacketModal();
+});
+
+// ── live updates (mirrors frontend/js/websocket_client.js's reconnect
+// pattern, simplified: we don't do incremental DOM patches per event like
+// the main app does, we just treat any push as "something changed, go
+// refetch" and debounce so a burst of packets triggers one refresh) ──
+
+let liveSocket = null;
+let liveReconnectDelay = 2000;
+let refreshTimer = null;
+
+function scheduleRefresh() {
+    if (refreshTimer) return;
+    refreshTimer = setTimeout(() => { refreshTimer = null; loadAll(); }, 800);
+}
+
+function connectLive() {
+    if (!window.WS_PORT) return;
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    liveSocket = new WebSocket(`${proto}://${location.hostname}:${window.WS_PORT}/live`);
+    liveSocket.onopen = () => { liveReconnectDelay = 2000; };
+    liveSocket.onmessage = (event) => {
+        try {
+            const msg = JSON.parse(event.data);
+            if (msg.type === 'update') scheduleRefresh();
+        } catch (_) { /* ignore malformed pushes */ }
+    };
+    liveSocket.onclose = () => {
+        setTimeout(connectLive, liveReconnectDelay);
+        liveReconnectDelay = Math.min(liveReconnectDelay * 1.5, 30000);
+    };
+    liveSocket.onerror = () => { liveSocket.close(); };
+}
+
+async function loadAll() {
+    try {
+        const [stats, devices, nodes, packets] = await Promise.all([
+            fetch('/api/stats').then(r => r.json()),
+            fetch('/api/devices').then(r => r.json()),
+            fetch('/api/nodes').then(r => r.json()),
+            fetch('/api/packets?limit=100').then(r => r.json()),
+        ]);
+
+        document.getElementById('stat-devices').textContent = stats.devices;
+        document.getElementById('stat-nodes').textContent = stats.nodes_unique;
+        document.getElementById('stat-packets').textContent = stats.packets_total;
+        document.getElementById('stat-packets-hour').textContent = stats.packets_last_hour;
+
+        deviceNameById = {};
+        deviceById = {};
+        for (const d of devices) {
+            deviceNameById[d.device_id] = d.device_name;
+            deviceById[d.device_id] = d;
+        }
+
+        document.getElementById('device-pills').innerHTML = devices.map((d) => `
+            <span class="device-pill" title="${esc(d.device_id)}">
+                <span class="device-pill__dot"></span>${esc(d.device_name || d.device_id)}
+            </span>`).join('');
+
+        renderMap(devices, nodes);
+        triggerLiveEffects(packets, nodes);
+        lastNodesRendered = nodes;
+        lastPacketsRendered = packets;
+        hopByNode = latestHopCountBySource(packets);
+        lastActivityByNode = latestActivityByNode(nodes, packets);
+        nodeNameById = nodeNameLookup(nodes);
+        renderNodeList();
+        renderPacketFeed();
+    } catch (e) {
+        console.error('Refresh failed', e);
+    }
+}
+
+loadAll();
+connectLive();
+// Safety net if the live socket is ever silently down -- the live push
+// above is what makes this feel instant; this is just a backstop.
+setInterval(loadAll, 30000);
+</script>
+</body>
+</html>

@@ -1,0 +1,13 @@
+[Unit]
+Description=Local Meshradar receiver (dev tooling, unofficial)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/local_meshradar
+ExecStart=/usr/bin/python3 /opt/local_meshradar/server.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
