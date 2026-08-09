@@ -66,12 +66,14 @@ echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━�
 echo ""
 if [ "$IS_UPGRADE" = "1" ]; then
     info "Existing installation detected: running in upgrade mode"
+    echo ""
     echo "Welcome back! This updates/repairs your existing Meshpoint install"
     echo "in place: system packages, SPI/UART/GPS config, the SX1302 HAL, the"
     echo "Python venv, and the systemd service. Most steps are idempotent and"
     echo "skip straight past anything already in place, so a repeat run is"
     echo "usually much faster than the first one."
 else
+    echo ""
     echo "Welcome! This sets up a fresh Raspberry Pi for Meshpoint: system"
     echo "packages, SPI/UART/GPS config, the SX1302 HAL, a Python venv, and"
     echo "the systemd service. Expect this to take 15-30 minutes depending"
@@ -146,7 +148,7 @@ if [ "$INSTALL_ARDUINO" = "1" ] && ! command -v arduino-cli &>/dev/null && [ -t 
     echo "compile+flash that companion's firmware from this dashboard, not"
     echo "the board itself. Say yes here if that's a path you want open."
     echo ""
-    read -r -p "Install the arduino-cli/ESP32 toolchain now? [y/N] " arduino_reply || arduino_reply=""
+    read -r -p "Include the arduino-cli/ESP32 toolchain in this install? [y/N] " arduino_reply || arduino_reply=""
     case "$arduino_reply" in
         [yY]*) INSTALL_ARDUINO=1 ;;
         *) INSTALL_ARDUINO=0 ;;
@@ -178,7 +180,7 @@ if [ "$INSTALL_PLATFORMIO" = "1" ] && ! command -v pio &>/dev/null && [ -t 0 ]; 
     echo "this step itself is quick; the multi-hundred-MB download happens"
     echo "the first time you actually use the card."
     echo ""
-    read -r -p "Install the PlatformIO toolchain now? [y/N] " platformio_reply || platformio_reply=""
+    read -r -p "Include the PlatformIO toolchain in this install? [y/N] " platformio_reply || platformio_reply=""
     case "$platformio_reply" in
         [yY]*) INSTALL_PLATFORMIO=1 ;;
         *) INSTALL_PLATFORMIO=0 ;;
@@ -213,7 +215,7 @@ if [ "$INSTALL_RTLSDR" = "1" ] && ! command -v rtl_sdr &>/dev/null && [ -t 0 ]; 
     echo "wasted time and disk space. Skip it now and re-run this installer"
     echo "later (without --skip-rtlsdr) to add it once you have a dongle."
     echo ""
-    read -r -p "Install RTL-SDR support now? [y/N] " rtlsdr_reply || rtlsdr_reply=""
+    read -r -p "Include RTL-SDR support in this install? [y/N] " rtlsdr_reply || rtlsdr_reply=""
     case "$rtlsdr_reply" in
         [yY]*) INSTALL_RTLSDR=1 ;;
         *) INSTALL_RTLSDR=0 ;;
