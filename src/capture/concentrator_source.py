@@ -188,7 +188,13 @@ class ConcentratorCaptureSource(CaptureSource):
         # lorawan_public=True already programmed above) -- only a plan
         # like eu868_reticulum() that sets multi_sf_syncword to something
         # else actually changes ch0-ch7's behavior here.
-        self._wrapper.set_multi_sf_syncword(self._channel_plan.multi_sf_syncword)
+        print(f"!!! DEBUG about to call set_multi_sf_syncword(0x{self._channel_plan.multi_sf_syncword:02X})", flush=True)
+        try:
+            self._wrapper.set_multi_sf_syncword(self._channel_plan.multi_sf_syncword)
+        except BaseException as exc:
+            print(f"!!! DEBUG set_multi_sf_syncword RAISED: {type(exc).__name__}: {exc}", flush=True)
+            raise
+        print("!!! DEBUG set_multi_sf_syncword call RETURNED (did not raise)", flush=True)
         self._running = True
         logger.info(
             "Concentrator capture started (syncword=0x%02X, multi_sf_syncword=0x%02X)",
