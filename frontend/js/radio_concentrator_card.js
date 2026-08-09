@@ -35,8 +35,15 @@ class RadioConcentratorCard {
 
     _protocolLabel(protocol) {
         if (!protocol) return '';
-        return KNOWN_PROTOCOL_LABELS[protocol]
-            || (protocol.charAt(0).toUpperCase() + protocol.slice(1));
+        if (KNOWN_PROTOCOL_LABELS[protocol]) return KNOWN_PROTOCOL_LABELS[protocol];
+        // Per-word title case, not just the string's first character --
+        // multi-word "auto"-derived names (e.g. "lora pager", from a
+        // channel named "LoRa Pager") need every word capitalized, or
+        // "lora pager" renders as "Lora pager" instead of "Lora Pager".
+        return protocol
+            .split(' ')
+            .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+            .join(' ');
     }
 
     mount(rootEl) {

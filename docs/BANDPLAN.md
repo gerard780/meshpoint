@@ -115,39 +115,41 @@ the ±490 kHz IF window.
 
 ```
 radio_0 = radio_1 = 869.525 MHz  →  ch0:     Reticulum (869.463 MHz, sync word 0x12)
-                                     ch1:     TechInc  (reserved, no protocol built yet)
-                                     ch2–ch7: PAPA/DELTA/TWO/ECHO/MIKE/CHARLIE
-                                              (spare, same 0x12 sync word)
+                                     ch1–ch7: Chat/LoRa Pager/Public/Data/Weather/
+                                              Alert/Emergency (spare, same 0x12 sync word)
                                      ch8:     Meshtastic LongFast (sync word 0x2B, unchanged)
 ```
 
 ch1-ch7 are real, enabled, listening channels — not disabled placeholders —
 but with no protocol of their own yet, free spectrum for a future custom
-LoRa-chirp experiment. Naming a channel (e.g. ch1 "TechInc") only reserves
-it and sets what shows in the Concentrator Channels table -- it doesn't
-create or select any decoder. Real handling for a channel's traffic would
-mean writing an actual decoder and wiring it into the capture/routing path
-(e.g. `src/decode/packet_router.py`), a separate, unbuilt step; nothing
+LoRa-chirp experiment. Naming a channel only reserves it and sets what
+shows in the Concentrator Channels table -- it doesn't create or select
+any decoder. Real handling for a channel's traffic would mean writing an
+actual decoder and wiring it into the capture/routing path (e.g.
+`src/decode/packet_router.py`), a separate, unbuilt step; nothing
 currently reads a channel's name to decide how to interpret its bytes.
-Names here are otherwise placeholders (PAPA/DELTA/TWO/ECHO/MIKE/CHARLIE is
-a phonetic-alphabet spelling of the operator's own callsign) -- easy to
-rename, no other code depends on the exact strings. The usable window here
-is genuinely tight (869.035-870.000 MHz: capped on one side by the ±490 kHz
-IF limit, on the other by EU_868's own 870.000 MHz region ceiling — 965 kHz
-total, with ch0/ch8 already sitting in the middle of it), so the 7 spare
-frequencies are hand-picked for real guard band rather than evenly
-auto-spaced: 4 fit below the ch0/ch8 pair, 3 above.
+Names here are placeholders, named by likely future use rather than
+decoratively (reads more clearly in a screenshot of the Concentrator
+Channels table) -- easy to rename, no other code depends on the exact
+strings. ch2 is "LoRa Pager", not just "Pager", deliberately -- using the
+same name as ch9's real, already-working Pager channel would make both
+rows read identically despite being completely different things. The
+usable window here is genuinely tight (869.035-870.000 MHz: capped on one
+side by the ±490 kHz IF limit, on the other by EU_868's own 870.000 MHz
+region ceiling — 965 kHz total, with ch0/ch8 already sitting in the middle
+of it), so the 7 spare frequencies are hand-picked for real guard band
+rather than evenly auto-spaced: 4 fit below the ch0/ch8 pair, 3 above.
 
 | Channel | Name | Frequency | BW | SF | Protocol | RF chain | IF offset |
 |---|---|---|---|---|---|---|---|
 | ch0 | Reticulum | 869.463 MHz | 125 kHz | SF7–12 | Reticulum | RF0 | −62 000 Hz |
-| ch1 | TechInc | 869.055 MHz | 125 kHz | SF7–12 | Techinc | RF0 | −470 000 Hz |
-| ch2 | PAPA | 869.155 MHz | 125 kHz | SF7–12 | Papa | RF0 | −370 000 Hz |
-| ch3 | DELTA | 869.255 MHz | 125 kHz | SF7–12 | Delta | RF0 | −270 000 Hz |
-| ch4 | TWO | 869.355 MHz | 125 kHz | SF7–12 | Two | RF0 | −170 000 Hz |
-| ch5 | ECHO | 869.665 MHz | 125 kHz | SF7–12 | Echo | RF0 | +140 000 Hz |
-| ch6 | MIKE | 869.765 MHz | 125 kHz | SF7–12 | Mike | RF0 | +240 000 Hz |
-| ch7 | CHARLIE | 869.865 MHz | 125 kHz | SF7–12 | Charlie | RF0 | +340 000 Hz |
+| ch1 | Chat | 869.055 MHz | 125 kHz | SF7–12 | Chat | RF0 | −470 000 Hz |
+| ch2 | LoRa Pager | 869.155 MHz | 125 kHz | SF7–12 | Lora Pager | RF0 | −370 000 Hz |
+| ch3 | Public | 869.255 MHz | 125 kHz | SF7–12 | Public | RF0 | −270 000 Hz |
+| ch4 | Data | 869.355 MHz | 125 kHz | SF7–12 | Data | RF0 | −170 000 Hz |
+| ch5 | Weather | 869.665 MHz | 125 kHz | SF7–12 | Weather | RF0 | +140 000 Hz |
+| ch6 | Alert | 869.765 MHz | 125 kHz | SF7–12 | Alert | RF0 | +240 000 Hz |
+| ch7 | Emergency | 869.865 MHz | 125 kHz | SF7–12 | Emergency | RF0 | +340 000 Hz |
 | ch8 | — | 869.525 MHz | 250 kHz | SF11 | Meshtastic | RF0 | 0 |
 
 `multi_sf_protocol="auto"` here (unlike every other plan's plain string

@@ -258,14 +258,17 @@ class ConcentratorChannelPlan:
         LoRa-chirp experiment (they'd share this same 0x12 sync word --
         fine for something you design yourself, since you pick its sync
         word too; not fine for receiving an existing protocol with its
-        own fixed required sync word, e.g. real LoRaWAN's 0x34). ch1
-        ("TechInc") is reserved for a possible future "TechInc pager"
-        project -- name only for now, no actual protocol built yet (see
-        the module docstring's note on what "auto" does and doesn't do).
-        ch2-ch7 are named PAPA/DELTA/TWO/ECHO/MIKE/CHARLIE, a phonetic
-        spelling of the operator's own callsign -- all placeholders,
+        own fixed required sync word, e.g. real LoRaWAN's 0x34). Named
+        by likely future use (Chat/LoRa Pager/Public/Data/Weather/Alert/
+        Emergency) rather than decoratively -- reads more clearly in a
+        screenshot of the Concentrator Channels table. All placeholders,
         easy to rename later, no other code depends on the exact
-        strings. multi_sf_protocol="auto" (see config_routes.py's
+        strings. "LoRa Pager" (ch2) is deliberately not just "Pager" --
+        this is cosmetic only (see the "auto" note below and
+        CONFIGURATION.md), and using the exact same name as ch9's real,
+        already-working Pager channel would make both rows read
+        identically in the Concentrator Channels table despite being
+        completely different things. multi_sf_protocol="auto" (see config_routes.py's
         _derive_channel_protocol()) uses each channel's own name,
         lowercased, as its displayed protocol -- that's what actually
         distinguishes the real Reticulum channel from a spare one in the
@@ -282,13 +285,13 @@ class ConcentratorChannelPlan:
 
         Channel map:
           ch0  869.463 MHz  125 kHz  SF7–12  Reticulum   RF1  IF  –62 000
-          ch1  869.055 MHz  125 kHz  SF7–12  TechInc     RF0  IF –470 000
-          ch2  869.155 MHz  125 kHz  SF7–12  PAPA        RF0  IF –370 000
-          ch3  869.255 MHz  125 kHz  SF7–12  DELTA       RF0  IF –270 000
-          ch4  869.355 MHz  125 kHz  SF7–12  TWO         RF0  IF –170 000
-          ch5  869.665 MHz  125 kHz  SF7–12  ECHO        RF1  IF +140 000
-          ch6  869.765 MHz  125 kHz  SF7–12  MIKE        RF1  IF +240 000
-          ch7  869.865 MHz  125 kHz  SF7–12  CHARLIE     RF1  IF +340 000
+          ch1  869.055 MHz  125 kHz  SF7–12  Chat        RF0  IF –470 000
+          ch2  869.155 MHz  125 kHz  SF7–12  LoRa Pager  RF0  IF –370 000
+          ch3  869.255 MHz  125 kHz  SF7–12  Public      RF0  IF –270 000
+          ch4  869.355 MHz  125 kHz  SF7–12  Data        RF0  IF –170 000
+          ch5  869.665 MHz  125 kHz  SF7–12  Weather     RF1  IF +140 000
+          ch6  869.765 MHz  125 kHz  SF7–12  Alert       RF1  IF +240 000
+          ch7  869.865 MHz  125 kHz  SF7–12  Emergency   RF1  IF +340 000
           ch8  869.525 MHz  250 kHz  SF11    Meshtastic  RF1  IF       0
 
         Sync word assignment (see sx1302_wrapper.py):
@@ -313,18 +316,13 @@ class ConcentratorChannelPlan:
         )
         plan.multi_sf_channels = [
             ChannelConfig(frequency_hz=869_463_000, name="Reticulum"),
-            # ch1: reserved for a possible future "TechInc pager" project
-            # (name only, for now -- see the class docstring's note on
-            # what "auto" does and doesn't do).
-            # ch2-ch7: PAPA DELTA TWO ECHO MIKE CHARLIE -- phonetic
-            # spelling of the operator's own callsign.
-            ChannelConfig(frequency_hz=869_055_000, name="TechInc"),
-            ChannelConfig(frequency_hz=869_155_000, name="PAPA"),
-            ChannelConfig(frequency_hz=869_255_000, name="DELTA"),
-            ChannelConfig(frequency_hz=869_355_000, name="TWO"),
-            ChannelConfig(frequency_hz=869_665_000, name="ECHO"),
-            ChannelConfig(frequency_hz=869_765_000, name="MIKE"),
-            ChannelConfig(frequency_hz=869_865_000, name="CHARLIE"),
+            ChannelConfig(frequency_hz=869_055_000, name="Chat"),
+            ChannelConfig(frequency_hz=869_155_000, name="LoRa Pager"),
+            ChannelConfig(frequency_hz=869_255_000, name="Public"),
+            ChannelConfig(frequency_hz=869_355_000, name="Data"),
+            ChannelConfig(frequency_hz=869_665_000, name="Weather"),
+            ChannelConfig(frequency_hz=869_765_000, name="Alert"),
+            ChannelConfig(frequency_hz=869_865_000, name="Emergency"),
         ]
         return plan
 
