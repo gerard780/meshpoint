@@ -139,7 +139,9 @@
         border-radius: 999px;
         padding: 3px 10px;
         white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        cursor: pointer;
     }
+    .device-pill:hover { border-color: var(--accent); }
     .device-pill__dot {
         width: 6px; height: 6px; border-radius: 50%; flex: none;
         background: var(--accent-green);
@@ -692,6 +694,23 @@ function latestActivityByDeviceNode(nodes, packets) {
         const current = result[key];
         if (!current || new Date(t) > new Date(current)) {
             result[key] = t;
+        }
+    }
+    return result;
+}
+
+// register only ever fires once per WebSocket connection, so
+// devices.last_seen is really "connected since," not a live heartbeat --
+// this derives an actual "last heard" per device from the newest packet
+// we've received from it, mirroring viewer.html's own
+// latestActivityByDevice.
+function latestActivityByDevice(packets) {
+    const result = {};
+    for (const p of packets) {
+        const t = p.received_at || p.timestamp;
+        if (!t || !p.device_id) continue;
+        if (!result[p.device_id] || new Date(t) > new Date(result[p.device_id])) {
+            result[p.device_id] = t;
         }
     }
     return result;
@@ -1336,6 +1355,7 @@ document.getElementById('hop-filter').addEventListener('click', (e) => {
 let packetFilterState = { type: '', protocol: '', device: '' };
 let deviceNameById = {};
 let deviceById = {};
+let deviceActivityById = {};
 let lastSeenPacketId = 0;
 let isFirstLoad = true;
 
@@ -1652,6 +1672,33 @@ document.getElementById('pdm-overlay').addEventListener('click', (e) => {
     if (e.target.id === 'pdm-overlay') closePacketModal();
 });
 
+// Reuses the packet detail modal's overlay/close mechanics -- same idea
+// (a single generic modal, filled per-thing-clicked), just with device
+// fields instead of packet fields. Matches what /viewer's Devices table
+// shows, just one device at a time instead of a whole table.
+function openDeviceModal(d) {
+    const heardAt = deviceActivityById[d.device_id];
+    const modal = document.getElementById('pdm-modal');
+    modal.innerHTML = `
+        <div class="pdm-header">
+            <div>
+                <h2 class="pdm-title">${esc(d.device_name || d.device_id)}</h2>
+                <div class="pdm-meta">Meshpoint unit</div>
+            </div>
+            <button class="pdm-close" id="pdm-close-btn">&times;</button>
+        </div>
+        ${pdmLayer('Device', [
+            { label: 'Device ID', value: esc(d.device_id) },
+            { label: 'Hardware', value: d.hardware_description ? esc(d.hardware_description) : null },
+            { label: 'Firmware', value: d.firmware_version ? esc(d.firmware_version) : null },
+            { label: 'Connected since', value: d.last_seen ? relTime(d.last_seen) : null },
+            { label: 'Last heard', value: heardAt ? relTime(heardAt) : null },
+        ])}
+    `;
+    document.getElementById('pdm-close-btn').addEventListener('click', closePacketModal);
+    document.getElementById('pdm-overlay').classList.add('pdm-overlay--open');
+}
+
 // ── live updates (mirrors frontend/js/websocket_client.js's reconnect
 // pattern, simplified: we don't do incremental DOM patches per event like
 // the main app does, we just treat any push as "something changed, go
@@ -1705,10 +1752,18 @@ async function loadAll() {
             deviceById[d.device_id] = d;
         }
 
+        deviceActivityById = latestActivityByDevice(packets);
+
         document.getElementById('device-pills').innerHTML = devices.map((d) => `
-            <span class="device-pill" title="${esc(d.device_id)}">
+            <span class="device-pill" title="${esc(d.device_id)}" data-device-id="${esc(d.device_id)}">
                 <span class="device-pill__dot"></span>${esc(d.device_name || d.device_id)}
             </span>`).join('');
+        document.querySelectorAll('.device-pill').forEach((pill) => {
+            pill.addEventListener('click', () => {
+                const d = deviceById[pill.dataset.deviceId];
+                if (d) openDeviceModal(d);
+            });
+        });
 
         renderMap(devices, nodes);
         triggerLiveEffects(packets, nodes);
