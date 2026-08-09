@@ -286,7 +286,7 @@ void drawScreen() {
   display.clearDisplay();
   display.setTextSize(1);
   display.setCursor(0, 0);
-  display.println("RETICULUM CH TEST");
+  display.println("CONCENTRATOR CH TEST");
   display.drawFastHLine(0, 10, OLED_WIDTH, SSD1306_WHITE);
 
   // Keep the selected channel inside the visible scroll window.
