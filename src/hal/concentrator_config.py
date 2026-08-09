@@ -258,11 +258,14 @@ class ConcentratorChannelPlan:
         LoRa-chirp experiment (they'd share this same 0x12 sync word --
         fine for something you design yourself, since you pick its sync
         word too; not fine for receiving an existing protocol with its
-        own fixed required sync word, e.g. real LoRaWAN's 0x34). Named
-        PAPA/DELTA/TWO/ECHO/MIKE/CHARLIE (the operator's own callsign,
-        phonetic) plus one extra (SIERRA) -- placeholders, easy to rename
-        later, no other code depends on the exact strings.
-        multi_sf_protocol="auto" (see config_routes.py's
+        own fixed required sync word, e.g. real LoRaWAN's 0x34). ch1
+        ("TechInc") is reserved for a possible future "TechInc pager"
+        project -- name only for now, no actual protocol built yet (see
+        the module docstring's note on what "auto" does and doesn't do).
+        ch2-ch7 are named PAPA/DELTA/TWO/ECHO/MIKE/CHARLIE, a phonetic
+        spelling of the operator's own callsign -- all placeholders,
+        easy to rename later, no other code depends on the exact
+        strings. multi_sf_protocol="auto" (see config_routes.py's
         _derive_channel_protocol()) uses each channel's own name,
         lowercased, as its displayed protocol -- that's what actually
         distinguishes the real Reticulum channel from a spare one in the
@@ -279,13 +282,13 @@ class ConcentratorChannelPlan:
 
         Channel map:
           ch0  869.463 MHz  125 kHz  SF7–12  Reticulum   RF1  IF  –62 000
-          ch1  869.055 MHz  125 kHz  SF7–12  PAPA        RF0  IF –470 000
-          ch2  869.155 MHz  125 kHz  SF7–12  DELTA       RF0  IF –370 000
-          ch3  869.255 MHz  125 kHz  SF7–12  TWO         RF0  IF –270 000
-          ch4  869.355 MHz  125 kHz  SF7–12  ECHO        RF0  IF –170 000
-          ch5  869.665 MHz  125 kHz  SF7–12  MIKE        RF1  IF +140 000
-          ch6  869.765 MHz  125 kHz  SF7–12  CHARLIE     RF1  IF +240 000
-          ch7  869.865 MHz  125 kHz  SF7–12  SIERRA      RF1  IF +340 000
+          ch1  869.055 MHz  125 kHz  SF7–12  TechInc     RF0  IF –470 000
+          ch2  869.155 MHz  125 kHz  SF7–12  PAPA        RF0  IF –370 000
+          ch3  869.255 MHz  125 kHz  SF7–12  DELTA       RF0  IF –270 000
+          ch4  869.355 MHz  125 kHz  SF7–12  TWO         RF0  IF –170 000
+          ch5  869.665 MHz  125 kHz  SF7–12  ECHO        RF1  IF +140 000
+          ch6  869.765 MHz  125 kHz  SF7–12  MIKE        RF1  IF +240 000
+          ch7  869.865 MHz  125 kHz  SF7–12  CHARLIE     RF1  IF +340 000
           ch8  869.525 MHz  250 kHz  SF11    Meshtastic  RF1  IF       0
 
         Sync word assignment (see sx1302_wrapper.py):
