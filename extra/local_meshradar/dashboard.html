@@ -239,18 +239,40 @@
         display: flex; align-items: center; gap: 8px;
         margin-bottom: 10px; flex-wrap: wrap;
     }
+    .nodes-search-wrap {
+        position: relative;
+        flex: 1;
+        min-width: 100px;
+    }
     .nodes-search {
         background: var(--bg);
         color: var(--text);
         border: 1px solid var(--border);
         border-radius: 6px;
-        padding: 5px 10px;
+        padding: 5px 24px 5px 10px;
         font-family: inherit;
         font-size: 12px;
-        flex: 1;
-        min-width: 100px;
+        width: 100%;
+        box-sizing: border-box;
     }
     .nodes-search:focus { outline: none; border-color: var(--accent); }
+    .nodes-search-clear {
+        display: none;
+        position: absolute;
+        right: 6px;
+        top: 50%;
+        transform: translateY(-50%);
+        width: 16px;
+        height: 16px;
+        line-height: 16px;
+        text-align: center;
+        border-radius: 50%;
+        cursor: pointer;
+        color: var(--dim);
+        font-size: 13px;
+    }
+    .nodes-search-clear:hover { color: var(--text); background: var(--border); }
+    .nodes-search-clear.visible { display: block; }
     select.nodes-sort {
         background: var(--bg);
         color: var(--text);
@@ -486,7 +508,10 @@
                     <div class="filter-pill" data-hop="direct">DIRECT</div>
                     <div class="filter-pill" data-hop="relayed">RELAYED</div>
                 </div>
-                <input class="nodes-search" id="node-search" placeholder="Search...">
+                <div class="nodes-search-wrap">
+                    <input class="nodes-search" id="node-search" placeholder="Search...">
+                    <div class="nodes-search-clear" id="node-search-clear" title="Clear search">&times;</div>
+                </div>
             </div>
             <div id="nodes"></div>
         </section>
@@ -1212,6 +1237,15 @@ function renderNodeList() {
 
 document.getElementById('node-search').addEventListener('input', (e) => {
     toolbarState.search = e.target.value;
+    document.getElementById('node-search-clear').classList.toggle('visible', !!e.target.value);
+    renderNodeList();
+});
+document.getElementById('node-search-clear').addEventListener('click', () => {
+    const input = document.getElementById('node-search');
+    input.value = '';
+    toolbarState.search = '';
+    document.getElementById('node-search-clear').classList.remove('visible');
+    input.focus();
     renderNodeList();
 });
 document.getElementById('node-sort').addEventListener('change', (e) => {
