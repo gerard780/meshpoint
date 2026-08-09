@@ -1,0 +1,7 @@
+# Vul de WiFi van de DOELLOCATIE in waar de node komt te draaien.
+# Daarna:  ./flash-node.sh wifi.txt.example   (of kopieer naar wifi.txt)
+SSID=NaamVanHetWiFiNetwerk
+PASS=het-wifi-wachtwoord
+# Optioneel (laat staan voor het standaard Reticulum-netwerk):
+VPS=node.reticulumnet.nl
+PORT=4242

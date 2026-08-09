@@ -1,0 +1,45 @@
+{
+	"name": "microReticulum",
+	"version": "0.3.1",
+	"description": "Port of Reticulum Network Stack to C++ specifically but not exclusively targeting 32-bit and better MCUs",
+	"keywords": "reticulum, rns, mesh, embedded, mcu, esp32, nrf52, native",
+	"repository":
+	{
+		"type": "git",
+		"url": "https://github.com/attermann/microReticulum.git"
+	},
+	"authors":
+	[
+		{
+			"name": "Chad Attermann",
+			"email": "attermann@gmail.com",
+			"maintainer": true
+		}
+	],
+	"license": "Apache-2.0",
+	"homepage": "https://reticulum.network/",
+	"dependencies": [
+		{
+			"name": "ArduinoJson",
+			"version": "~7.4.2"
+		},
+		{
+			"name": "MsgPack",
+			"version": "~0.4.2"
+		},
+		{
+			"name": "Crypto",
+			"url": "https://github.com/attermann/Crypto.git"
+		},
+		{
+			"name": "microStore",
+			"url": "https://github.com/attermann/microStore.git"
+		}
+	],
+	"frameworks": "*",
+	"platforms": "*",
+	"export": {},
+	"exclude": [
+		".github"
+	]
+}
