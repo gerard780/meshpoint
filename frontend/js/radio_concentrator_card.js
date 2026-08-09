@@ -2,8 +2,13 @@
  * Radio tab — SX1302 Concentrator Channels card (observational).
  *
  * Read-only table of the full 9-slot concentrator plan the capture
- * source runs: per channel frequency, bandwidth, SF, sync word,
- * protocol, RF chain, and enabled state. Data comes from the
+ * source runs: per channel name, frequency, bandwidth, SF, sync word,
+ * protocol, RF chain, and enabled state. ``name`` (optional, e.g.
+ * eu868_reticulum()'s "Playground 1"-"Playground 7") is what
+ * distinguishes individual channels when several share one plan-wide
+ * protocol label -- Protocol alone can't tell ch0 "Reticulum" apart
+ * from a same-sync-word spare channel once those are enabled too.
+ * Data comes from the
  * ``concentrator`` block of GET /api/config (rebuilt server-side with
  * the same call the capture source makes). Hidden when the box has no
  * concentrator source configured.
@@ -44,6 +49,7 @@ class RadioConcentratorCard {
             return `
                 <tr class="ch-table__row"${dim}>
                     <td class="ch-table__idx">${ch.ch}</td>
+                    <td class="ch-table__name">${ch.name ? this._esc(ch.name) : '—'}</td>
                     <td class="ch-table__hash">${ch.frequency_mhz.toFixed(3)}</td>
                     <td class="ch-table__hash">${ch.bandwidth_khz} kHz</td>
                     <td class="ch-table__hash">${sf}</td>
@@ -71,6 +77,7 @@ class RadioConcentratorCard {
                 <thead>
                     <tr>
                         <th>CH</th>
+                        <th>Name</th>
                         <th>Freq (MHz)</th>
                         <th>BW</th>
                         <th>SF</th>

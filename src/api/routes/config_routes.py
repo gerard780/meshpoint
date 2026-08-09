@@ -123,6 +123,7 @@ def _concentrator_status(config: AppConfig) -> dict:
     for idx, ch in enumerate(plan.multi_sf_channels):
         channels.append({
             "ch": idx,
+            "name": ch.name,
             "frequency_mhz": round(ch.frequency_hz / 1e6, 4),
             "bandwidth_khz": ch.bandwidth_khz,
             "spreading_factor": ch.spreading_factor,  # 0 = multi-SF
@@ -135,6 +136,7 @@ def _concentrator_status(config: AppConfig) -> dict:
     if single is not None:
         channels.append({
             "ch": 8,
+            "name": single.name,
             "frequency_mhz": round(single.frequency_hz / 1e6, 4),
             "bandwidth_khz": single.bandwidth_khz,
             "spreading_factor": single.spreading_factor,
@@ -153,6 +155,7 @@ def _concentrator_status(config: AppConfig) -> dict:
     # became user-editable, see PUT /api/config/radio/pager below.
     channels.append({
         "ch": 9,
+        "name": "",
         "frequency_mhz": round(radio.pager_frequency_mhz, 4),
         "bandwidth_khz": 125.0,
         "spreading_factor": None,

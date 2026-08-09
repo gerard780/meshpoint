@@ -45,6 +45,12 @@ class ChannelConfig:
     bandwidth_khz: int = 125
     spreading_factor: int = 0
     enabled: bool = True
+    # Optional per-channel display label (config_routes.py, Concentrator
+    # Channels table) -- empty string everywhere except eu868_reticulum()
+    # below, where every ch0-ch7 channel shares the plan-wide "reticulum"
+    # protocol label once ch1-7 are enabled, so protocol alone can no
+    # longer distinguish the real Reticulum channel from a spare one.
+    name: str = ""
 
 
 @dataclass
@@ -232,9 +238,10 @@ class ConcentratorChannelPlan:
     @staticmethod
     def eu868_reticulum() -> ConcentratorChannelPlan:
         """EU868 alternate plan: Reticulum on ch0 instead of LoRaWAN,
-        Meshtastic unchanged on ch8. Opt-in via radio.band_plan =
-        "reticulum" -- eu868_lorawan() (the default) is untouched by
-        this existing alongside it.
+        Meshtastic unchanged on ch8, ch1-ch7 enabled as spare "Playground"
+        channels. Opt-in via radio.band_plan = "reticulum" --
+        eu868_lorawan() (the default) is untouched by this existing
+        alongside it.
 
         Same RF1 anchor (869.525 MHz) as eu868_lorawan() -- Reticulum's
         own network parameters (869.463 MHz / SF8 / BW125 / CR5) put its
@@ -246,19 +253,40 @@ class ConcentratorChannelPlan:
         register entirely -- not something the default plan should ever
         do silently.
 
-        ch1-ch7 are left disabled, reserved for a possible future second
-        LoRa-chirp experiment (they would share this same 0x12 sync
-        word -- fine for something you design yourself, since you pick
-        its sync word too; not fine for receiving an existing protocol
-        with its own fixed required sync word, e.g. real LoRaWAN's 0x34).
+        ch1-ch7 ("Playground 1"-"Playground 7") are real, enabled,
+        listening channels -- but with no protocol of their own; they're
+        free spectrum for a future custom LoRa-chirp experiment (they'd
+        share this same 0x12 sync word -- fine for something you design
+        yourself, since you pick its sync word too; not fine for
+        receiving an existing protocol with its own fixed required sync
+        word, e.g. real LoRaWAN's 0x34). ``name`` (not ``protocol``, which
+        is plan-wide "reticulum" for all of ch0-ch7) is what distinguishes
+        the real Reticulum channel from a spare one in the Concentrator
+        Channels table.
+
+        Frequencies are hand-picked, not evenly auto-spaced: the usable
+        window here is genuinely tight (869.035-870.000 MHz, capped by
+        the ±490 kHz IF limit on one side and EU_868's own 870.000 MHz
+        region ceiling on the other -- 965 kHz total, with ch0/ch8
+        already sitting in the middle of it), so guard band per channel
+        matters more than a perfectly even grid. 4 fit below the ch0/ch8
+        pair, 3 above.
 
         Channel map:
-          ch0  869.463 MHz  125 kHz  SF7–12  Reticulum   RF1  IF –62 000
-          ch1–ch7  (disabled — reserved for future use)
-          ch8  869.525 MHz  250 kHz  SF11    Meshtastic  RF1  IF       0
+          ch0  869.463 MHz  125 kHz  SF7–12  Reticulum      RF1  IF  –62 000
+          ch1  869.055 MHz  125 kHz  SF7–12  Playground 1   RF0  IF –470 000
+          ch2  869.155 MHz  125 kHz  SF7–12  Playground 2   RF0  IF –370 000
+          ch3  869.255 MHz  125 kHz  SF7–12  Playground 3   RF0  IF –270 000
+          ch4  869.355 MHz  125 kHz  SF7–12  Playground 4   RF0  IF –170 000
+          ch5  869.665 MHz  125 kHz  SF7–12  Playground 5   RF1  IF +140 000
+          ch6  869.765 MHz  125 kHz  SF7–12  Playground 6   RF1  IF +240 000
+          ch7  869.865 MHz  125 kHz  SF7–12  Playground 7   RF1  IF +340 000
+          ch8  869.525 MHz  250 kHz  SF11    Meshtastic     RF1  IF       0
 
         Sync word assignment (see sx1302_wrapper.py):
-          ch0-ch7 multi-SF: Reticulum 0x12  (set_multi_sf_syncword(), see above)
+          ch0-ch7 multi-SF: Reticulum 0x12  (set_multi_sf_syncword(), see above --
+                                             applies to ALL of ch0-ch7, Playground
+                                             channels included, not just ch0)
           ch8   service:    Meshtastic 0x2B (direct register writes, unchanged)
         """
         plan = ConcentratorChannelPlan(
@@ -273,16 +301,14 @@ class ConcentratorChannelPlan:
             spreading_factor=11,
         )
         plan.multi_sf_channels = [
-            ChannelConfig(frequency_hz=869_463_000),
-            # ch1–ch7: disabled — reserved for a possible future second
-            # LoRa-chirp experiment, not populated speculatively.
-            ChannelConfig(frequency_hz=869_525_000, enabled=False),
-            ChannelConfig(frequency_hz=869_525_000, enabled=False),
-            ChannelConfig(frequency_hz=869_525_000, enabled=False),
-            ChannelConfig(frequency_hz=869_525_000, enabled=False),
-            ChannelConfig(frequency_hz=869_525_000, enabled=False),
-            ChannelConfig(frequency_hz=869_525_000, enabled=False),
-            ChannelConfig(frequency_hz=869_525_000, enabled=False),
+            ChannelConfig(frequency_hz=869_463_000, name="Reticulum"),
+            ChannelConfig(frequency_hz=869_055_000, name="Playground 1"),
+            ChannelConfig(frequency_hz=869_155_000, name="Playground 2"),
+            ChannelConfig(frequency_hz=869_255_000, name="Playground 3"),
+            ChannelConfig(frequency_hz=869_355_000, name="Playground 4"),
+            ChannelConfig(frequency_hz=869_665_000, name="Playground 5"),
+            ChannelConfig(frequency_hz=869_765_000, name="Playground 6"),
+            ChannelConfig(frequency_hz=869_865_000, name="Playground 7"),
         ]
         return plan
 
