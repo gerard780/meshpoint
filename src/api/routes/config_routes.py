@@ -384,6 +384,11 @@ async def get_config(claims: SessionClaims = Depends(require_auth)):
             "preamble_length": radio.preamble_length,
             "current_preset": current_preset,
             "band_plan": radio.band_plan,
+            # Drives the LoRaWAN sidebar link's data-requires-config gating
+            # (sidebar_controller.js) -- band_plan="reticulum" repoints
+            # ch0-ch7 away from LoRaWAN entirely, so the tab would otherwise
+            # imply live monitoring that isn't actually happening.
+            "lorawan_active": radio.band_plan != "reticulum",
         },
         "transmit": {
             "enabled": tx.enabled,

@@ -92,6 +92,60 @@ never wired into `for_region()`, which always returns `eu868_lorawan()` for
 `EU_868`. Kept in the source as a documented alternative, not dead by
 accident.
 
+## EU_868 alternate — Reticulum instead of LoRaWAN (`radio.band_plan: "reticulum"`)
+
+`eu868_reticulum()` — unlike `meshtastic_eu868_default()` above, this one
+**is** live and selectable, via `radio.band_plan` (Configuration → Radio's
+"Band plan" dropdown, EU_868-only). `from_radio_config()` checks `band_plan`
+before anything else: `"reticulum"` returns this plan regardless of the
+requested frequency/SF/BW.
+
+The trade this makes explicit: ch0–ch7 share **one** sync-word register
+across all 8 channels (`SX1302_REG_RX_TOP_FRAME_SYNCH0/1_SF7TO12_PEAK1/2_
+POS_SF7TO12` in the real HAL register map — genuinely one shared front-end,
+not 8 independent ones), so it's LoRaWAN *or* Reticulum on that register,
+never both. `eu868_reticulum()` repoints it to
+[Reticulum](https://reticulum.network/)'s own sync word `0x12` instead of
+LoRaWAN's `0x34` — real LoRaWAN reception stops entirely while this is
+selected. `radio_0`/`radio_1` both anchor to 869.525 MHz (same as ch8) since
+Reticulum's real network parameters (869.463 MHz / SF8 / BW125 / CR5,
+confirmed against `microReticulum_Firmware`'s own source, see
+`extra/heltec_v4_reticulum_bron/`) sit only 62 kHz away — comfortably inside
+the ±490 kHz IF window.
+
+```
+radio_0 = radio_1 = 869.525 MHz  →  ch0:     Reticulum (869.463 MHz, sync word 0x12)
+                                     ch1–ch7: disabled (reserved for a
+                                              possible future second
+                                              LoRa-chirp experiment)
+                                     ch8:     Meshtastic LongFast (sync word 0x2B, unchanged)
+```
+
+| Channel | Frequency | BW | SF | Protocol | RF chain | IF offset |
+|---|---|---|---|---|---|---|
+| ch0 | 869.463 MHz | 125 kHz | SF7–12 | Reticulum | RF0 | −62 000 Hz |
+| ch1–ch7 | — | — | — | disabled | RF0 | — |
+| ch8 | 869.525 MHz | 250 kHz | SF11 | Meshtastic | RF0 | 0 |
+
+(Both RF chains anchor to the same frequency here, so `_configure_if_channels()`'s
+`RF0 if freq_hz <= radio_0 + 500_000 else RF1` rule puts every channel on
+RF0 — not a bug, just what happens when there's only one real anchor.)
+
+Meshtastic (ch8, its own genuinely independent sync-word register) and Pager
+(ch9, separate FSK silicon) are **unaffected either way** — this plan only
+changes what's on the shared ch0-7 register. ch1-7 are left disabled rather
+than populated speculatively; if a second custom LoRa-chirp protocol gets
+built later, it would need to also use sync word `0x12` to be received here
+(fine for something you design yourself — not for an existing protocol with
+its own fixed required sync word).
+
+**This only gets the concentrator physically receiving correctly-framed
+Reticulum RF** — there is no `Protocol.RETICULUM` decoder in
+`src/decode/packet_router.py`, so received frames aren't decoded/labeled as
+Reticulum content on the dashboard yet. See
+[Configuration → Radio](CONFIGURATION.md#eu868-band-plan--lorawan-vs-reticulum)
+for the config reference.
+
 ## US, ANZ, IN, KR, SG_923 — Meshtastic-only wide-band plans
 
 The other five regions have ≥2 MHz of usable band and use
@@ -151,6 +205,12 @@ program **all 8 multi-SF channels (ch0–ch7) to the public LoRaWAN sync word
 `0x34`** — for every region, not just `EU_868`. Only the single-SF service
 channel (ch8) gets overridden to Meshtastic's `0x2B` via a direct register
 write (`set_syncword()`).
+
+`ConcentratorCaptureSource.start()` now also calls a second, analogous
+override, `set_multi_sf_syncword()`, right after `lgw_start()` — a no-op for
+every plan except `eu868_reticulum()` (see above), which repoints ch0-ch7 to
+`0x12`. Same register-write technique as `set_syncword()`, just the shared
+multi-SF register pair (578/579) instead of the service channel's (932/933).
 
 Practical effect: **only ch8 (the single primary/service channel) can ever
 decode Meshtastic traffic**, on every region. The 8 multi-SF channels are
