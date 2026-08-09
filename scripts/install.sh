@@ -46,16 +46,37 @@ info()  { echo -e "${GREEN}[INFO]${NC}  $*"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 fail()  { echo -e "${RED}[FAIL]${NC}  $*"; exit 1; }
 
+# Detect upgrade vs fresh install upfront, before the welcome banner
+# below -- an existing local.yaml or an enabled meshpoint service is the
+# clearest signal a previous install already completed. Used to live
+# further down (near SCRIPT_DIR), which meant the banner always claimed
+# to set up "a fresh Raspberry Pi" even on a repeat/upgrade run, since it
+# printed before that detection had even run.
+IS_UPGRADE=0
+if [ -f "${MESHPOINT_DIR}/config/local.yaml" ] \
+        || systemctl is-enabled meshpoint &>/dev/null; then
+    IS_UPGRADE=1
+fi
+
 # ── Welcome ─────────────────────────────────────────────────────────
 
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${CYAN}${BOLD}  MESHPOINT INSTALLER${NC}"
 echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
-echo "Welcome! This sets up a fresh Raspberry Pi for Meshpoint: system"
-echo "packages, SPI/UART/GPS config, the SX1302 HAL, a Python venv, and"
-echo "the systemd service. Expect this to take 15-30 minutes depending"
-echo "on your Pi and network connection."
+if [ "$IS_UPGRADE" = "1" ]; then
+    info "Existing installation detected: running in upgrade mode"
+    echo "Welcome back! This updates/repairs your existing Meshpoint install"
+    echo "in place: system packages, SPI/UART/GPS config, the SX1302 HAL, the"
+    echo "Python venv, and the systemd service. Most steps are idempotent and"
+    echo "skip straight past anything already in place, so a repeat run is"
+    echo "usually much faster than the first one."
+else
+    echo "Welcome! This sets up a fresh Raspberry Pi for Meshpoint: system"
+    echo "packages, SPI/UART/GPS config, the SX1302 HAL, a Python venv, and"
+    echo "the systemd service. Expect this to take 15-30 minutes depending"
+    echo "on your Pi and network connection."
+fi
 echo ""
 
 # ── Pre-flight checks ──────────────────────────────────────────────
@@ -213,15 +234,9 @@ echo ""
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 info "Source directory: ${SCRIPT_DIR}"
 
-# Detect upgrade vs fresh install for the post-install banner.
-# An existing local.yaml or an enabled meshpoint service is the
-# clearest signal that the previous install completed at least once.
-IS_UPGRADE=0
-if [ -f "${MESHPOINT_DIR}/config/local.yaml" ] \
-        || systemctl is-enabled meshpoint &>/dev/null; then
-    IS_UPGRADE=1
-    info "Existing installation detected: running in upgrade mode"
-fi
+# IS_UPGRADE itself is already set (see the welcome banner near the top
+# of this script) -- kept here only as the anchor comment for what it's
+# used for below.
 
 # Read the version we're installing for the post-install banner.
 INSTALL_VERSION="$(
