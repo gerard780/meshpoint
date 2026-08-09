@@ -330,6 +330,21 @@
         font-size: 10px; padding: 1px 5px; border-radius: 4px;
         border: 1px solid var(--border); color: var(--dim);
     }
+    .receiver-pills {
+        display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+        margin-top: 6px; cursor: pointer;
+    }
+    .receiver-pill {
+        display: flex; align-items: center; gap: 4px;
+        background: var(--overlay-soft); border: 1px solid var(--border);
+        border-radius: 10px; padding: 2px 7px 2px 6px;
+        font-size: 10px; color: var(--dim);
+    }
+    .receiver-pills:hover .receiver-pill { border-color: var(--accent); }
+    .receiver-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+    .receiver-dot--fresh { background: var(--accent-green); }
+    .receiver-dot--stale { background: var(--accent-red); }
+    .receiver-pills__toggle { font-size: 9px; color: var(--dim); }
     .badge-row { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; align-items: center; }
     .badge {
         font-size: 10px; padding: 2px 6px; border-radius: 4px;
@@ -1080,6 +1095,7 @@ let lastActivityByNode = {};
 let lastActivityByDeviceNode = {};
 let nodeNameById = {};
 let toolbarState = { sort: 'last_heard', hopFilter: 'all', favOnly: false, search: '' };
+let expandedReceivers = new Set();
 
 function renderNodeList() {
     const el = document.getElementById('nodes');
@@ -1182,12 +1198,37 @@ function renderNodeList() {
         // days ago while the other just updated. Each device needs its
         // own timestamp so a stale row doesn't look as fresh as the card
         // header implies.
-        const deviceRows = members.map((m) => {
+        const memberInfos = members.map((m) => {
             const signal = parseJsonSafe(m.latest_signal_json);
-            const rssi = round1(signal?.rssi);
-            const snr = round1(signal?.snr);
             const heardAt = lastActivityByDeviceNode[`${m.device_id}:${m.node_id}`] || m.last_heard;
-            return `
+            return { m, signal, rssi: round1(signal?.rssi), snr: round1(signal?.snr), heardAt };
+        });
+        const maxHeardAt = memberInfos.reduce(
+            (best, info) => (!best || new Date(info.heardAt) > new Date(best) ? info.heardAt : best), null,
+        );
+
+        // A node heard by multiple mesh points used to stack a full detail
+        // row per receiver, so the card jumped between 1 and 3 lines tall
+        // depending on coverage. Collapse to a compact pill per receiver
+        // (dot green if it's within a few seconds of the freshest read,
+        // red if it's lagging) and only show the full rows on click.
+        const isExpanded = expandedReceivers.has(g.key);
+        const receiverPills = members.length > 1 ? `
+            <div class="receiver-pills" data-node-key="${esc(g.key)}">
+                ${memberInfos.map((info) => {
+                    const isFresh = maxHeardAt != null
+                        && Math.abs(new Date(info.heardAt) - new Date(maxHeardAt)) <= 5000;
+                    return `
+                        <span class="receiver-pill">
+                            <span class="receiver-dot ${isFresh ? 'receiver-dot--fresh' : 'receiver-dot--stale'}"></span>
+                            ${esc(deviceNameById[info.m.device_id] || info.m.device_id)}
+                            ${relTime(info.heardAt)}
+                        </span>`;
+                }).join('')}
+                <span class="receiver-pills__toggle">${isExpanded ? '&#9650;' : '&#9660;'}</span>
+            </div>` : '';
+
+        const deviceRows = (members.length === 1 || isExpanded) ? memberInfos.map(({ m, signal, rssi, snr, heardAt }) => `
                 <div class="badge-row node-card__device-row">
                     <span class="badge badge--device">${esc(deviceNameById[m.device_id] || m.device_id)}</span>
                     <span class="badge">${relTime(heardAt)}</span>
@@ -1197,8 +1238,7 @@ function renderNodeList() {
                     ${snrQualityBadge(snr)}
                     ${hops ? `<span class="badge">${hops} hops</span>` : ''}
                     ${signal?.frequency_mhz != null ? `<span class="badge">${round1(signal.frequency_mhz)} MHz</span>` : ''}
-                </div>`;
-        }).join('');
+                </div>`).join('') : '';
 
         return `
             <div class="node-card" data-group-index="${i}">
@@ -1213,6 +1253,7 @@ function renderNodeList() {
                     <span class="node-star ${isFav ? 'active' : ''}" data-node-key="${esc(g.key)}">&#9733;</span>
                     <span class="proto-badge" style="color:${protocolColor(members[0].protocol)}; border-color:${protocolColor(members[0].protocol)}">${members[0].protocol === 'meshtastic' ? 'MT' : (members[0].protocol || '').slice(0, 2).toUpperCase()}</span>
                 </div>
+                ${receiverPills}
                 ${deviceRows}
                 <div class="badge-row">${extraBadges.join('')}</div>
             </div>`;
@@ -1230,6 +1271,14 @@ function renderNodeList() {
             const key = star.dataset.nodeKey;
             if (favorites.has(key)) favorites.delete(key); else favorites.add(key);
             saveFavs(favorites);
+            renderNodeList();
+        });
+    });
+    el.querySelectorAll('.receiver-pills').forEach((row) => {
+        row.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const key = row.dataset.nodeKey;
+            if (expandedReceivers.has(key)) expandedReceivers.delete(key); else expandedReceivers.add(key);
             renderNodeList();
         });
     });
