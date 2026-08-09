@@ -47,13 +47,14 @@ class RadioConfigEditCard {
                         <span class="cfg-field__label">Band plan</span>
                         <select class="cfg-field__input" data-radio-band-plan>
                             <option value="default">Default (LoRaWAN + Meshtastic)</option>
-                            <option value="reticulum">Reticulum (ch0 → Reticulum, drops LoRaWAN)</option>
+                            <option value="reticulum">Reticulum (ch0 Reticulum + 7 spare channels)</option>
                         </select>
                         <p class="cfg-field__hint">
                             EU 868 only. "Reticulum" repoints channels 0-7 from LoRaWAN's
                             sync word to Reticulum's — LoRaWAN reception stops entirely
                             while this is selected. Meshtastic (ch8) and Pager (ch9) are
-                            unaffected either way.
+                            unaffected either way. The 7 spare channels (ch1-ch7) are named
+                            individually — see the Concentrator Channels table below.
                         </p>
                     </label>
                     <div class="cfg-field">
