@@ -117,8 +117,9 @@ fi
 # Already-installed check comes first, ahead of even showing the
 # explanation: on a box that already has it (e.g. a repeat/upgrade run),
 # asking again every time is just noise -- silently default to "yes"
-# instead (section 13's own per-step idempotency then does the real
-# work of confirming/filling in anything actually missing, quietly). An
+# instead (section 13's own per-step idempotency then does the real work
+# of confirming/filling in anything actually missing, and announces that
+# itself when it gets there -- no need to say it twice, here too). An
 # explicit --skip-arduino still wins over that, in case someone wants a
 # fast run without even the idempotent checks.
 INSTALL_ARDUINO=1
@@ -127,33 +128,29 @@ for arg in "$@"; do
         --skip-arduino) INSTALL_ARDUINO=0 ;;
     esac
 done
-if [ "$INSTALL_ARDUINO" = "1" ]; then
-    if command -v arduino-cli &>/dev/null; then
-        info "arduino-cli already installed -- skipping the install prompt"
-    elif [ -t 0 ]; then
-        echo ""
-        echo "One optional piece before we start: Configuration -> Firmware's"
-        echo "POCSAG, Pager, and RF Environment companion cards compile their"
-        echo "own firmware from source via arduino-cli + the ESP32 toolchain --"
-        echo "a genuinely large (few hundred MB), multi-minute download."
-        echo "MeshCore/Meshtastic flashing uses prebuilt releases instead and"
-        echo "needs none of this. Skip it now and re-run this installer later"
-        echo "(without --skip-arduino) to add it whenever you actually need it."
-        echo ""
-        echo "On a RAK2287 (RAK V2) board: that concentrator has no SX1261, so"
-        echo "the RF Environment page has nothing to show on its own. Fixing"
-        echo "that needs a separate Heltec V3 board, flashed as an RF"
-        echo "Environment companion and added under capture.rfenv_companion in"
-        echo "local.yaml -- this toolchain only gets you the ability to"
-        echo "compile+flash that companion's firmware from this dashboard, not"
-        echo "the board itself. Say yes here if that's a path you want open."
-        echo ""
-        read -r -p "Install the arduino-cli/ESP32 toolchain now? [y/N] " arduino_reply || arduino_reply=""
-        case "$arduino_reply" in
-            [yY]*) INSTALL_ARDUINO=1 ;;
-            *) INSTALL_ARDUINO=0 ;;
-        esac
-    fi
+if [ "$INSTALL_ARDUINO" = "1" ] && ! command -v arduino-cli &>/dev/null && [ -t 0 ]; then
+    echo ""
+    echo "One optional piece before we start: Configuration -> Firmware's"
+    echo "POCSAG, Pager, and RF Environment companion cards compile their"
+    echo "own firmware from source via arduino-cli + the ESP32 toolchain --"
+    echo "a genuinely large (few hundred MB), multi-minute download."
+    echo "MeshCore/Meshtastic flashing uses prebuilt releases instead and"
+    echo "needs none of this. Skip it now and re-run this installer later"
+    echo "(without --skip-arduino) to add it whenever you actually need it."
+    echo ""
+    echo "On a RAK2287 (RAK V2) board: that concentrator has no SX1261, so"
+    echo "the RF Environment page has nothing to show on its own. Fixing"
+    echo "that needs a separate Heltec V3 board, flashed as an RF"
+    echo "Environment companion and added under capture.rfenv_companion in"
+    echo "local.yaml -- this toolchain only gets you the ability to"
+    echo "compile+flash that companion's firmware from this dashboard, not"
+    echo "the board itself. Say yes here if that's a path you want open."
+    echo ""
+    read -r -p "Install the arduino-cli/ESP32 toolchain now? [y/N] " arduino_reply || arduino_reply=""
+    case "$arduino_reply" in
+        [yY]*) INSTALL_ARDUINO=1 ;;
+        *) INSTALL_ARDUINO=0 ;;
+    esac
 fi
 
 # A second, separate optional toolchain: PlatformIO, needed only for the
@@ -163,32 +160,29 @@ fi
 # express, so it can't share arduino-cli's toolchain above. Kept as its
 # own prompt/flag rather than folded into --skip-arduino: someone may want
 # one companion toolchain without the other. Same already-installed
-# short-circuit as arduino-cli above.
+# short-circuit as arduino-cli above (and same reasoning: the actual
+# install step below announces "already installed, skipping" itself).
 INSTALL_PLATFORMIO=1
 for arg in "$@"; do
     case "$arg" in
         --skip-platformio) INSTALL_PLATFORMIO=0 ;;
     esac
 done
-if [ "$INSTALL_PLATFORMIO" = "1" ]; then
-    if command -v pio &>/dev/null; then
-        info "PlatformIO already installed -- skipping the install prompt"
-    elif [ -t 0 ]; then
-        echo ""
-        echo "One more optional piece: the Reticulum companion firmware card"
-        echo "(Configuration -> Firmware, extra/heltec_v4_reticulum_bron) builds"
-        echo "and flashes that project via PlatformIO, not arduino-cli -- a"
-        echo "separate toolchain. PlatformIO manages its own ESP32 package"
-        echo "downloads lazily on first build (not during this installer), so"
-        echo "this step itself is quick; the multi-hundred-MB download happens"
-        echo "the first time you actually use the card."
-        echo ""
-        read -r -p "Install the PlatformIO toolchain now? [y/N] " platformio_reply || platformio_reply=""
-        case "$platformio_reply" in
-            [yY]*) INSTALL_PLATFORMIO=1 ;;
-            *) INSTALL_PLATFORMIO=0 ;;
-        esac
-    fi
+if [ "$INSTALL_PLATFORMIO" = "1" ] && ! command -v pio &>/dev/null && [ -t 0 ]; then
+    echo ""
+    echo "One more optional piece: the Reticulum companion firmware card"
+    echo "(Configuration -> Firmware, extra/heltec_v4_reticulum_bron) builds"
+    echo "and flashes that project via PlatformIO, not arduino-cli -- a"
+    echo "separate toolchain. PlatformIO manages its own ESP32 package"
+    echo "downloads lazily on first build (not during this installer), so"
+    echo "this step itself is quick; the multi-hundred-MB download happens"
+    echo "the first time you actually use the card."
+    echo ""
+    read -r -p "Install the PlatformIO toolchain now? [y/N] " platformio_reply || platformio_reply=""
+    case "$platformio_reply" in
+        [yY]*) INSTALL_PLATFORMIO=1 ;;
+        *) INSTALL_PLATFORMIO=0 ;;
+    esac
 fi
 
 # Sections 6-11 below are all downstream of one physical USB RTL-SDR
@@ -203,31 +197,27 @@ fi
 # same reasoning as arduino-cli/PlatformIO above -- an imperfect proxy
 # for all six sub-pieces, but a safe one: skipping the prompt just
 # defaults to installing, which lets each step's own idempotent check
-# quietly fill in anything actually still missing.
+# quietly fill in (and announce) anything actually still missing.
 INSTALL_RTLSDR=1
 for arg in "$@"; do
     case "$arg" in
         --skip-rtlsdr) INSTALL_RTLSDR=0 ;;
     esac
 done
-if [ "$INSTALL_RTLSDR" = "1" ]; then
-    if command -v rtl_sdr &>/dev/null; then
-        info "RTL-SDR support already installed -- skipping the install prompt"
-    elif [ -t 0 ]; then
-        echo ""
-        echo "Another optional piece: the Radio tab's RTL-SDR listeners (FM/RDS,"
-        echo "P2000/Pagers/POCSAG, generic 433/868 sensors, ADS-B air traffic,"
-        echo "DAB+) all need a physical USB RTL-SDR dongle -- without one,"
-        echo "installing their decoders (several built from source) is just"
-        echo "wasted time and disk space. Skip it now and re-run this installer"
-        echo "later (without --skip-rtlsdr) to add it once you have a dongle."
-        echo ""
-        read -r -p "Install RTL-SDR support now? [y/N] " rtlsdr_reply || rtlsdr_reply=""
-        case "$rtlsdr_reply" in
-            [yY]*) INSTALL_RTLSDR=1 ;;
-            *) INSTALL_RTLSDR=0 ;;
-        esac
-    fi
+if [ "$INSTALL_RTLSDR" = "1" ] && ! command -v rtl_sdr &>/dev/null && [ -t 0 ]; then
+    echo ""
+    echo "Another optional piece: the Radio tab's RTL-SDR listeners (FM/RDS,"
+    echo "P2000/Pagers/POCSAG, generic 433/868 sensors, ADS-B air traffic,"
+    echo "DAB+) all need a physical USB RTL-SDR dongle -- without one,"
+    echo "installing their decoders (several built from source) is just"
+    echo "wasted time and disk space. Skip it now and re-run this installer"
+    echo "later (without --skip-rtlsdr) to add it once you have a dongle."
+    echo ""
+    read -r -p "Install RTL-SDR support now? [y/N] " rtlsdr_reply || rtlsdr_reply=""
+    case "$rtlsdr_reply" in
+        [yY]*) INSTALL_RTLSDR=1 ;;
+        *) INSTALL_RTLSDR=0 ;;
+    esac
 fi
 
 echo ""
