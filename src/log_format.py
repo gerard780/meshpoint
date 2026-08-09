@@ -294,7 +294,6 @@ def _region_frequency_line(config: AppConfig) -> str:
             frequency_mhz=radio.frequency_mhz,
             spreading_factor=radio.spreading_factor,
             bandwidth_khz=radio.bandwidth_khz,
-            band_plan=radio.band_plan,
         )
         if plan.single_sf_channel:
             freq = plan.single_sf_channel.frequency_hz / 1_000_000
@@ -317,7 +316,6 @@ def _describe_concentrator(config: AppConfig) -> str:
             frequency_mhz=radio.frequency_mhz,
             spreading_factor=radio.spreading_factor,
             bandwidth_khz=radio.bandwidth_khz,
-            band_plan=radio.band_plan,
         )
     except Exception:
         return _region_frequency_line(config)

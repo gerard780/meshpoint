@@ -41,19 +41,10 @@ LGW_MULTI_NB = 8
 LGW_COM_SPI = 0
 LGW_RADIO_TYPE_SX1250 = 5
 
-# SX1302 service-channel (ch8) LoRa sync word peak-position registers.
+# SX1302 service-channel LoRa sync word peak-position registers.
 # See loragw_reg.h: SX1302_REG_RX_TOP_LORA_SERVICE_FSK_FRAME_SYNCH0/1_PEAK*
 _REG_SERVICE_PEAK1 = 932
 _REG_SERVICE_PEAK2 = 933
-
-# SX1302 multi-SF (ch0-ch7) LoRa sync word peak-position registers --
-# genuinely different hardware from the service-channel pair above: this
-# is the shared SF7-12 demodulator front-end covering all 8 multi-SF
-# channels at once (loragw_reg.h: SX1302_REG_RX_TOP_FRAME_SYNCH0/1_
-# SF7TO12_PEAK1/2_POS_SF7TO12), not one independent register per channel
-# -- see set_multi_sf_syncword()'s own docstring for what that implies.
-_REG_MULTI_SF_PEAK1 = 578
-_REG_MULTI_SF_PEAK2 = 579
 
 BW_125KHZ = 0x04
 BW_250KHZ = 0x05
@@ -401,49 +392,6 @@ class SX1302Wrapper:
             logger.info(
                 "Service channel (ch8) sync word 0x%02X (PEAK1=%d, PEAK2=%d); "
                 "ch0-ch7 remain on LoRaWAN 0x34",
-                syncword, peak1, peak2,
-            )
-
-    def set_multi_sf_syncword(self, syncword: int) -> None:
-        """Override the multi-SF (ch0-ch7) sync word via direct register
-        writes -- same technique and register-pair-selection idea as
-        set_syncword() above, just the OTHER register pair.
-
-        With lorawan_public=True in board config, lgw_start() programs
-        ch0-ch7 to LoRaWAN 0x34 by default. This method overrides those
-        SAME registers afterward, same timing as set_syncword() already
-        does for ch8 -- so calling this with 0x34 (the default) is a
-        harmless no-op, and calling it with anything else (e.g. 0x12 for
-        Reticulum) repoints ch0-ch7 away from LoRaWAN reception entirely.
-
-        Unlike set_syncword() (ch8, genuinely independent hardware), this
-        one shared register pair covers ALL 8 multi-SF channels at once
-        -- there is no way to give individual multi-SF channels their
-        own distinct sync word. Every multi-SF channel gets whatever
-        value this was last called with; ch8 (service) and ch9 (FSK) are
-        unaffected either way, each with their own separate registers.
-
-        PEAK values derived from the syncword byte nibbles (same formula
-        as set_syncword()):
-          PEAK1 = 2 * (syncword >> 4)
-          PEAK2 = 2 * (syncword & 0x0F)
-        e.g. 0x12 → PEAK1=2,  PEAK2=4    (Reticulum)
-             0x34 → PEAK1=6,  PEAK2=8    (LoRaWAN public, the default)
-        """
-        if self._lib is None:
-            self.load()
-        peak1 = ((syncword >> 4) & 0x0F) * 2
-        peak2 = (syncword & 0x0F) * 2
-        r1 = self._lib.lgw_reg_w(_REG_MULTI_SF_PEAK1, peak1)
-        r2 = self._lib.lgw_reg_w(_REG_MULTI_SF_PEAK2, peak2)
-        if r1 != LGW_HAL_SUCCESS or r2 != LGW_HAL_SUCCESS:
-            logger.warning(
-                "Failed to set multi-SF (ch0-ch7) sync word 0x%02X (PEAK1=%d, PEAK2=%d)",
-                syncword, peak1, peak2,
-            )
-        else:
-            logger.info(
-                "Multi-SF (ch0-ch7) sync word 0x%02X (PEAK1=%d, PEAK2=%d)",
                 syncword, peak1, peak2,
             )
 

@@ -24,30 +24,14 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Frequency (Hz) used by Meshtastic on EU868.  Packets on this frequency
-# are routed to the Meshtastic decoder regardless of which ch0-ch7 band
-# plan is active -- ch8 (Meshtastic's own service channel) is unaffected
-# by radio.band_plan. Only the ch8 service channel (869.525 MHz) can
-# decode Meshtastic -- ch0-ch7 multi-SF channels share one board-wide
-# sync word (see eu868_lorawan()/eu868_reticulum() in
-# concentrator_config.py), so no other frequency will ever carry a
-# Meshtastic-decoded packet. Everything else gets hinted LoRaWAN or
-# Reticulum depending on which sync word ch0-ch7 is actually configured
-# for right now (see the protocol_hint branch in packets() below,
-# checking self._channel_plan.multi_sf_syncword) -- NOT always
-# LoRaWAN; that was only ever true before eu868_reticulum() existed.
+# are routed to the Meshtastic decoder; everything else is treated as LoRaWAN.
+# Only the ch8 service channel (869.525 MHz) can decode Meshtastic -- ch0-ch7
+# multi-SF channels share a single board-wide LoRaWAN sync word, so no other
+# frequency will ever carry a Meshtastic-decoded packet (see eu868_lorawan()
+# in concentrator_config.py).
 _MESHTASTIC_EU868_FREQS_HZ: frozenset[int] = frozenset({
     869_525_000,
 })
-
-# ch2 ("LoRa Pager") of eu868_reticulum()'s spare channels -- gets its
-# own protocol_hint/adapter (lora_pager_event_adapter.py) instead of the
-# generic RETICULUM hint every other spare channel still gets. Checked
-# the same way as the Meshtastic frequency above: by the packet's own
-# frequency_hz, since ch0-ch7 all share one sync word and can't be told
-# apart any other way. Only meaningful while radio.band_plan="reticulum"
-# is active -- this frequency isn't otherwise reachable on the default
-# eu868_lorawan() plan, so no risk of misclassifying real LoRaWAN traffic.
-_LORA_PAGER_FREQ_HZ = 869_155_000
 
 # Emergency pager project: ch9's own frequency and sync word, fixed
 # Now configurable via RadioConfig.pager_frequency_mhz/pager_sync_word/
@@ -122,7 +106,6 @@ class ConcentratorCaptureSource(CaptureSource):
                 frequency_mhz=radio_config.frequency_mhz,
                 spreading_factor=radio_config.spreading_factor,
                 bandwidth_khz=radio_config.bandwidth_khz,
-                band_plan=radio_config.band_plan,
             )
         if channel_plan is not None:
             return channel_plan
@@ -184,21 +167,10 @@ class ConcentratorCaptureSource(CaptureSource):
         self._wrapper.start()
         self._wrapper.set_syncword(self._syncword)
         self._wrapper.set_tx_syncword(self._syncword)
-        # Harmless no-op for every existing plan (0x34 matches what
-        # lorawan_public=True already programmed above) -- only a plan
-        # like eu868_reticulum() that sets multi_sf_syncword to something
-        # else actually changes ch0-ch7's behavior here.
-        print(f"!!! DEBUG about to call set_multi_sf_syncword(0x{self._channel_plan.multi_sf_syncword:02X})", flush=True)
-        try:
-            self._wrapper.set_multi_sf_syncword(self._channel_plan.multi_sf_syncword)
-        except BaseException as exc:
-            print(f"!!! DEBUG set_multi_sf_syncword RAISED: {type(exc).__name__}: {exc}", flush=True)
-            raise
-        print("!!! DEBUG set_multi_sf_syncword call RETURNED (did not raise)", flush=True)
         self._running = True
         logger.info(
-            "Concentrator capture started (syncword=0x%02X, multi_sf_syncword=0x%02X)",
-            self._syncword, self._channel_plan.multi_sf_syncword,
+            "Concentrator capture started (syncword=0x%02X)",
+            self._syncword,
         )
 
     async def stop(self) -> None:
@@ -255,27 +227,11 @@ class ConcentratorCaptureSource(CaptureSource):
                     )
                     continue
 
-                if pkt.frequency_hz in _MESHTASTIC_EU868_FREQS_HZ:
-                    protocol_hint = Protocol.MESHTASTIC
-                elif (
-                    self._channel_plan.multi_sf_syncword == 0x12
-                    and pkt.frequency_hz == _LORA_PAGER_FREQ_HZ
-                ):
-                    protocol_hint = Protocol.LORA_PAGER
-                elif self._channel_plan.multi_sf_syncword == 0x12:
-                    # ch0-ch7 configured for Reticulum's sync word right
-                    # now (radio.band_plan="reticulum", see
-                    # eu868_reticulum() in concentrator_config.py) --
-                    # honest hint instead of the stale default-plan
-                    # assumption that anything non-Meshtastic must be
-                    # LoRaWAN. No real decoder exists for this yet
-                    # (packet_router.py explicitly rejects it rather than
-                    # risk a false-positive Meshtastic/MeshCore decode);
-                    # this only makes Stray Frames entries labeled
-                    # accurately.
-                    protocol_hint = Protocol.RETICULUM
-                else:
-                    protocol_hint = Protocol.LORAWAN
+                protocol_hint = (
+                    Protocol.MESHTASTIC
+                    if pkt.frequency_hz in _MESHTASTIC_EU868_FREQS_HZ
+                    else Protocol.LORAWAN
+                )
 
                 yield RawCapture(
                     payload=pkt.payload,

@@ -84,33 +84,14 @@ def _refresh_channel_hash_map() -> None:
     )
 
 
-def _derive_channel_protocol(name: str) -> str:
-    """Per-channel protocol label for a plan with multi_sf_protocol="auto"
-    (e.g. eu868_reticulum()) -- the channel's own name, lowercased. Lets
-    channels sharing one physical sync word still show an honest
-    per-channel label instead of one fixed word for the whole group (a
-    spare channel genuinely isn't running the same protocol as the real
-    one just because they share ch0-7's demodulator register).
-
-    Empty string if ``name`` itself is empty -- harmless, since the
-    frontend only displays a channel's protocol when it's enabled, and
-    every unnamed channel in this codebase is also disabled.
-    """
-    return (name or "").strip().lower()
-
-
 def _concentrator_status(config: AppConfig) -> dict:
     """Serialize the SX1302 channel plan the concentrator source would run.
 
     Rebuilt with the same ``from_radio_config`` call the capture source
     makes, so the table reflects the live plan without touching hardware.
-    ch0-ch7's sync word comes from the plan itself (``multi_sf_syncword``
-    -- 0x34 for every plan except radio.band_plan="reticulum"'s own
-    0x12). Protocol label is either the plan-wide ``multi_sf_protocol``
-    literal, or -- when that's the sentinel "auto" -- derived per-channel
-    from each channel's own name (see _derive_channel_protocol). ch8
-    (service channel) is always Meshtastic 0x2B via direct register
-    writes, unaffected by band_plan.
+    Sync words mirror sx1302_wrapper.py: ch0-ch7 share the board-wide
+    LoRaWAN 0x34 (``lorawan_public=True``), only ch8 (service channel)
+    is overridden to Meshtastic 0x2B via direct register writes.
     """
     from src.hal.concentrator_config import ConcentratorChannelPlan
 
@@ -122,13 +103,10 @@ def _concentrator_status(config: AppConfig) -> dict:
             frequency_mhz=radio.frequency_mhz,
             spreading_factor=radio.spreading_factor,
             bandwidth_khz=radio.bandwidth_khz,
-            band_plan=radio.band_plan,
         )
     except (ValueError, TypeError) as exc:
         logger.warning("concentrator plan unavailable: %s", exc)
         return {"active": active, "channels": []}
-
-    multi_sf_syncword_hex = f"0x{plan.multi_sf_syncword:02X}"
 
     radio_0 = plan.radio_0_freq_hz
 
@@ -138,19 +116,13 @@ def _concentrator_status(config: AppConfig) -> dict:
 
     channels = []
     for idx, ch in enumerate(plan.multi_sf_channels):
-        protocol = (
-            _derive_channel_protocol(ch.name)
-            if plan.multi_sf_protocol == "auto"
-            else plan.multi_sf_protocol
-        )
         channels.append({
             "ch": idx,
-            "name": ch.name,
             "frequency_mhz": round(ch.frequency_hz / 1e6, 4),
             "bandwidth_khz": ch.bandwidth_khz,
             "spreading_factor": ch.spreading_factor,  # 0 = multi-SF
-            "syncword": multi_sf_syncword_hex,
-            "protocol": protocol,
+            "syncword": "0x34",
+            "protocol": "lorawan",
             "rf_chain": _rf_chain(ch.frequency_hz),
             "enabled": ch.enabled,
         })
@@ -158,12 +130,6 @@ def _concentrator_status(config: AppConfig) -> dict:
     if single is not None:
         channels.append({
             "ch": 8,
-            # ch8 is always Meshtastic (the service channel), across every
-            # plan/region -- unlike the multi-SF group, no factory sets
-            # single.name explicitly since there's never more than one
-            # thing here to disambiguate. Same fallback idea, just a fixed
-            # answer rather than a real per-plan choice.
-            "name": single.name or "Meshtastic",
             "frequency_mhz": round(single.frequency_hz / 1e6, 4),
             "bandwidth_khz": single.bandwidth_khz,
             "spreading_factor": single.spreading_factor,
@@ -182,7 +148,6 @@ def _concentrator_status(config: AppConfig) -> dict:
     # became user-editable, see PUT /api/config/radio/pager below.
     channels.append({
         "ch": 9,
-        "name": "Pager",
         "frequency_mhz": round(radio.pager_frequency_mhz, 4),
         "bandwidth_khz": 125.0,
         "spreading_factor": None,
@@ -413,12 +378,6 @@ async def get_config(claims: SessionClaims = Depends(require_auth)):
             "sync_word": f"0x{radio.sync_word:02X}",
             "preamble_length": radio.preamble_length,
             "current_preset": current_preset,
-            "band_plan": radio.band_plan,
-            # Drives the LoRaWAN sidebar link's data-requires-config gating
-            # (sidebar_controller.js) -- band_plan="reticulum" repoints
-            # ch0-ch7 away from LoRaWAN entirely, so the tab would otherwise
-            # imply live monitoring that isn't actually happening.
-            "lorawan_active": radio.band_plan != "reticulum",
         },
         "transmit": {
             "enabled": tx.enabled,
@@ -630,9 +589,6 @@ async def update_identity(
     return {"saved": True, "restart_required": restart_needed, "updates": updates}
 
 
-_SUPPORTED_BAND_PLANS = {"default", "reticulum"}
-
-
 class RadioUpdate(BaseModel):
     region: Optional[str] = None
     preset: Optional[str] = None
@@ -640,7 +596,6 @@ class RadioUpdate(BaseModel):
     spreading_factor: Optional[int] = None
     bandwidth_khz: Optional[float] = None
     coding_rate: Optional[str] = None
-    band_plan: Optional[str] = None
 
 
 @router.put("/radio")
@@ -699,18 +654,6 @@ async def update_radio(
         updates["frequency_mhz"] = req.frequency_mhz
     elif req.region and req.region in REGION_DEFAULTS and "frequency_mhz" not in updates:
         updates["frequency_mhz"] = REGION_DEFAULTS[req.region]["frequency_mhz"]
-
-    if req.band_plan is not None:
-        if req.band_plan not in _SUPPORTED_BAND_PLANS:
-            raise HTTPException(400, f"Unknown band_plan: {req.band_plan}")
-        effective_region = req.region if req.region is not None else radio.region
-        if req.band_plan == "reticulum" and effective_region != "EU_868":
-            raise HTTPException(
-                400, "band_plan 'reticulum' is only defined for the EU_868 region"
-            )
-        if req.band_plan != radio.band_plan:
-            restart_needed = True
-        updates["band_plan"] = req.band_plan
 
     if updates:
         for key, val in updates.items():

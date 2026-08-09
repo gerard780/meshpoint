@@ -14,22 +14,6 @@ class Protocol(str, Enum):
     LORAWAN = "lorawan"
     DAPNET = "dapnet"
     PAGER = "pager"
-    # ch0-ch7 of the concentrator's eu868_reticulum() band plan (see
-    # concentrator_config.py) -- honest protocol_hint for that traffic
-    # instead of the pre-band-plan default of LORAWAN. No real decoder
-    # exists yet (see packet_router.py's explicit reject for this hint,
-    # and src/decode/ -- there is no reticulum_decoder.py); this exists
-    # so Stray Frames entries are labeled accurately, not to claim
-    # decoding capability that doesn't exist.
-    RETICULUM = "reticulum"
-    # ch2 of eu868_reticulum() ("LoRa Pager", 869.155 MHz) -- one of the
-    # plan's spare channels, given its own hint (rather than the generic
-    # RETICULUM one every other spare channel still gets) because it has
-    # its own dedicated adapter now (lora_pager_event_adapter.py). Not
-    # the same thing as PAGER (ch9, real POCSAG/FSK hardware) -- this is
-    # a LoRa-modulated experimental channel with its own simple
-    # JSON test payload, see that adapter's own docstring.
-    LORA_PAGER = "lora_pager"
     UNKNOWN = "unknown"
 
 
@@ -64,11 +48,6 @@ class PacketType(str, Enum):
     # to prove the concentrator is actually receiving something on this
     # channel before a real protocol/decoder is built.
     PAGER_RAW = "pager_raw"
-    # heltec_lora_pager_test.ino's diagnostic payload on ch2 ("LoRa
-    # Pager") -- no real over-the-air protocol designed yet for this
-    # channel either, same "prove reception works first" spirit as
-    # PAGER_RAW above, just LoRa-modulated instead of FSK.
-    LORA_PAGER_TEST = "lora_pager_test"
     UNKNOWN = "unknown"
 
 

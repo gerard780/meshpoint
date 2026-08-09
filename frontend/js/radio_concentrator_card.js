@@ -2,48 +2,16 @@
  * Radio tab — SX1302 Concentrator Channels card (observational).
  *
  * Read-only table of the full 9-slot concentrator plan the capture
- * source runs: per channel name, frequency, bandwidth, SF, sync word,
- * protocol, RF chain, and enabled state. ``name`` (optional, e.g.
- * eu868_reticulum()'s spare channels) is what distinguishes individual
- * channels when several share one plan-wide protocol -- for a plan with
- * multi_sf_protocol="auto", ``protocol`` itself IS each channel's own
- * name lowercased (server-derived, see config_routes.py's
- * _derive_channel_protocol()), so _protocolLabel() below has to handle
- * arbitrary values, not just the 4 known protocols.
- * Data comes from the
+ * source runs: per channel frequency, bandwidth, SF, sync word,
+ * protocol, RF chain, and enabled state. Data comes from the
  * ``concentrator`` block of GET /api/config (rebuilt server-side with
  * the same call the capture source makes). Hidden when the box has no
  * concentrator source configured.
  */
-/** Canonical display casing for the few protocols this dashboard actually
- * knows about. Anything else (e.g. an "auto" plan's per-channel-name-
- * derived label, like a phonetic-alphabet spare channel) falls back to
- * a plain capitalized version of whatever string arrives -- see
- * _protocolLabel(). */
-const KNOWN_PROTOCOL_LABELS = {
-    meshtastic: 'Meshtastic',
-    pager: 'Pager',
-    reticulum: 'Reticulum',
-    lorawan: 'LoRaWAN',
-};
-
 class RadioConcentratorCard {
     constructor(api) {
         this._api = api;
         this._root = null;
-    }
-
-    _protocolLabel(protocol) {
-        if (!protocol) return '';
-        if (KNOWN_PROTOCOL_LABELS[protocol]) return KNOWN_PROTOCOL_LABELS[protocol];
-        // Per-word title case, not just the string's first character --
-        // multi-word "auto"-derived names (e.g. "lora pager", from a
-        // channel named "LoRa Pager") need every word capitalized, or
-        // "lora pager" renders as "Lora pager" instead of "Lora Pager".
-        return protocol
-            .split(' ')
-            .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
-            .join(' ');
     }
 
     mount(rootEl) {
@@ -65,7 +33,9 @@ class RadioConcentratorCard {
             const sf = ch.protocol === 'pager'
                 ? `${(ch.datarate_bps / 1000).toFixed(1)}k FSK`
                 : (ch.spreading_factor ? `SF${ch.spreading_factor}` : 'SF7–12');
-            const proto = this._protocolLabel(ch.protocol);
+            const proto = ch.protocol === 'meshtastic' ? 'Meshtastic'
+                : ch.protocol === 'pager' ? 'Pager'
+                : 'LoRaWAN';
             const stateClass = ch.enabled
                 ? 'ch-table__pill ch-table__pill--on'
                 : 'ch-table__pill ch-table__pill--off';
@@ -73,7 +43,6 @@ class RadioConcentratorCard {
             return `
                 <tr class="ch-table__row"${dim}>
                     <td class="ch-table__idx">${ch.ch}</td>
-                    <td class="ch-table__name">${ch.name ? this._esc(ch.name) : '—'}</td>
                     <td class="ch-table__hash">${ch.frequency_mhz.toFixed(3)}</td>
                     <td class="ch-table__hash">${ch.bandwidth_khz} kHz</td>
                     <td class="ch-table__hash">${sf}</td>
@@ -101,7 +70,6 @@ class RadioConcentratorCard {
                 <thead>
                     <tr>
                         <th>CH</th>
-                        <th>Name</th>
                         <th>Freq (MHz)</th>
                         <th>BW</th>
                         <th>SF</th>

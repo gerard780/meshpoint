@@ -43,20 +43,6 @@ class RadioConfigEditCard {
                         <span class="cfg-field__label">Region</span>
                         <select class="cfg-field__input" data-radio-region></select>
                     </label>
-                    <label class="cfg-field" data-radio-band-plan-wrap style="display:none">
-                        <span class="cfg-field__label">Band plan</span>
-                        <select class="cfg-field__input" data-radio-band-plan>
-                            <option value="default">Default (LoRaWAN + Meshtastic)</option>
-                            <option value="reticulum">Reticulum (ch0 Reticulum + 7 spare channels)</option>
-                        </select>
-                        <p class="cfg-field__hint">
-                            EU 868 only. "Reticulum" repoints channels 0-7 from LoRaWAN's
-                            sync word to Reticulum's — LoRaWAN reception stops entirely
-                            while this is selected. Meshtastic (ch8) and Pager (ch9) are
-                            unaffected either way. The 7 spare channels (ch1-ch7) are named
-                            individually — see the Concentrator Channels table below.
-                        </p>
-                    </label>
                     <div class="cfg-field">
                         <span class="cfg-field__label">Modem preset</span>
                         <div class="cfg-chip-row" data-radio-presets></div>
@@ -128,8 +114,6 @@ class RadioConfigEditCard {
         `;
         this._form = this._root.querySelector('[data-radio-form]');
         this._regionEl = this._root.querySelector('[data-radio-region]');
-        this._bandPlanEl = this._root.querySelector('[data-radio-band-plan]');
-        this._bandPlanWrap = this._root.querySelector('[data-radio-band-plan-wrap]');
         this._presetsEl = this._root.querySelector('[data-radio-presets]');
         this._freqEl = this._root.querySelector('[data-radio-freq]');
         this._slotEl = this._root.querySelector('[data-radio-slot]');
@@ -167,15 +151,12 @@ class RadioConfigEditCard {
             bandwidth_khz: radio.bandwidth_khz != null ? Number(radio.bandwidth_khz) : null,
             coding_rate: radio.coding_rate || '',
             hop_limit: tx.hop_limit != null ? Number(tx.hop_limit) : 3,
-            band_plan: radio.band_plan || 'default',
         };
 
         this._renderRegions();
         this._renderPresets();
         this._renderHopLimit();
         this._regionEl.value = this._initial.region;
-        this._bandPlanEl.value = this._initial.band_plan;
-        this._updateBandPlanVisibility();
         if (this._initial.frequency_mhz != null) {
             this._freqEl.value = this._initial.frequency_mhz;
         }
@@ -300,20 +281,6 @@ class RadioConfigEditCard {
             this._freqEl.value = r.frequency_mhz;
             this._syncSlotFromFreq();
         }
-        this._updateBandPlanVisibility();
-    }
-
-    /** Band plan is EU_868-only (see eu868_reticulum() in
-     * concentrator_config.py) -- hides the field on any other region,
-     * and forces the value back to "default" so switching away from
-     * EU_868 can never silently submit a stale "reticulum" selection
-     * the backend would reject. */
-    _updateBandPlanVisibility() {
-        const isEu868 = this._regionEl.value === 'EU_868';
-        this._bandPlanWrap.style.display = isEu868 ? '' : 'none';
-        if (!isEu868 && this._bandPlanEl.value !== 'default') {
-            this._bandPlanEl.value = 'default';
-        }
     }
 
     _onModeChange() {
@@ -409,9 +376,6 @@ class RadioConfigEditCard {
 
         const radioBody = {};
         if (region && region !== this._initial.region) radioBody.region = region;
-
-        const bandPlan = this._bandPlanEl.value;
-        if (bandPlan && bandPlan !== this._initial.band_plan) radioBody.band_plan = bandPlan;
 
         if (isCustom) {
             const sf = parseInt(this._sfEl.value, 10);

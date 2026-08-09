@@ -45,12 +45,6 @@ class ChannelConfig:
     bandwidth_khz: int = 125
     spreading_factor: int = 0
     enabled: bool = True
-    # Optional per-channel display label (config_routes.py, Concentrator
-    # Channels table) -- empty string everywhere except eu868_reticulum()
-    # below, where every ch0-ch7 channel shares the plan-wide "reticulum"
-    # protocol label once ch1-7 are enabled, so protocol alone can no
-    # longer distinguish the real Reticulum channel from a spare one.
-    name: str = ""
 
 
 @dataclass
@@ -61,16 +55,6 @@ class ConcentratorChannelPlan:
     single_sf_channel: ChannelConfig | None = None
     radio_0_freq_hz: int = 906_800_000
     radio_1_freq_hz: int = 907_400_000
-    # ch0-ch7 share ONE sync-word register across all 8 multi-SF channels
-    # (see sx1302_wrapper.py's set_multi_sf_syncword() docstring) -- 0x34
-    # (LoRaWAN public) is every existing plan's implicit default, matching
-    # what lorawan_public=True already programs at lgw_start() before any
-    # override runs, so leaving this field unset changes nothing for any
-    # plan defined before it existed. Only eu868_reticulum() below sets
-    # it to something else. multi_sf_protocol is the matching display
-    # label for the Concentrator Channels table (config_routes.py).
-    multi_sf_syncword: int = 0x34
-    multi_sf_protocol: str = "lorawan"
 
     @classmethod
     def from_radio_config(
@@ -79,28 +63,13 @@ class ConcentratorChannelPlan:
         frequency_mhz: float,
         spreading_factor: int = 11,
         bandwidth_khz: float = 250.0,
-        band_plan: str = "default",
     ) -> ConcentratorChannelPlan:
         """Build a channel plan from radio config.
 
         Uses the hardcoded LongFast region preset only when frequency,
         SF, and BW all match defaults.  Otherwise builds a plan that
         respects the caller's spreading_factor and bandwidth_khz.
-
-        ``band_plan`` is checked first, ahead of all of that: "reticulum"
-        goes straight to eu868_reticulum() regardless of the requested
-        frequency/SF/BW (Meshtastic's own frequency there is fixed at
-        869.525 MHz same as the default plan, so nothing else to derive
-        it from) -- EU_868 only, since that's the only region this
-        alternate plan is defined for.
         """
-        if band_plan == "reticulum":
-            if region != "EU_868":
-                raise ValueError(
-                    "band_plan 'reticulum' is only defined for the EU_868 region"
-                )
-            return cls.eu868_reticulum()
-
         freq_hz = int(frequency_mhz * 1_000_000)
 
         if not region:
@@ -197,11 +166,11 @@ class ConcentratorChannelPlan:
         868.3 MHz covers 5 TTN channels within ±400 kHz:
 
         Channel map:
-          ch0  867.900 MHz  125 kHz  SF7–12  LoRaWAN 1  RF0  IF –400 000
-          ch1  868.100 MHz  125 kHz  SF7–12  LoRaWAN 2  RF0  IF –200 000
-          ch2  868.300 MHz  125 kHz  SF7–12  LoRaWAN 3  RF0  IF       0
-          ch3  868.500 MHz  125 kHz  SF7–12  LoRaWAN 4  RF0  IF +200 000
-          ch4  868.700 MHz  125 kHz  SF7–12  LoRaWAN 5  RF0  IF +400 000
+          ch0  867.900 MHz  125 kHz  SF7–12  LoRaWAN  RF0  IF –400 000
+          ch1  868.100 MHz  125 kHz  SF7–12  LoRaWAN  RF0  IF –200 000
+          ch2  868.300 MHz  125 kHz  SF7–12  LoRaWAN  RF0  IF       0
+          ch3  868.500 MHz  125 kHz  SF7–12  LoRaWAN  RF0  IF +200 000
+          ch4  868.700 MHz  125 kHz  SF7–12  LoRaWAN  RF0  IF +400 000
           ch5–ch7  (disabled — RF1 multi-SF can't reach anything useful)
           ch8  869.525 MHz  250 kHz  SF11    Meshtastic RF1 IF       0
 
@@ -223,115 +192,15 @@ class ConcentratorChannelPlan:
         )
         plan.multi_sf_channels = [
             # ch0–ch4: RF0 within ±400 kHz (3 mandatory TTN + 867.9 + 868.7)
-            ChannelConfig(frequency_hz=867_900_000, name="LoRaWAN 1"),
-            ChannelConfig(frequency_hz=868_100_000, name="LoRaWAN 2"),
-            ChannelConfig(frequency_hz=868_300_000, name="LoRaWAN 3"),
-            ChannelConfig(frequency_hz=868_500_000, name="LoRaWAN 4"),
-            ChannelConfig(frequency_hz=868_700_000, name="LoRaWAN 5"),
+            ChannelConfig(frequency_hz=867_900_000),
+            ChannelConfig(frequency_hz=868_100_000),
+            ChannelConfig(frequency_hz=868_300_000),
+            ChannelConfig(frequency_hz=868_500_000),
+            ChannelConfig(frequency_hz=868_700_000),
             # ch5–ch7: disabled — nothing LoRaWAN-useful within ±490 kHz of RF1
             ChannelConfig(frequency_hz=869_525_000, enabled=False),
             ChannelConfig(frequency_hz=869_525_000, enabled=False),
             ChannelConfig(frequency_hz=869_525_000, enabled=False),
-        ]
-        return plan
-
-    @staticmethod
-    def eu868_reticulum() -> ConcentratorChannelPlan:
-        """EU868 alternate plan: Reticulum on ch0 instead of LoRaWAN,
-        Meshtastic unchanged on ch8, ch1-ch7 enabled as spare channels
-        with their own individual names. Opt-in via radio.band_plan =
-        "reticulum" -- eu868_lorawan() (the default) is untouched by
-        this existing alongside it.
-
-        Same RF1 anchor (869.525 MHz) as eu868_lorawan() -- Reticulum's
-        own network parameters (869.463 MHz / SF8 / BW125 / CR5) put its
-        frequency only 62 kHz away, comfortably inside the SX1302's
-        ±490 kHz IF range. This is the same math investigated (and
-        reverted) for a single reserved channel; here it's the
-        deliberate basis of a whole separate plan instead, since making
-        it work means giving up LoRaWAN's 0x34 on the shared ch0-7
-        register entirely -- not something the default plan should ever
-        do silently.
-
-        ch1-ch7 are real, enabled, listening channels -- but with no
-        protocol of their own; they're free spectrum for a future custom
-        LoRa-chirp experiment (they'd share this same 0x12 sync word --
-        fine for something you design yourself, since you pick its sync
-        word too; not fine for receiving an existing protocol with its
-        own fixed required sync word, e.g. real LoRaWAN's 0x34). Named
-        by likely future use (Chat/LoRa Pager/Public/Data/Weather/Alert/
-        Emergency) rather than decoratively -- reads more clearly in a
-        screenshot of the Concentrator Channels table. All placeholders,
-        easy to rename later, no other code depends on the exact
-        strings. "LoRa Pager" (ch2) is deliberately not just "Pager" --
-        this is cosmetic only (see the "auto" note below and
-        CONFIGURATION.md), and using the exact same name as ch9's real,
-        already-working Pager channel would make both rows read
-        identically in the Concentrator Channels table despite being
-        completely different things. multi_sf_protocol="auto" (see config_routes.py's
-        _derive_channel_protocol()) uses each channel's own name,
-        lowercased, as its displayed protocol -- that's what actually
-        distinguishes the real Reticulum channel from a spare one in the
-        Concentrator Channels table, since "protocol" alone can't (the
-        whole group shares one physical sync word).
-
-        Frequencies are hand-picked, not evenly auto-spaced: the usable
-        window here is genuinely tight (869.035-870.000 MHz, capped by
-        the ±490 kHz IF limit on one side and EU_868's own 870.000 MHz
-        region ceiling on the other -- 965 kHz total, with ch0/ch8
-        already sitting in the middle of it), so guard band per channel
-        matters more than a perfectly even grid. 4 fit below the ch0/ch8
-        pair, 3 above.
-
-        Channel map (both radio_0_freq_hz and radio_1_freq_hz are set to
-        869.525 MHz here -- unlike eu868_lorawan()'s split RF0/RF1
-        anchors, every multi-SF channel below lands on RF0 per
-        _rf_chain()'s ``<= radio_0_freq + 500kHz`` classification, since
-        the whole 869.035-870.000 MHz window is within 500 kHz of that
-        one shared anchor either way. Numerically harmless -- the IF
-        offset math gives the same result regardless of which RF chain
-        gets picked when both anchors are identical -- but worth being
-        honest about rather than implying an RF0/RF1 split that doesn't
-        actually happen):
-          ch0  869.463 MHz  125 kHz  SF7–12  Reticulum   RF0  IF  –62 000
-          ch1  869.055 MHz  125 kHz  SF7–12  Chat        RF0  IF –470 000
-          ch2  869.155 MHz  125 kHz  SF7–12  LoRa Pager  RF0  IF –370 000
-          ch3  869.255 MHz  125 kHz  SF7–12  Public      RF0  IF –270 000
-          ch4  869.355 MHz  125 kHz  SF7–12  Data        RF0  IF –170 000
-          ch5  869.665 MHz  125 kHz  SF7–12  Weather     RF0  IF +140 000
-          ch6  869.765 MHz  125 kHz  SF7–12  Alert       RF0  IF +240 000
-          ch7  869.865 MHz  125 kHz  SF7–12  Emergency   RF0  IF +340 000
-          ch8  869.525 MHz  250 kHz  SF11    Meshtastic  RF0  IF       0
-
-        Sync word assignment (see sx1302_wrapper.py):
-          ch0-ch7 multi-SF: Reticulum 0x12  (set_multi_sf_syncword(), see above --
-                                             applies to ALL of ch0-ch7, the spare
-                                             channels included, not just ch0)
-          ch8   service:    Meshtastic 0x2B (direct register writes, unchanged)
-        """
-        plan = ConcentratorChannelPlan(
-            radio_0_freq_hz=869_525_000,
-            radio_1_freq_hz=869_525_000,
-            multi_sf_syncword=0x12,
-            # "auto": each channel's own name (lowercased) becomes its
-            # displayed protocol -- see _derive_channel_protocol() in
-            # config_routes.py.
-            multi_sf_protocol="auto",
-        )
-        plan.single_sf_channel = ChannelConfig(
-            frequency_hz=869_525_000,
-            bandwidth_khz=250,
-            spreading_factor=11,
-        )
-        plan.multi_sf_channels = [
-            ChannelConfig(frequency_hz=869_463_000, name="Reticulum"),
-            ChannelConfig(frequency_hz=869_055_000, name="Chat"),
-            ChannelConfig(frequency_hz=869_155_000, name="LoRa Pager"),
-            ChannelConfig(frequency_hz=869_255_000, name="Public"),
-            ChannelConfig(frequency_hz=869_355_000, name="Data"),
-            ChannelConfig(frequency_hz=869_665_000, name="Weather"),
-            ChannelConfig(frequency_hz=869_765_000, name="Alert"),
-            ChannelConfig(frequency_hz=869_865_000, name="Emergency"),
         ]
         return plan
 

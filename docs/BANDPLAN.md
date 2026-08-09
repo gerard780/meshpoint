@@ -73,15 +73,15 @@ radio_1 = 869.525 MHz  →  ch8:     Meshtastic LongFast (sync word 0x2B)
                                     ±490 kHz of radio_1)
 ```
 
-| Channel | Name | Frequency | BW | SF | Protocol | RF chain | IF offset |
-|---|---|---|---|---|---|---|---|
-| ch0 | LoRaWAN 1 | 867.900 MHz | 125 kHz | SF7–12 | LoRaWAN | RF0 | −400 000 Hz |
-| ch1 | LoRaWAN 2 | 868.100 MHz | 125 kHz | SF7–12 | LoRaWAN | RF0 | −200 000 Hz |
-| ch2 | LoRaWAN 3 | 868.300 MHz | 125 kHz | SF7–12 | LoRaWAN | RF0 | 0 |
-| ch3 | LoRaWAN 4 | 868.500 MHz | 125 kHz | SF7–12 | LoRaWAN | RF0 | +200 000 Hz |
-| ch4 | LoRaWAN 5 | 868.700 MHz | 125 kHz | SF7–12 | LoRaWAN | RF0 | +400 000 Hz |
-| ch5–ch7 | — | — | — | — | disabled | RF1 | — |
-| ch8 | Meshtastic | 869.525 MHz | 250 kHz | SF11 | Meshtastic | RF1 | 0 |
+| Channel | Frequency | BW | SF | Protocol | RF chain | IF offset |
+|---|---|---|---|---|---|---|
+| ch0 | 867.900 MHz | 125 kHz | SF7–12 | LoRaWAN | RF0 | −400 000 Hz |
+| ch1 | 868.100 MHz | 125 kHz | SF7–12 | LoRaWAN | RF0 | −200 000 Hz |
+| ch2 | 868.300 MHz | 125 kHz | SF7–12 | LoRaWAN | RF0 | 0 |
+| ch3 | 868.500 MHz | 125 kHz | SF7–12 | LoRaWAN | RF0 | +200 000 Hz |
+| ch4 | 868.700 MHz | 125 kHz | SF7–12 | LoRaWAN | RF0 | +400 000 Hz |
+| ch5–ch7 | — | — | — | disabled | RF1 | — |
+| ch8 | 869.525 MHz | 250 kHz | SF11 | Meshtastic | RF1 | 0 |
 
 TTN channels covered: 868.1, 868.3, 868.5 (the 3 mandatory ones) plus 867.9
 and 868.7. Out of reach from this RF0 anchor: 867.1/867.3/867.5/867.7.
@@ -91,95 +91,6 @@ There's a second, unused EU868 factory, `meshtastic_eu868_default()`
 never wired into `for_region()`, which always returns `eu868_lorawan()` for
 `EU_868`. Kept in the source as a documented alternative, not dead by
 accident.
-
-## EU_868 alternate — Reticulum instead of LoRaWAN (`radio.band_plan: "reticulum"`)
-
-`eu868_reticulum()` — unlike `meshtastic_eu868_default()` above, this one
-**is** live and selectable, via `radio.band_plan` (Configuration → Radio's
-"Band plan" dropdown, EU_868-only). `from_radio_config()` checks `band_plan`
-before anything else: `"reticulum"` returns this plan regardless of the
-requested frequency/SF/BW.
-
-The trade this makes explicit: ch0–ch7 share **one** sync-word register
-across all 8 channels (`SX1302_REG_RX_TOP_FRAME_SYNCH0/1_SF7TO12_PEAK1/2_
-POS_SF7TO12` in the real HAL register map — genuinely one shared front-end,
-not 8 independent ones), so it's LoRaWAN *or* Reticulum on that register,
-never both. `eu868_reticulum()` repoints it to
-[Reticulum](https://reticulum.network/)'s own sync word `0x12` instead of
-LoRaWAN's `0x34` — real LoRaWAN reception stops entirely while this is
-selected. `radio_0`/`radio_1` both anchor to 869.525 MHz (same as ch8) since
-Reticulum's real network parameters (869.463 MHz / SF8 / BW125 / CR5,
-confirmed against `microReticulum_Firmware`'s own source, see
-`extra/heltec_v4_reticulum_bron/`) sit only 62 kHz away — comfortably inside
-the ±490 kHz IF window.
-
-```
-radio_0 = radio_1 = 869.525 MHz  →  ch0:     Reticulum (869.463 MHz, sync word 0x12)
-                                     ch1–ch7: Chat/LoRa Pager/Public/Data/Weather/
-                                              Alert/Emergency (spare, same 0x12 sync word)
-                                     ch8:     Meshtastic LongFast (sync word 0x2B, unchanged)
-```
-
-ch1-ch7 are real, enabled, listening channels — not disabled placeholders —
-but with no protocol of their own yet, free spectrum for a future custom
-LoRa-chirp experiment. Naming a channel only reserves it and sets what
-shows in the Concentrator Channels table -- it doesn't create or select
-any decoder. Real handling for a channel's traffic would mean writing an
-actual decoder and wiring it into the capture/routing path (e.g.
-`src/decode/packet_router.py`), a separate, unbuilt step; nothing
-currently reads a channel's name to decide how to interpret its bytes.
-Names here are placeholders, named by likely future use rather than
-decoratively (reads more clearly in a screenshot of the Concentrator
-Channels table) -- easy to rename, no other code depends on the exact
-strings. ch2 is "LoRa Pager", not just "Pager", deliberately -- using the
-same name as ch9's real, already-working Pager channel would make both
-rows read identically despite being completely different things. The
-usable window here is genuinely tight (869.035-870.000 MHz: capped on one
-side by the ±490 kHz IF limit, on the other by EU_868's own 870.000 MHz
-region ceiling — 965 kHz total, with ch0/ch8 already sitting in the middle
-of it), so the 7 spare frequencies are hand-picked for real guard band
-rather than evenly auto-spaced: 4 fit below the ch0/ch8 pair, 3 above.
-
-| Channel | Name | Frequency | BW | SF | Protocol | RF chain | IF offset |
-|---|---|---|---|---|---|---|---|
-| ch0 | Reticulum | 869.463 MHz | 125 kHz | SF7–12 | Reticulum | RF0 | −62 000 Hz |
-| ch1 | Chat | 869.055 MHz | 125 kHz | SF7–12 | Chat | RF0 | −470 000 Hz |
-| ch2 | LoRa Pager | 869.155 MHz | 125 kHz | SF7–12 | Lora Pager | RF0 | −370 000 Hz |
-| ch3 | Public | 869.255 MHz | 125 kHz | SF7–12 | Public | RF0 | −270 000 Hz |
-| ch4 | Data | 869.355 MHz | 125 kHz | SF7–12 | Data | RF0 | −170 000 Hz |
-| ch5 | Weather | 869.665 MHz | 125 kHz | SF7–12 | Weather | RF0 | +140 000 Hz |
-| ch6 | Alert | 869.765 MHz | 125 kHz | SF7–12 | Alert | RF0 | +240 000 Hz |
-| ch7 | Emergency | 869.865 MHz | 125 kHz | SF7–12 | Emergency | RF0 | +340 000 Hz |
-| ch8 | — | 869.525 MHz | 250 kHz | SF11 | Meshtastic | RF0 | 0 |
-
-`multi_sf_protocol="auto"` here (unlike every other plan's plain string
-literal) — instead of one fixed word for the whole ch0-7 group,
-`config_routes.py`'s `_derive_channel_protocol()` uses each channel's own
-`name`, lowercased, as its displayed protocol. That's what actually
-distinguishes ch0 ("Reticulum") from a spare channel ("Papa", "Delta", ...)
-in the Concentrator Channels table — "protocol" alone couldn't, since the
-whole group shares one physical sync word. `eu868_lorawan()` stays on its
-plain `"lorawan"` literal (not `"auto"`) — its 5 real channels don't need
-individual protocol labels, only individual names for the table.
-
-(Both RF chains anchor to the same frequency here, so `_configure_if_channels()`'s
-`RF0 if freq_hz <= radio_0 + 500_000 else RF1` rule puts every channel on
-RF0 — not a bug, just what happens when there's only one real anchor.)
-
-Meshtastic (ch8, its own genuinely independent sync-word register) and Pager
-(ch9, separate FSK silicon) are **unaffected either way** — this plan only
-changes what's on the shared ch0-7 register. If a second custom LoRa-chirp
-protocol gets built for one of the spare channels, it would need to
-also use sync word `0x12` to be received here (fine for something you
-design yourself — not for an existing protocol with its own fixed required
-sync word).
-
-**This only gets the concentrator physically receiving correctly-framed
-Reticulum RF** — there is no `Protocol.RETICULUM` decoder in
-`src/decode/packet_router.py`, so received frames aren't decoded/labeled as
-Reticulum content on the dashboard yet. See
-[Configuration → Radio](CONFIGURATION.md#eu868-band-plan--lorawan-vs-reticulum)
-for the config reference.
 
 ## US, ANZ, IN, KR, SG_923 — Meshtastic-only wide-band plans
 
@@ -240,12 +151,6 @@ program **all 8 multi-SF channels (ch0–ch7) to the public LoRaWAN sync word
 `0x34`** — for every region, not just `EU_868`. Only the single-SF service
 channel (ch8) gets overridden to Meshtastic's `0x2B` via a direct register
 write (`set_syncword()`).
-
-`ConcentratorCaptureSource.start()` now also calls a second, analogous
-override, `set_multi_sf_syncword()`, right after `lgw_start()` — a no-op for
-every plan except `eu868_reticulum()` (see above), which repoints ch0-ch7 to
-`0x12`. Same register-write technique as `set_syncword()`, just the shared
-multi-SF register pair (578/579) instead of the service channel's (932/933).
 
 Practical effect: **only ch8 (the single primary/service channel) can ever
 decode Meshtastic traffic**, on every region. The 8 multi-SF channels are

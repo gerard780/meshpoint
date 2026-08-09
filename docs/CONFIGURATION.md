@@ -234,23 +234,6 @@ Or enter a custom frequency: `meshpoint meshcore-radio custom`
 
 See the [Onboarding Guide](ONBOARDING.md#changing-meshcore-radio-frequency) for full details.
 
-### EU868 Band Plan — LoRaWAN vs Reticulum
-
-```yaml
-radio:
-  region: "EU_868"
-  band_plan: "default"        # or "reticulum" -- EU_868 only
-```
-
-The SX1302's ch0-ch7 (multi-SF) channels all share **one** sync-word register across the whole set — there's no way to give individual multi-SF channels their own distinct sync word (confirmed against the real HAL register map: `SX1302_REG_RX_TOP_FRAME_SYNCH0/1_SF7TO12_PEAK1/2_POS_SF7TO12` covers all 8 channels at once, unlike ch8's genuinely independent service-channel registers). `band_plan` picks which protocol gets that shared register:
-
-- **`"default"`** (unchanged behavior) — ch0-ch7 stay on LoRaWAN's public sync word 0x34 ([`eu868_lorawan()`](../src/hal/concentrator_config.py)), 5 real TTN channels (867.9-868.7 MHz).
-- **`"reticulum"`** — ch0-ch7 repoint to [Reticulum](https://reticulum.network/)'s own sync word 0x12 instead ([`eu868_reticulum()`](../src/hal/concentrator_config.py)), with ch0 ("Reticulum") tuned to 869.463 MHz (Reticulum's real network parameters: SF8/BW125/CR5, confirmed against `microReticulum_Firmware`'s own source — see `extra/heltec_v4_reticulum_bron/`). **LoRaWAN reception stops entirely** while this is selected — that's the real trade, not a bug. ch1-ch7 (Chat/LoRa Pager/Public/Data/Weather/Alert/Emergency — placeholders, named by likely future use rather than decoratively so they read clearly in a screenshot, easy to rename) are real, enabled spare channels at hand-picked frequencies within the tight 869.035-870.000 MHz usable window — free spectrum for a future second LoRa-chirp experiment (they'd share this same 0x12 sync word too, which only works for something you design yourself — not for receiving an existing protocol with its own fixed required sync word). ch2 is "LoRa Pager", not just "Pager", specifically to avoid reading identically to ch9's real, already-working Pager channel in the table. `multi_sf_protocol="auto"` for this plan means each channel's own name (lowercased) becomes its displayed protocol, instead of one fixed word for the whole group — but naming a channel is purely cosmetic today, it doesn't create or select a decoder; that's separate, unbuilt work. See [BANDPLAN.md](BANDPLAN.md#eu_868-alternate--reticulum-instead-of-lorawan-radioband_plan-reticulum) for the full per-channel table.
-
-Either way, **Meshtastic (ch8, its own independent 0x2B register) and Pager (ch9, separate FSK silicon) are completely unaffected** — this only ever trades LoRaWAN for Reticulum on the shared register, nothing else. Only defined for `region: "EU_868"`; setting `band_plan: "reticulum"` on any other region is rejected. Like `region`/`frequency_mhz`, changing this requires a service restart.
-
-Note this only gets the concentrator physically **receiving** correctly-framed Reticulum RF — there is no `Protocol.RETICULUM` decoder in `src/decode/packet_router.py` yet, so received frames won't be decoded/labeled as Reticulum content on the dashboard until that separate piece exists.
-
 ---
 
 ## Capture Sources
