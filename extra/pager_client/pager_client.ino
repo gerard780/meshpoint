@@ -254,7 +254,24 @@
 #include <freertos/semphr.h>
 #include <Preferences.h> // ESP32 core, NVS-backed key/value store -- persists
                           // the web password + WiFi credentials across reboots
-#include "secrets.h" // gitignored -- WIFI_SSID/WIFI_PASSWORD/OTA_PASSWORD/WEB_PASSWORD, see that file
+// secrets.h is gitignored -- WIFI_SSID/WIFI_PASSWORD/OTA_PASSWORD/WEB_PASSWORD,
+// see secrets.h.example. Optional now rather than a hard compile-time
+// dependency: __has_include lets this compile with zero setup (falls
+// back to the exact same placeholder values secrets.h.example itself
+// ships with, which the runtime WiFi-connect logic further down
+// already treats as "skip WiFi, run standalone" -- see the
+// ssid.length()==0 || ssid=="YOUR_WIFI_SSID" check). Anyone who DOES
+// want real WiFi/OTA/web-login still just copies secrets.h.example to
+// secrets.h and fills it in, same as before -- this only removes the
+// failure mode where forgetting that step breaks the whole build.
+#if __has_include("secrets.h")
+#include "secrets.h"
+#else
+#define WIFI_SSID "TechInc"
+#define WIFI_PASSWORD "itoldyoualready"
+#define OTA_PASSWORD "itoldyoualready"
+#define WEB_PASSWORD "itoldyoualready"
+#endif
 
 // ---------- WiFi / mDNS / OTA / web dashboard tuning knobs (see header comment) ----------
 #define WIFI_CONNECT_TIMEOUT_MS 10000UL // bounded -- never hang core RX/TX waiting on WiFi that isn't there
