@@ -1,0 +1,9 @@
+// Copy to node_config.h and fill in, or let flash-node.sh / the
+// dashboard's Reticulum companion firmware card generate it for you.
+#ifndef NODE_CONFIG_H
+#define NODE_CONFIG_H
+#define NODE_WIFI_SSID "YOUR_WIFI_SSID"
+#define NODE_WIFI_PSK  "YOUR_WIFI_PASSWORD"
+#define NODE_VPS_HOST  "node.reticulumnet.nl"
+#define NODE_VPS_PORT  4242
+#endif

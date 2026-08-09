@@ -19,6 +19,10 @@
 #                                               # P2000/Pagers/POCSAG, 433/868
 #                                               # sensors, ADS-B, DAB+);
 #                                               # otherwise prompted [y/N]
+#   sudo ./scripts/install.sh --skip-platformio  # skip the PlatformIO toolchain
+#                                               # (Reticulum companion firmware
+#                                               # provision+flash); otherwise
+#                                               # prompted [y/N]
 #
 # After completion, reboot then run:  meshpoint setup
 #
@@ -117,6 +121,37 @@ if [ "$INSTALL_ARDUINO" = "1" ] && [ -t 0 ]; then
     case "$arduino_reply" in
         [yY]*) INSTALL_ARDUINO=1 ;;
         *) INSTALL_ARDUINO=0 ;;
+    esac
+fi
+
+# A second, separate optional toolchain: PlatformIO, needed only for the
+# Reticulum companion firmware card (extra/heltec_v4_reticulum_bron) --
+# that project's own platformio.ini uses per-environment custom_variant/
+# littlefs/symlinked-lib_deps config arduino-cli's boards.txt system can't
+# express, so it can't share arduino-cli's toolchain above. Kept as its
+# own prompt/flag rather than folded into --skip-arduino: someone may want
+# one companion toolchain without the other.
+echo ""
+echo "One more optional piece: the Reticulum companion firmware card"
+echo "(Configuration -> Firmware, extra/heltec_v4_reticulum_bron) builds"
+echo "and flashes that project via PlatformIO, not arduino-cli -- a"
+echo "separate toolchain. PlatformIO manages its own ESP32 package"
+echo "downloads lazily on first build (not during this installer), so"
+echo "this step itself is quick; the multi-hundred-MB download happens"
+echo "the first time you actually use the card."
+echo ""
+
+INSTALL_PLATFORMIO=1
+for arg in "$@"; do
+    case "$arg" in
+        --skip-platformio) INSTALL_PLATFORMIO=0 ;;
+    esac
+done
+if [ "$INSTALL_PLATFORMIO" = "1" ] && [ -t 0 ]; then
+    read -r -p "Install the PlatformIO toolchain now? [y/N] " platformio_reply || platformio_reply=""
+    case "$platformio_reply" in
+        [yY]*) INSTALL_PLATFORMIO=1 ;;
+        *) INSTALL_PLATFORMIO=0 ;;
     esac
 fi
 
@@ -635,7 +670,52 @@ else
     info "Skipping arduino-cli/ESP32 toolchain (POCSAG/Pager/RF Environment Compile+Flash won't be available) -- re-run without --skip-arduino, or answer Y next time, to add it later"
 fi
 
-# ── 14. Build SX1302 HAL ──────────────────────────────────────────
+# ── 14. Install PlatformIO toolchain (Reticulum companion firmware) ──
+#
+# Separate from arduino-cli above: extra/heltec_v4_reticulum_bron's own
+# platformio.ini needs PlatformIO specifically (custom_variant/littlefs/
+# symlinked lib_deps -- arduino-cli's boards.txt system can't express
+# any of that). Unlike arduino-cli's board core, PlatformIO downloads
+# its ESP32 platform/toolchain lazily on first `pio run`, not here --
+# this step only installs the `pio` command itself, so it's quick.
+#
+# Installed into its own venv under /opt/platformio (not a pipx/pip
+# --user install into some invoking user's $HOME): the systemd service
+# that will actually invoke this at runtime runs as `meshpoint`, a
+# --no-create-home system account with no $HOME of its own -- same
+# reasoning as arduino-cli's /opt/arduino-cli home above. A symlink at
+# /usr/local/bin/pio puts it on PATH for that account without needing
+# one, and PLATFORMIO_CORE_DIR (set in meshpoint.service, mirroring
+# arduino-cli's XDG_CACHE_HOME there) points PlatformIO's own downloaded-
+# package/toolchain cache at a real directory that account can write to.
+#
+# Idempotent: skips if the venv already exists, same pattern as the
+# other build-from-source sections above.
+
+if [ "$INSTALL_PLATFORMIO" = "1" ]; then
+    PLATFORMIO_HOME="/opt/platformio"
+    PIO_BIN="/usr/local/bin/pio"
+
+    if [ -x "${PLATFORMIO_HOME}/venv/bin/pio" ]; then
+        info "PlatformIO already installed, skipping"
+    else
+        info "Installing PlatformIO..."
+        mkdir -p "${PLATFORMIO_HOME}/core"
+        python3 -m venv "${PLATFORMIO_HOME}/venv"
+        "${PLATFORMIO_HOME}/venv/bin/pip" install --upgrade pip -q
+        "${PLATFORMIO_HOME}/venv/bin/pip" install platformio -q
+        ln -sf "${PLATFORMIO_HOME}/venv/bin/pio" "$PIO_BIN"
+    fi
+
+    if ! id -u meshpoint &>/dev/null; then
+        useradd --system --no-create-home --shell /usr/sbin/nologin meshpoint
+    fi
+    chown -R meshpoint:meshpoint "$PLATFORMIO_HOME"
+else
+    info "Skipping PlatformIO toolchain (Reticulum companion firmware Compile+Flash won't be available) -- re-run without --skip-platformio, or answer Y next time, to add it later"
+fi
+
+# ── 15. Build SX1302 HAL ──────────────────────────────────────────
 
 if [ -f "/usr/local/lib/libloragw.so" ]; then
     info "libloragw.so already installed, skipping HAL build"
@@ -886,7 +966,7 @@ _HALCFG
     info "libloragw.so installed to /usr/local/lib/"
 fi
 
-# ── 15. Apply TX sync word patch ──────────────────────────────────
+# ── 16. Apply TX sync word patch ──────────────────────────────────
 
 HAL_SRC="${HAL_BUILD_DIR}/libloragw/src/loragw_sx1302.c"
 if [ -f "$HAL_SRC" ]; then
@@ -904,7 +984,7 @@ if [ -f "$HAL_SRC" ]; then
     MESHPOINT_INSTALL_IN_PROGRESS=1 bash "${SCRIPT_DIR}/scripts/patch_hal.sh"
 fi
 
-# ── 16. Install Meshpoint application ─────────────────────────────
+# ── 17. Install Meshpoint application ─────────────────────────────
 
 info "Installing Meshpoint to ${MESHPOINT_DIR}..."
 mkdir -p "$MESHPOINT_DIR"
@@ -926,7 +1006,7 @@ rsync -a --exclude='venv' \
 #          --exclude='*.pyc' \
 #          "${SCRIPT_DIR}/" "$MESHPOINT_DIR/"
 
-# ── 17. Remove stale compiled core modules from prior installs ───
+# ── 18. Remove stale compiled core modules from prior installs ───
 # Releases before 0.7.0 shipped .cpython-*.so files alongside the
 # .py source. Python prefers the .so at import time, so any leftover
 # binary would silently shadow the current source. rsync above does
@@ -938,7 +1018,7 @@ if find "${MESHPOINT_DIR}/src" -name '*.cpython-*.so' -print -quit | grep -q .; 
     find "${MESHPOINT_DIR}/src" -name '*.cpython-*.so' -delete
 fi
 
-# ── 18. Python virtual environment ────────────────────────────────
+# ── 19. Python virtual environment ────────────────────────────────
 
 info "Setting up Python virtual environment..."
 python3 -m venv "${MESHPOINT_DIR}/venv"
@@ -949,11 +1029,11 @@ pip install -r "${MESHPOINT_DIR}/requirements.txt" -q
 pip install pyserial -q
 deactivate
 
-# ── 19. Create data directory ─────────────────────────────────────
+# ── 20. Create data directory ─────────────────────────────────────
 
 mkdir -p "${MESHPOINT_DIR}/data"
 
-# ── 20. Create meshpoint system user ──────────────────────────────
+# ── 21. Create meshpoint system user ──────────────────────────────
 
 if ! id -u meshpoint &>/dev/null; then
     info "Creating system user 'meshpoint'..."
@@ -1003,14 +1083,14 @@ info "Installing sudoers rule for service management..."
 cp "${MESHPOINT_DIR}/config/sudoers-meshpoint" /etc/sudoers.d/meshpoint
 chmod 440 /etc/sudoers.d/meshpoint
 
-# ── 21. Configure journald log rotation ───────────────────────────
+# ── 22. Configure journald log rotation ───────────────────────────
 
 info "Configuring journald log limits (100M, 7-day retention)..."
 mkdir -p /etc/systemd/journald.conf.d
 cp "${MESHPOINT_DIR}/config/journald-meshpoint.conf" /etc/systemd/journald.conf.d/meshpoint.conf
 systemctl restart systemd-journald 2>/dev/null || warn "Could not restart journald"
 
-# ── 22. Install systemd service ───────────────────────────────────
+# ── 23. Install systemd service ───────────────────────────────────
 
 info "Installing systemd service..."
 cp "${MESHPOINT_DIR}/${SERVICE_FILE}" /etc/systemd/system/meshpoint.service
@@ -1018,7 +1098,7 @@ systemctl daemon-reload
 systemctl enable meshpoint
 info "Service enabled (will start after 'meshpoint setup')"
 
-# ── 23. Install network watchdog ──────────────────────────────────
+# ── 24. Install network watchdog ──────────────────────────────────
 
 info "Installing WiFi network watchdog..."
 cp "${MESHPOINT_DIR}/${WATCHDOG_SERVICE_FILE}" /etc/systemd/system/network-watchdog.service
@@ -1027,7 +1107,7 @@ systemctl enable network-watchdog
 systemctl start network-watchdog 2>/dev/null || warn "Could not start network-watchdog (will start on next boot)"
 info "Network watchdog enabled"
 
-# ── 24. Install mDNS (Avahi) for meshpoint.local discovery ────────
+# ── 25. Install mDNS (Avahi) for meshpoint.local discovery ────────
 #
 # Lets the Pi be reached as meshpoint.local (or <hostname>.local) on
 # the LAN without knowing its IP -- useful right after a fresh flash
@@ -1048,13 +1128,13 @@ fi
 
 systemctl enable --now avahi-daemon
 
-# ── 25. Install CLI tool ───────────────────────────────────────────
+# ── 26. Install CLI tool ───────────────────────────────────────────
 
 info "Installing meshpoint CLI..."
 chmod +x "${MESHPOINT_DIR}/${CLI_SCRIPT}"
 ln -sf "${MESHPOINT_DIR}/${CLI_SCRIPT}" /usr/local/bin/meshpoint
 
-# ── 26. Add fastfetch login banner ────────────────────────────────
+# ── 27. Add fastfetch login banner ────────────────────────────────
 #
 # Shows a system-info banner on every interactive login shell for the
 # `pi` user. Idempotent: skips if already present.

@@ -174,6 +174,7 @@ class ConfigurationPanel {
                         <div data-firmware-pocsag></div>
                         <div data-firmware-pager></div>
                         <div data-firmware-rfenv></div>
+                        <div data-firmware-reticulum></div>
                     </div>
                 `;
                 if (window.MeshtasticFirmwareConfigCard) {
@@ -200,6 +201,11 @@ class ConfigurationPanel {
                     const rfenv = new window.RfenvCompanionFirmwareConfigCard(api);
                     rfenv.mount(host.querySelector('[data-firmware-rfenv]'));
                     this._cards.set('firmware-rfenv', rfenv);
+                }
+                if (window.ReticulumCompanionFirmwareConfigCard) {
+                    const reticulum = new window.ReticulumCompanionFirmwareConfigCard(api);
+                    reticulum.mount(host.querySelector('[data-firmware-reticulum]'));
+                    this._cards.set('firmware-reticulum', reticulum);
                 }
             }
         } else if (section === 'transmit' && window.TransmitConfigCard) {

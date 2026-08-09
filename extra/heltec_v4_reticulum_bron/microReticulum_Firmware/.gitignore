@@ -10,3 +10,7 @@ build/*
 .pio/*
 .vscode/*
 Debug*
+# Rewritten on every provision by the dashboard's Reticulum companion
+# firmware card (and by flash-node.sh) -- holds real WiFi credentials,
+# same reasoning as the other companions' secrets.h.
+node_config.h

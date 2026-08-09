@@ -39,6 +39,12 @@ Environment=FORCE_COLOR=1
 # (see its "Install arduino-cli" section) so a firmware-flash feature
 # invoked from this process can actually compile.
 Environment=XDG_CACHE_HOME=/opt/arduino-cli/cache
+# Same reasoning as XDG_CACHE_HOME above, for the separate PlatformIO
+# toolchain (Reticulum companion firmware, see install.sh's "Install
+# PlatformIO" section): PLATFORMIO_CORE_DIR is where `pio` stores its
+# own downloaded platform/toolchain packages, and defaults to a
+# $HOME-relative path this --no-create-home user doesn't have.
+Environment=PLATFORMIO_CORE_DIR=/opt/platformio/core
 
 # Hardening
 NoNewPrivileges=false
