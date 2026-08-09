@@ -106,6 +106,7 @@ class ConcentratorCaptureSource(CaptureSource):
                 frequency_mhz=radio_config.frequency_mhz,
                 spreading_factor=radio_config.spreading_factor,
                 bandwidth_khz=radio_config.bandwidth_khz,
+                band_plan=radio_config.band_plan,
             )
         if channel_plan is not None:
             return channel_plan
@@ -167,10 +168,15 @@ class ConcentratorCaptureSource(CaptureSource):
         self._wrapper.start()
         self._wrapper.set_syncword(self._syncword)
         self._wrapper.set_tx_syncword(self._syncword)
+        # Harmless no-op for every existing plan (0x34 matches what
+        # lorawan_public=True already programmed above) -- only a plan
+        # like eu868_reticulum() that sets multi_sf_syncword to something
+        # else actually changes ch0-ch7's behavior here.
+        self._wrapper.set_multi_sf_syncword(self._channel_plan.multi_sf_syncword)
         self._running = True
         logger.info(
-            "Concentrator capture started (syncword=0x%02X)",
-            self._syncword,
+            "Concentrator capture started (syncword=0x%02X, multi_sf_syncword=0x%02X)",
+            self._syncword, self._channel_plan.multi_sf_syncword,
         )
 
     async def stop(self) -> None:

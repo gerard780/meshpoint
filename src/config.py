@@ -101,6 +101,14 @@ class RadioConfig:
     # transmit without a real one configured, same reasoning as
     # pocsag_companion.ino requiring a callsign before it will key up.
     pager_capcode: int = 0
+    # "default" keeps ch0-7 on the standard LoRaWAN 0x34 sync word (see
+    # concentrator_config.py's eu868_lorawan()) -- the only value every
+    # region besides EU_868 supports. "reticulum" repoints ch0-7 to the
+    # Reticulum network's own 0x12 sync word instead (eu868_reticulum()),
+    # dropping LoRaWAN reception entirely in exchange for real Reticulum
+    # RX -- ch8 (Meshtastic) and ch9 (Pager) are unaffected either way.
+    # EU_868 only; validated in system_config_routes.py.
+    band_plan: str = "default"
 
 
 @dataclass

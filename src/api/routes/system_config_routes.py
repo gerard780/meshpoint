@@ -574,6 +574,7 @@ async def update_radio_pager(
                 frequency_mhz=radio.frequency_mhz,
                 spreading_factor=radio.spreading_factor,
                 bandwidth_khz=radio.bandwidth_khz,
+                band_plan=radio.band_plan,
             )
         except (ValueError, TypeError) as exc:
             raise HTTPException(

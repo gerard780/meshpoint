@@ -89,9 +89,11 @@ def _concentrator_status(config: AppConfig) -> dict:
 
     Rebuilt with the same ``from_radio_config`` call the capture source
     makes, so the table reflects the live plan without touching hardware.
-    Sync words mirror sx1302_wrapper.py: ch0-ch7 share the board-wide
-    LoRaWAN 0x34 (``lorawan_public=True``), only ch8 (service channel)
-    is overridden to Meshtastic 0x2B via direct register writes.
+    ch0-ch7's sync word/protocol label come from the plan itself
+    (``multi_sf_syncword``/``multi_sf_protocol`` -- 0x34/"lorawan" for
+    every plan except radio.band_plan="reticulum"'s own 0x12); ch8
+    (service channel) is always Meshtastic 0x2B via direct register
+    writes, unaffected by band_plan.
     """
     from src.hal.concentrator_config import ConcentratorChannelPlan
 
@@ -103,10 +105,13 @@ def _concentrator_status(config: AppConfig) -> dict:
             frequency_mhz=radio.frequency_mhz,
             spreading_factor=radio.spreading_factor,
             bandwidth_khz=radio.bandwidth_khz,
+            band_plan=radio.band_plan,
         )
     except (ValueError, TypeError) as exc:
         logger.warning("concentrator plan unavailable: %s", exc)
         return {"active": active, "channels": []}
+
+    multi_sf_syncword_hex = f"0x{plan.multi_sf_syncword:02X}"
 
     radio_0 = plan.radio_0_freq_hz
 
@@ -121,8 +126,8 @@ def _concentrator_status(config: AppConfig) -> dict:
             "frequency_mhz": round(ch.frequency_hz / 1e6, 4),
             "bandwidth_khz": ch.bandwidth_khz,
             "spreading_factor": ch.spreading_factor,  # 0 = multi-SF
-            "syncword": "0x34",
-            "protocol": "lorawan",
+            "syncword": multi_sf_syncword_hex,
+            "protocol": plan.multi_sf_protocol,
             "rf_chain": _rf_chain(ch.frequency_hz),
             "enabled": ch.enabled,
         })
@@ -378,6 +383,7 @@ async def get_config(claims: SessionClaims = Depends(require_auth)):
             "sync_word": f"0x{radio.sync_word:02X}",
             "preamble_length": radio.preamble_length,
             "current_preset": current_preset,
+            "band_plan": radio.band_plan,
         },
         "transmit": {
             "enabled": tx.enabled,
@@ -589,6 +595,9 @@ async def update_identity(
     return {"saved": True, "restart_required": restart_needed, "updates": updates}
 
 
+_SUPPORTED_BAND_PLANS = {"default", "reticulum"}
+
+
 class RadioUpdate(BaseModel):
     region: Optional[str] = None
     preset: Optional[str] = None
@@ -596,6 +605,7 @@ class RadioUpdate(BaseModel):
     spreading_factor: Optional[int] = None
     bandwidth_khz: Optional[float] = None
     coding_rate: Optional[str] = None
+    band_plan: Optional[str] = None
 
 
 @router.put("/radio")
@@ -654,6 +664,18 @@ async def update_radio(
         updates["frequency_mhz"] = req.frequency_mhz
     elif req.region and req.region in REGION_DEFAULTS and "frequency_mhz" not in updates:
         updates["frequency_mhz"] = REGION_DEFAULTS[req.region]["frequency_mhz"]
+
+    if req.band_plan is not None:
+        if req.band_plan not in _SUPPORTED_BAND_PLANS:
+            raise HTTPException(400, f"Unknown band_plan: {req.band_plan}")
+        effective_region = req.region if req.region is not None else radio.region
+        if req.band_plan == "reticulum" and effective_region != "EU_868":
+            raise HTTPException(
+                400, "band_plan 'reticulum' is only defined for the EU_868 region"
+            )
+        if req.band_plan != radio.band_plan:
+            restart_needed = True
+        updates["band_plan"] = req.band_plan
 
     if updates:
         for key, val in updates.items():

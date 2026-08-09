@@ -55,6 +55,16 @@ class ConcentratorChannelPlan:
     single_sf_channel: ChannelConfig | None = None
     radio_0_freq_hz: int = 906_800_000
     radio_1_freq_hz: int = 907_400_000
+    # ch0-ch7 share ONE sync-word register across all 8 multi-SF channels
+    # (see sx1302_wrapper.py's set_multi_sf_syncword() docstring) -- 0x34
+    # (LoRaWAN public) is every existing plan's implicit default, matching
+    # what lorawan_public=True already programs at lgw_start() before any
+    # override runs, so leaving this field unset changes nothing for any
+    # plan defined before it existed. Only eu868_reticulum() below sets
+    # it to something else. multi_sf_protocol is the matching display
+    # label for the Concentrator Channels table (config_routes.py).
+    multi_sf_syncword: int = 0x34
+    multi_sf_protocol: str = "lorawan"
 
     @classmethod
     def from_radio_config(
@@ -63,13 +73,28 @@ class ConcentratorChannelPlan:
         frequency_mhz: float,
         spreading_factor: int = 11,
         bandwidth_khz: float = 250.0,
+        band_plan: str = "default",
     ) -> ConcentratorChannelPlan:
         """Build a channel plan from radio config.
 
         Uses the hardcoded LongFast region preset only when frequency,
         SF, and BW all match defaults.  Otherwise builds a plan that
         respects the caller's spreading_factor and bandwidth_khz.
+
+        ``band_plan`` is checked first, ahead of all of that: "reticulum"
+        goes straight to eu868_reticulum() regardless of the requested
+        frequency/SF/BW (Meshtastic's own frequency there is fixed at
+        869.525 MHz same as the default plan, so nothing else to derive
+        it from) -- EU_868 only, since that's the only region this
+        alternate plan is defined for.
         """
+        if band_plan == "reticulum":
+            if region != "EU_868":
+                raise ValueError(
+                    "band_plan 'reticulum' is only defined for the EU_868 region"
+                )
+            return cls.eu868_reticulum()
+
         freq_hz = int(frequency_mhz * 1_000_000)
 
         if not region:
@@ -198,6 +223,63 @@ class ConcentratorChannelPlan:
             ChannelConfig(frequency_hz=868_500_000),
             ChannelConfig(frequency_hz=868_700_000),
             # ch5–ch7: disabled — nothing LoRaWAN-useful within ±490 kHz of RF1
+            ChannelConfig(frequency_hz=869_525_000, enabled=False),
+            ChannelConfig(frequency_hz=869_525_000, enabled=False),
+            ChannelConfig(frequency_hz=869_525_000, enabled=False),
+        ]
+        return plan
+
+    @staticmethod
+    def eu868_reticulum() -> ConcentratorChannelPlan:
+        """EU868 alternate plan: Reticulum on ch0 instead of LoRaWAN,
+        Meshtastic unchanged on ch8. Opt-in via radio.band_plan =
+        "reticulum" -- eu868_lorawan() (the default) is untouched by
+        this existing alongside it.
+
+        Same RF1 anchor (869.525 MHz) as eu868_lorawan() -- Reticulum's
+        own network parameters (869.463 MHz / SF8 / BW125 / CR5) put its
+        frequency only 62 kHz away, comfortably inside the SX1302's
+        ±490 kHz IF range. This is the same math investigated (and
+        reverted) for a single reserved channel; here it's the
+        deliberate basis of a whole separate plan instead, since making
+        it work means giving up LoRaWAN's 0x34 on the shared ch0-7
+        register entirely -- not something the default plan should ever
+        do silently.
+
+        ch1-ch7 are left disabled, reserved for a possible future second
+        LoRa-chirp experiment (they would share this same 0x12 sync
+        word -- fine for something you design yourself, since you pick
+        its sync word too; not fine for receiving an existing protocol
+        with its own fixed required sync word, e.g. real LoRaWAN's 0x34).
+
+        Channel map:
+          ch0  869.463 MHz  125 kHz  SF7–12  Reticulum   RF1  IF –62 000
+          ch1–ch7  (disabled — reserved for future use)
+          ch8  869.525 MHz  250 kHz  SF11    Meshtastic  RF1  IF       0
+
+        Sync word assignment (see sx1302_wrapper.py):
+          ch0-ch7 multi-SF: Reticulum 0x12  (set_multi_sf_syncword(), see above)
+          ch8   service:    Meshtastic 0x2B (direct register writes, unchanged)
+        """
+        plan = ConcentratorChannelPlan(
+            radio_0_freq_hz=869_525_000,
+            radio_1_freq_hz=869_525_000,
+            multi_sf_syncword=0x12,
+            multi_sf_protocol="reticulum",
+        )
+        plan.single_sf_channel = ChannelConfig(
+            frequency_hz=869_525_000,
+            bandwidth_khz=250,
+            spreading_factor=11,
+        )
+        plan.multi_sf_channels = [
+            ChannelConfig(frequency_hz=869_463_000),
+            # ch1–ch7: disabled — reserved for a possible future second
+            # LoRa-chirp experiment, not populated speculatively.
+            ChannelConfig(frequency_hz=869_525_000, enabled=False),
+            ChannelConfig(frequency_hz=869_525_000, enabled=False),
+            ChannelConfig(frequency_hz=869_525_000, enabled=False),
+            ChannelConfig(frequency_hz=869_525_000, enabled=False),
             ChannelConfig(frequency_hz=869_525_000, enabled=False),
             ChannelConfig(frequency_hz=869_525_000, enabled=False),
             ChannelConfig(frequency_hz=869_525_000, enabled=False),
