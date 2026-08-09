@@ -39,6 +39,16 @@ _MESHTASTIC_EU868_FREQS_HZ: frozenset[int] = frozenset({
     869_525_000,
 })
 
+# ch2 ("LoRa Pager") of eu868_reticulum()'s spare channels -- gets its
+# own protocol_hint/adapter (lora_pager_event_adapter.py) instead of the
+# generic RETICULUM hint every other spare channel still gets. Checked
+# the same way as the Meshtastic frequency above: by the packet's own
+# frequency_hz, since ch0-ch7 all share one sync word and can't be told
+# apart any other way. Only meaningful while radio.band_plan="reticulum"
+# is active -- this frequency isn't otherwise reachable on the default
+# eu868_lorawan() plan, so no risk of misclassifying real LoRaWAN traffic.
+_LORA_PAGER_FREQ_HZ = 869_155_000
+
 # Emergency pager project: ch9's own frequency and sync word, fixed
 # Now configurable via RadioConfig.pager_frequency_mhz/pager_sync_word/
 # pager_sync_word_size/pager_rf_chain (src/config.py) -- these are just
@@ -241,6 +251,11 @@ class ConcentratorCaptureSource(CaptureSource):
 
                 if pkt.frequency_hz in _MESHTASTIC_EU868_FREQS_HZ:
                     protocol_hint = Protocol.MESHTASTIC
+                elif (
+                    self._channel_plan.multi_sf_syncword == 0x12
+                    and pkt.frequency_hz == _LORA_PAGER_FREQ_HZ
+                ):
+                    protocol_hint = Protocol.LORA_PAGER
                 elif self._channel_plan.multi_sf_syncword == 0x12:
                     # ch0-ch7 configured for Reticulum's sync word right
                     # now (radio.band_plan="reticulum", see

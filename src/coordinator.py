@@ -389,6 +389,12 @@ class PipelineCoordinator:
             # would reasonably read a different capture_source as a
             # different physical device.
             packet = self._adapt_pager(raw)
+        elif raw.protocol_hint == Protocol.LORA_PAGER:
+            # Same reasoning as the PAGER branch above -- ch2 shares the
+            # same concentrator object as everything else on ch0-ch7,
+            # just a different frequency within the shared IF/sync-word
+            # group, not different hardware.
+            packet = self._adapt_lora_pager(raw)
         else:
             packet = self._router.decode(
                 raw.payload,
@@ -463,6 +469,11 @@ class PipelineCoordinator:
     @staticmethod
     def _adapt_pager(raw: RawCapture) -> Optional[Packet]:
         from src.decode.pager_event_adapter import adapt_event
+        return adapt_event(raw.payload, signal=raw.signal)
+
+    @staticmethod
+    def _adapt_lora_pager(raw: RawCapture) -> Optional[Packet]:
+        from src.decode.lora_pager_event_adapter import adapt_event
         return adapt_event(raw.payload, signal=raw.signal)
 
     def _dapnet_capcode_tier(self, packet: Packet) -> Optional[str]:

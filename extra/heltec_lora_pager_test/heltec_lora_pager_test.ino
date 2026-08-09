@@ -152,7 +152,7 @@ void setup() {
     8,                             // spreading factor -- matches Reticulum's real SF8
     5,                             // coding rate 4/5
     RETICULUM_PRIVATE_SYNC_WORD,
-    14,                             // TX power (dBm) -- deliberately modest;
+    20,                             // TX power (dBm) -- deliberately modest;
                                     // this is a same-room diagnostic tool,
                                     // not a real deployment, and these
                                     // frequencies don't all fall inside
