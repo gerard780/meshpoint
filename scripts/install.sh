@@ -70,13 +70,13 @@ fi
 
 # Informational -- not a hard requirement, just worth knowing before a
 # multi-GB run (apt packages, the SX1302 HAL build, a Python venv, and
-# optionally the arduino-cli/ESP32 toolchain below) starts on what might
-# be a small SD card.
+# optionally the arduino-cli/ESP32 and/or PlatformIO toolchains below)
+# starts on what might be a small SD card.
 FREE_ROOT_GB="$(df -Pk / 2>/dev/null | awk 'NR==2 { printf "%.1f", $4/1024/1024 }')"
 if [ -n "$FREE_ROOT_GB" ]; then
     info "Free space on /: ${FREE_ROOT_GB} GB"
     if awk -v f="$FREE_ROOT_GB" 'BEGIN { exit !(f < 4) }'; then
-        warn "That's getting tight -- the HAL build, venv, and (if installed) the arduino-cli/ESP32 toolchain need real room. A larger SD card is worth considering; answering 'n' below saves roughly 300-500 MB if you don't need POCSAG/Pager/RF Environment firmware flashing."
+        warn "That's getting tight -- the HAL build, venv, and (if installed) the arduino-cli/ESP32 toolchain need real room. A larger SD card is worth considering; answering 'n' to arduino-cli below saves roughly 300-500 MB right now if you don't need POCSAG/Pager/RF Environment firmware flashing. PlatformIO's own install.sh footprint is small either way (its ESP32 toolchain downloads lazily on first build, not during this installer) -- but that later download is a similar few-hundred-MB size, worth knowing about now if space is already tight."
     fi
 else
     warn "Could not determine free disk space (df failed) -- proceeding anyway."
