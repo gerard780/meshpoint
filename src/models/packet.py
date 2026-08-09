@@ -14,6 +14,14 @@ class Protocol(str, Enum):
     LORAWAN = "lorawan"
     DAPNET = "dapnet"
     PAGER = "pager"
+    # ch0-ch7 of the concentrator's eu868_reticulum() band plan (see
+    # concentrator_config.py) -- honest protocol_hint for that traffic
+    # instead of the pre-band-plan default of LORAWAN. No real decoder
+    # exists yet (see packet_router.py's explicit reject for this hint,
+    # and src/decode/ -- there is no reticulum_decoder.py); this exists
+    # so Stray Frames entries are labeled accurately, not to claim
+    # decoding capability that doesn't exist.
+    RETICULUM = "reticulum"
     UNKNOWN = "unknown"
 
 

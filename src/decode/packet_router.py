@@ -57,6 +57,17 @@ class PacketRouter:
                 )
             return packet
 
+        if protocol_hint == Protocol.RETICULUM:
+            # No decoder exists for this yet -- deliberately return None
+            # here rather than falling through to the generic Meshtastic/
+            # MeshCore trial-decode below. Real Reticulum bytes could
+            # plausibly pass one of those decoders' own loose structural
+            # checks by coincidence and get stored as a wrong, made-up
+            # Meshtastic/MeshCore packet -- worse than the honest "we
+            # don't decode this yet" this hint exists to communicate.
+            # Caller (coordinator.py) records the stray frame either way.
+            return None
+
         if protocol_hint == Protocol.MESHTASTIC:
             packet = self._meshtastic.decode(raw_bytes, signal, pre_decoded=pre_decoded)
             if packet:

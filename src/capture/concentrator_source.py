@@ -24,11 +24,17 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # Frequency (Hz) used by Meshtastic on EU868.  Packets on this frequency
-# are routed to the Meshtastic decoder; everything else is treated as LoRaWAN.
-# Only the ch8 service channel (869.525 MHz) can decode Meshtastic -- ch0-ch7
-# multi-SF channels share a single board-wide LoRaWAN sync word, so no other
-# frequency will ever carry a Meshtastic-decoded packet (see eu868_lorawan()
-# in concentrator_config.py).
+# are routed to the Meshtastic decoder regardless of which ch0-ch7 band
+# plan is active -- ch8 (Meshtastic's own service channel) is unaffected
+# by radio.band_plan. Only the ch8 service channel (869.525 MHz) can
+# decode Meshtastic -- ch0-ch7 multi-SF channels share one board-wide
+# sync word (see eu868_lorawan()/eu868_reticulum() in
+# concentrator_config.py), so no other frequency will ever carry a
+# Meshtastic-decoded packet. Everything else gets hinted LoRaWAN or
+# Reticulum depending on which sync word ch0-ch7 is actually configured
+# for right now (see the protocol_hint branch in packets() below,
+# checking self._channel_plan.multi_sf_syncword) -- NOT always
+# LoRaWAN; that was only ever true before eu868_reticulum() existed.
 _MESHTASTIC_EU868_FREQS_HZ: frozenset[int] = frozenset({
     869_525_000,
 })
@@ -233,11 +239,22 @@ class ConcentratorCaptureSource(CaptureSource):
                     )
                     continue
 
-                protocol_hint = (
-                    Protocol.MESHTASTIC
-                    if pkt.frequency_hz in _MESHTASTIC_EU868_FREQS_HZ
-                    else Protocol.LORAWAN
-                )
+                if pkt.frequency_hz in _MESHTASTIC_EU868_FREQS_HZ:
+                    protocol_hint = Protocol.MESHTASTIC
+                elif self._channel_plan.multi_sf_syncword == 0x12:
+                    # ch0-ch7 configured for Reticulum's sync word right
+                    # now (radio.band_plan="reticulum", see
+                    # eu868_reticulum() in concentrator_config.py) --
+                    # honest hint instead of the stale default-plan
+                    # assumption that anything non-Meshtastic must be
+                    # LoRaWAN. No real decoder exists for this yet
+                    # (packet_router.py explicitly rejects it rather than
+                    # risk a false-positive Meshtastic/MeshCore decode);
+                    # this only makes Stray Frames entries labeled
+                    # accurately.
+                    protocol_hint = Protocol.RETICULUM
+                else:
+                    protocol_hint = Protocol.LORAWAN
 
                 yield RawCapture(
                     payload=pkt.payload,
