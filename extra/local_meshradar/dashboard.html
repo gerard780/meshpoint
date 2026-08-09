@@ -332,19 +332,21 @@
     }
     .receiver-pills {
         display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
-        margin-top: 6px; cursor: pointer;
+        margin-top: 6px;
     }
     .receiver-pill {
         display: flex; align-items: center; gap: 4px;
         background: var(--overlay-soft); border: 1px solid var(--border);
         border-radius: 10px; padding: 2px 7px 2px 6px;
         font-size: 10px; color: var(--dim);
+        cursor: pointer;
     }
-    .receiver-pills:hover .receiver-pill { border-color: var(--accent); }
+    .receiver-pill:hover { border-color: var(--accent); }
+    .receiver-pill.active { border-color: var(--accent); color: var(--text); }
     .receiver-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
     .receiver-dot--fresh { background: var(--accent-green); }
     .receiver-dot--stale { background: var(--accent-red); }
-    .receiver-pills__toggle { font-size: 9px; color: var(--dim); }
+    .receiver-pill__toggle { font-size: 9px; color: var(--dim); }
     .badge-row { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; align-items: center; }
     .badge {
         font-size: 10px; padding: 2px 6px; border-radius: 4px;
@@ -1095,7 +1097,10 @@ let lastActivityByNode = {};
 let lastActivityByDeviceNode = {};
 let nodeNameById = {};
 let toolbarState = { sort: 'last_heard', hopFilter: 'all', favOnly: false, search: '' };
-let expandedReceivers = new Set();
+// Which single receiver pill is expanded, per node -- a Map (node key ->
+// device_id) rather than a Set, since only one pill's detail row should
+// show at a time, not every receiver's at once.
+let expandedReceiverPill = new Map();
 
 function renderNodeList() {
     const el = document.getElementById('nodes');
@@ -1215,24 +1220,29 @@ function renderNodeList() {
         // row per receiver, so the card jumped between 1 and 3 lines tall
         // depending on coverage. Collapse to a compact pill per receiver
         // (dot green if it's within a few seconds of the freshest read,
-        // red if it's lagging) and only show the full rows on click.
-        const isExpanded = expandedReceivers.has(g.key);
+        // red if it's lagging) and only show ONE receiver's full row at a
+        // time -- whichever pill was clicked -- rather than all of them.
+        const expandedDeviceId = expandedReceiverPill.get(g.key);
         const receiverPills = members.length > 1 ? `
-            <div class="receiver-pills" data-node-key="${esc(g.key)}">
+            <div class="receiver-pills">
                 ${memberInfos.map((info) => {
                     const isFresh = maxHeardAt != null
                         && Math.abs(new Date(info.heardAt) - new Date(maxHeardAt)) <= 5000;
+                    const isActive = info.m.device_id === expandedDeviceId;
                     return `
-                        <span class="receiver-pill">
+                        <span class="receiver-pill ${isActive ? 'active' : ''}" data-node-key="${esc(g.key)}" data-device-id="${esc(info.m.device_id)}">
                             <span class="receiver-dot ${isFresh ? 'receiver-dot--fresh' : 'receiver-dot--stale'}"></span>
                             ${esc(deviceNameById[info.m.device_id] || info.m.device_id)}
                             ${relTime(info.heardAt)}
+                            ${isActive ? '<span class="receiver-pill__toggle">&#9650;</span>' : ''}
                         </span>`;
                 }).join('')}
-                <span class="receiver-pills__toggle">${isExpanded ? '&#9650;' : '&#9660;'}</span>
             </div>` : '';
 
-        const deviceRows = (members.length === 1 || isExpanded) ? memberInfos.map(({ m, signal, rssi, snr, heardAt }) => `
+        const rowsToShow = members.length === 1
+            ? memberInfos
+            : memberInfos.filter((info) => info.m.device_id === expandedDeviceId);
+        const deviceRows = rowsToShow.map(({ m, signal, rssi, snr, heardAt }) => `
                 <div class="badge-row node-card__device-row">
                     <span class="badge badge--device">${esc(deviceNameById[m.device_id] || m.device_id)}</span>
                     <span class="badge">${relTime(heardAt)}</span>
@@ -1242,7 +1252,7 @@ function renderNodeList() {
                     ${snrQualityBadge(snr)}
                     ${hops ? `<span class="badge">${hops} hops</span>` : ''}
                     ${signal?.frequency_mhz != null ? `<span class="badge">${round1(signal.frequency_mhz)} MHz</span>` : ''}
-                </div>`).join('') : '';
+                </div>`).join('');
 
         return `
             <div class="node-card" data-group-index="${i}">
@@ -1278,11 +1288,13 @@ function renderNodeList() {
             renderNodeList();
         });
     });
-    el.querySelectorAll('.receiver-pills').forEach((row) => {
-        row.addEventListener('click', (e) => {
+    el.querySelectorAll('.receiver-pill').forEach((pill) => {
+        pill.addEventListener('click', (e) => {
             e.stopPropagation();
-            const key = row.dataset.nodeKey;
-            if (expandedReceivers.has(key)) expandedReceivers.delete(key); else expandedReceivers.add(key);
+            const key = pill.dataset.nodeKey;
+            const deviceId = pill.dataset.deviceId;
+            if (expandedReceiverPill.get(key) === deviceId) expandedReceiverPill.delete(key);
+            else expandedReceiverPill.set(key, deviceId);
             renderNodeList();
         });
     });
