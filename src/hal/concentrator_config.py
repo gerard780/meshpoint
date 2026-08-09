@@ -283,16 +283,25 @@ class ConcentratorChannelPlan:
         matters more than a perfectly even grid. 4 fit below the ch0/ch8
         pair, 3 above.
 
-        Channel map:
-          ch0  869.463 MHz  125 kHz  SF7–12  Reticulum   RF1  IF  –62 000
+        Channel map (both radio_0_freq_hz and radio_1_freq_hz are set to
+        869.525 MHz here -- unlike eu868_lorawan()'s split RF0/RF1
+        anchors, every multi-SF channel below lands on RF0 per
+        _rf_chain()'s ``<= radio_0_freq + 500kHz`` classification, since
+        the whole 869.035-870.000 MHz window is within 500 kHz of that
+        one shared anchor either way. Numerically harmless -- the IF
+        offset math gives the same result regardless of which RF chain
+        gets picked when both anchors are identical -- but worth being
+        honest about rather than implying an RF0/RF1 split that doesn't
+        actually happen):
+          ch0  869.463 MHz  125 kHz  SF7–12  Reticulum   RF0  IF  –62 000
           ch1  869.055 MHz  125 kHz  SF7–12  Chat        RF0  IF –470 000
           ch2  869.155 MHz  125 kHz  SF7–12  LoRa Pager  RF0  IF –370 000
           ch3  869.255 MHz  125 kHz  SF7–12  Public      RF0  IF –270 000
           ch4  869.355 MHz  125 kHz  SF7–12  Data        RF0  IF –170 000
-          ch5  869.665 MHz  125 kHz  SF7–12  Weather     RF1  IF +140 000
-          ch6  869.765 MHz  125 kHz  SF7–12  Alert       RF1  IF +240 000
-          ch7  869.865 MHz  125 kHz  SF7–12  Emergency   RF1  IF +340 000
-          ch8  869.525 MHz  250 kHz  SF11    Meshtastic  RF1  IF       0
+          ch5  869.665 MHz  125 kHz  SF7–12  Weather     RF0  IF +140 000
+          ch6  869.765 MHz  125 kHz  SF7–12  Alert       RF0  IF +240 000
+          ch7  869.865 MHz  125 kHz  SF7–12  Emergency   RF0  IF +340 000
+          ch8  869.525 MHz  250 kHz  SF11    Meshtastic  RF0  IF       0
 
         Sync word assignment (see sx1302_wrapper.py):
           ch0-ch7 multi-SF: Reticulum 0x12  (set_multi_sf_syncword(), see above --

@@ -42,9 +42,23 @@
   threshold) -- reused as the same proven pattern, not reinvented:
     Short press: cycle to the next channel (wraps around).
     Long press:  send a test message on the currently selected channel.
-  No menu tree, no WiFi/OTA/NVS -- this is a temporary diagnostic tool,
-  not a permanent companion; deliberately not built to that fuller
-  pattern's scope.
+
+  ---- WiFi / web trigger ----
+  Optional, same "best-effort, never required" idea as pager_client.ino:
+  if secrets.h defines a real WIFI_SSID this connects and starts a tiny
+  web page (one button per channel) so a test send can be triggered
+  remotely instead of needing to stand next to the board -- useful for
+  confirming a hit while watching the dashboard's Stray Frames/Packet
+  Feed on a different screen. No secrets.h at all (or an empty
+  WIFI_SSID) skips WiFi entirely and this behaves exactly as the
+  button-only tool it started as. Deliberately NOT the fuller
+  OTA/NVS-password/mDNS-everything pattern pager_client.ino has -- this
+  is still a temporary diagnostic tool, just one that's also reachable
+  over the network now. Same cross-task safety rule as pager_client.ino:
+  loop() is the only thread allowed to touch `radio`/`display`, so the
+  web handler only ever stages a request (queueWebSend()) for loop() to
+  actually act on (checkWebSendPending()) -- never calls sendTestMessage()
+  directly from the AsyncTCP task.
 
   Library: RadioLib (Arduino Library Manager)
 */
@@ -54,6 +68,21 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include <ArduinoJson.h>
+#include <WiFi.h>
+#include <ESPmDNS.h>
+#include <ESPAsyncWebServer.h>
+
+// secrets.h is gitignored -- define WIFI_SSID/WIFI_PASSWORD there to
+// enable the web trigger (see header comment). Optional via
+// __has_include, same reasoning/fallback shape as pager_client.ino's
+// own secrets.h handling: an empty WIFI_SSID here means "skip WiFi",
+// checked below exactly like pager_client.ino checks its own.
+#if __has_include("secrets.h")
+#include "secrets.h"
+#else
+#define WIFI_SSID "TechInc"
+#define WIFI_PASSWORD "itoldyoualready"
+#endif
 
 // ---------- Hardware pins (Heltec WiFi LoRa32 V3) ----------
 #define LORA_CS   8
@@ -111,6 +140,33 @@ const int NUM_CHANNELS = sizeof(CHANNELS) / sizeof(CHANNELS[0]);
 int channelIdx = 0;
 uint32_t txCount = 0;
 
+// ---------- WiFi / web trigger (see header comment for the full
+// rationale) -- mirrors pager_client.ino's queueWebSend()/
+// checkWebSendPending()/stateMutex pattern exactly: the AsyncTCP task
+// (web requests) and loop() (button, radio, display) are different
+// FreeRTOS tasks that can genuinely run concurrently on this dual-core
+// chip, so any state either side both reads and writes goes through
+// this mutex, and the actual radio.transmit()/display calls only ever
+// happen on loop()'s own thread -- a web request just stages one. ----------
+bool wifiConnected = false;
+AsyncWebServer server(80);
+SemaphoreHandle_t stateMutex;
+
+bool webSendPending = false;
+int webSendChannel = -1;
+
+bool queueWebSend(int idx) {
+  bool queued = false;
+  xSemaphoreTake(stateMutex, portMAX_DELAY);
+  if (!webSendPending) {
+    webSendChannel = idx;
+    webSendPending = true;
+    queued = true;
+  }
+  xSemaphoreGive(stateMutex);
+  return queued;
+}
+
 // ---------- Button: debounce + short/long press (same shape as
 // pager_client.ino's own checkButton(), see header comment) ----------
 const unsigned long DEBOUNCE_MS   = 30;
@@ -129,6 +185,8 @@ char statusLine[32] = "short=next  hold=send";
 void setup() {
   Serial.begin(115200);
   delay(500);
+
+  stateMutex = xSemaphoreCreateMutex();
 
   // OLED power rail: must happen before Wire.begin()/display.begin(),
   // same VEXT gotcha documented in pager_client.ino's own header comment.
@@ -171,10 +229,125 @@ void setup() {
   drawBootScreen();
   delay(1500);
   drawScreen();
+
+  setupWifi(); // best-effort, see header comment -- no-ops if WIFI_SSID is empty
 }
 
 void loop() {
   checkButton();
+  checkWebSendPending();
+}
+
+// ---------- WiFi / web trigger ----------
+
+void setupWifi() {
+  if (strlen(WIFI_SSID) == 0) {
+    Serial.println("[wifi] no credentials configured, skipping WiFi/web trigger");
+    return;
+  }
+
+  WiFi.mode(WIFI_STA);
+  WiFi.setHostname("lora-pager-test");
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+
+  Serial.print("[wifi] connecting to "); Serial.print(WIFI_SSID);
+  const unsigned long WIFI_CONNECT_TIMEOUT_MS = 10000UL; // bounded -- never hang setup() on WiFi that isn't there
+  unsigned long start = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - start < WIFI_CONNECT_TIMEOUT_MS) {
+    delay(250);
+    Serial.print(".");
+  }
+  Serial.println();
+
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("[wifi] connect timed out, continuing button-only");
+    return;
+  }
+
+  wifiConnected = true;
+  Serial.print("[wifi] connected, IP="); Serial.println(WiFi.localIP());
+
+  if (MDNS.begin("lora-pager-test")) {
+    Serial.println("[mdns] reachable at lora-pager-test.local");
+  } else {
+    Serial.println("[mdns] begin() failed");
+  }
+
+  setupWebServer();
+}
+
+// Runs on loop()'s own thread (called from loop() above) -- the only
+// place sendTestMessage() (and therefore radio.transmit()/display) may
+// be called from, per the header comment's cross-task rule.
+void checkWebSendPending() {
+  bool doSend = false;
+  int idx = -1;
+  xSemaphoreTake(stateMutex, portMAX_DELAY);
+  if (webSendPending) {
+    doSend = true;
+    idx = webSendChannel;
+    webSendPending = false;
+  }
+  xSemaphoreGive(stateMutex);
+
+  if (doSend && idx >= 0 && idx < NUM_CHANNELS) {
+    xSemaphoreTake(stateMutex, portMAX_DELAY);
+    channelIdx = idx;
+    xSemaphoreGive(stateMutex);
+    sendTestMessage();
+  }
+}
+
+// Tiny plain-HTML page (no JS/fetch needed) -- one form per channel,
+// POSTing straight back to "/" with which channel to send. A form POST
+// followed by a redirect (not just re-rendering the POST response)
+// avoids the browser's "resubmit form?" warning on refresh.
+void setupWebServer() {
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
+    int curIdx;
+    uint32_t curCount;
+    char curStatus[32];
+    xSemaphoreTake(stateMutex, portMAX_DELAY);
+    curIdx = channelIdx;
+    curCount = txCount;
+    strncpy(curStatus, statusLine, sizeof(curStatus));
+    xSemaphoreGive(stateMutex);
+
+    String html = "<!doctype html><html><head><meta charset='utf-8'>"
+      "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+      "<title>LoRa Pager Test</title>"
+      "<style>body{font-family:monospace;background:#0a0e17;color:#e2e8f0;padding:16px}"
+      "form{margin:6px 0}"
+      "button{width:100%;padding:10px;font-family:inherit;font-size:14px;"
+      "background:#162033;color:#e2e8f0;border:1px solid #233049;border-radius:6px}"
+      "button.cur{border-color:#06b6d4;color:#06b6d4}"
+      ".status{color:#94a3b8;margin-top:12px}</style></head><body>"
+      "<h3>Concentrator Ch Test</h3>";
+
+    for (int i = 0; i < NUM_CHANNELS; i++) {
+      html += "<form method='POST' action='/send'>"
+        "<input type='hidden' name='channel' value='" + String(i) + "'>"
+        "<button class='" + String(i == curIdx ? "cur" : "") + "'>"
+        "ch" + String(i) + " " + CHANNELS[i].name
+        + " (" + String(CHANNELS[i].freqMhz, 3) + " MHz)</button></form>";
+    }
+
+    html += "<div class='status'>TX count: " + String(curCount) + "<br>"
+      + String(curStatus) + "</div></body></html>";
+
+    request->send(200, "text/html", html);
+  });
+
+  server.on("/send", HTTP_POST, [](AsyncWebServerRequest *request) {
+    if (request->hasParam("channel", true)) {
+      int idx = request->getParam("channel", true)->value().toInt();
+      queueWebSend(idx);
+    }
+    request->redirect("/");
+  });
+
+  server.begin();
+  Serial.println("[web] ready");
 }
 
 // ---------- Button handling ----------
@@ -204,8 +377,10 @@ void checkButton() {
 }
 
 void onShortPress() {
+  xSemaphoreTake(stateMutex, portMAX_DELAY);
   channelIdx = (channelIdx + 1) % NUM_CHANNELS;
   snprintf(statusLine, sizeof(statusLine), "short=next  hold=send");
+  xSemaphoreGive(stateMutex);
   drawScreen();
 }
 
@@ -217,7 +392,22 @@ void onLongPress() {
 
 void sendTestMessage() {
   const TestChannel &ch = CHANNELS[channelIdx];
-  radio.setFrequency(ch.freqMhz);
+
+  // Previously unchecked -- a failed retune would leave the radio on
+  // whatever frequency it last successfully used, and radio.transmit()
+  // below would still report success (the TRANSMIT itself works fine,
+  // just at the wrong/stale frequency), silently sending on the wrong
+  // channel while the OLED/web status claims otherwise.
+  int freqState = radio.setFrequency(ch.freqMhz);
+  if (freqState != RADIOLIB_ERR_NONE) {
+    Serial.printf("[!] setFrequency(%.3f) failed: %d -- NOT sending (radio may still be on the previous frequency)\n",
+                  ch.freqMhz, freqState);
+    xSemaphoreTake(stateMutex, portMAX_DELAY);
+    snprintf(statusLine, sizeof(statusLine), "FREQ SET FAILED (%d)", freqState);
+    xSemaphoreGive(stateMutex);
+    drawScreen();
+    return;
+  }
 
   // JSON so a future decoder can cross-check the channel this payload
   // CLAIMS it was sent on ("channel"/"name") against the channel it was
@@ -235,6 +425,7 @@ void sendTestMessage() {
   Serial.printf("[TX] %.3f MHz  %-12s  \"%s\" ... ", ch.freqMhz, ch.name, payload);
   int state = radio.transmit((uint8_t*)payload, payloadLen);
 
+  xSemaphoreTake(stateMutex, portMAX_DELAY);
   if (state == RADIOLIB_ERR_NONE) {
     Serial.println("OK");
     snprintf(statusLine, sizeof(statusLine), "TX #%lu sent OK", (unsigned long)txCount);
@@ -243,6 +434,7 @@ void sendTestMessage() {
     Serial.printf("FAIL (%d)\n", state);
     snprintf(statusLine, sizeof(statusLine), "TX FAILED (%d)", state);
   }
+  xSemaphoreGive(stateMutex);
 
   drawScreen();
 }
