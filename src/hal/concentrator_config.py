@@ -197,11 +197,11 @@ class ConcentratorChannelPlan:
         868.3 MHz covers 5 TTN channels within ±400 kHz:
 
         Channel map:
-          ch0  867.900 MHz  125 kHz  SF7–12  LoRaWAN  RF0  IF –400 000
-          ch1  868.100 MHz  125 kHz  SF7–12  LoRaWAN  RF0  IF –200 000
-          ch2  868.300 MHz  125 kHz  SF7–12  LoRaWAN  RF0  IF       0
-          ch3  868.500 MHz  125 kHz  SF7–12  LoRaWAN  RF0  IF +200 000
-          ch4  868.700 MHz  125 kHz  SF7–12  LoRaWAN  RF0  IF +400 000
+          ch0  867.900 MHz  125 kHz  SF7–12  LoRaWAN 1  RF0  IF –400 000
+          ch1  868.100 MHz  125 kHz  SF7–12  LoRaWAN 2  RF0  IF –200 000
+          ch2  868.300 MHz  125 kHz  SF7–12  LoRaWAN 3  RF0  IF       0
+          ch3  868.500 MHz  125 kHz  SF7–12  LoRaWAN 4  RF0  IF +200 000
+          ch4  868.700 MHz  125 kHz  SF7–12  LoRaWAN 5  RF0  IF +400 000
           ch5–ch7  (disabled — RF1 multi-SF can't reach anything useful)
           ch8  869.525 MHz  250 kHz  SF11    Meshtastic RF1 IF       0
 
@@ -223,11 +223,11 @@ class ConcentratorChannelPlan:
         )
         plan.multi_sf_channels = [
             # ch0–ch4: RF0 within ±400 kHz (3 mandatory TTN + 867.9 + 868.7)
-            ChannelConfig(frequency_hz=867_900_000),
-            ChannelConfig(frequency_hz=868_100_000),
-            ChannelConfig(frequency_hz=868_300_000),
-            ChannelConfig(frequency_hz=868_500_000),
-            ChannelConfig(frequency_hz=868_700_000),
+            ChannelConfig(frequency_hz=867_900_000, name="LoRaWAN 1"),
+            ChannelConfig(frequency_hz=868_100_000, name="LoRaWAN 2"),
+            ChannelConfig(frequency_hz=868_300_000, name="LoRaWAN 3"),
+            ChannelConfig(frequency_hz=868_500_000, name="LoRaWAN 4"),
+            ChannelConfig(frequency_hz=868_700_000, name="LoRaWAN 5"),
             # ch5–ch7: disabled — nothing LoRaWAN-useful within ±490 kHz of RF1
             ChannelConfig(frequency_hz=869_525_000, enabled=False),
             ChannelConfig(frequency_hz=869_525_000, enabled=False),

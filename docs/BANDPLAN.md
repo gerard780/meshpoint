@@ -73,15 +73,15 @@ radio_1 = 869.525 MHz  →  ch8:     Meshtastic LongFast (sync word 0x2B)
                                     ±490 kHz of radio_1)
 ```
 
-| Channel | Frequency | BW | SF | Protocol | RF chain | IF offset |
-|---|---|---|---|---|---|---|
-| ch0 | 867.900 MHz | 125 kHz | SF7–12 | LoRaWAN | RF0 | −400 000 Hz |
-| ch1 | 868.100 MHz | 125 kHz | SF7–12 | LoRaWAN | RF0 | −200 000 Hz |
-| ch2 | 868.300 MHz | 125 kHz | SF7–12 | LoRaWAN | RF0 | 0 |
-| ch3 | 868.500 MHz | 125 kHz | SF7–12 | LoRaWAN | RF0 | +200 000 Hz |
-| ch4 | 868.700 MHz | 125 kHz | SF7–12 | LoRaWAN | RF0 | +400 000 Hz |
-| ch5–ch7 | — | — | — | disabled | RF1 | — |
-| ch8 | 869.525 MHz | 250 kHz | SF11 | Meshtastic | RF1 | 0 |
+| Channel | Name | Frequency | BW | SF | Protocol | RF chain | IF offset |
+|---|---|---|---|---|---|---|---|
+| ch0 | LoRaWAN 1 | 867.900 MHz | 125 kHz | SF7–12 | LoRaWAN | RF0 | −400 000 Hz |
+| ch1 | LoRaWAN 2 | 868.100 MHz | 125 kHz | SF7–12 | LoRaWAN | RF0 | −200 000 Hz |
+| ch2 | LoRaWAN 3 | 868.300 MHz | 125 kHz | SF7–12 | LoRaWAN | RF0 | 0 |
+| ch3 | LoRaWAN 4 | 868.500 MHz | 125 kHz | SF7–12 | LoRaWAN | RF0 | +200 000 Hz |
+| ch4 | LoRaWAN 5 | 868.700 MHz | 125 kHz | SF7–12 | LoRaWAN | RF0 | +400 000 Hz |
+| ch5–ch7 | — | — | — | — | disabled | RF1 | — |
+| ch8 | Meshtastic | 869.525 MHz | 250 kHz | SF11 | Meshtastic | RF1 | 0 |
 
 TTN channels covered: 868.1, 868.3, 868.5 (the 3 mandatory ones) plus 867.9
 and 868.7. Out of reach from this RF0 anchor: 867.1/867.3/867.5/867.7.

@@ -136,7 +136,12 @@ def _concentrator_status(config: AppConfig) -> dict:
     if single is not None:
         channels.append({
             "ch": 8,
-            "name": single.name,
+            # ch8 is always Meshtastic (the service channel), across every
+            # plan/region -- unlike the multi-SF group, no factory sets
+            # single.name explicitly since there's never more than one
+            # thing here to disambiguate. Same fallback idea, just a fixed
+            # answer rather than a real per-plan choice.
+            "name": single.name or "Meshtastic",
             "frequency_mhz": round(single.frequency_hz / 1e6, 4),
             "bandwidth_khz": single.bandwidth_khz,
             "spreading_factor": single.spreading_factor,
@@ -155,7 +160,7 @@ def _concentrator_status(config: AppConfig) -> dict:
     # became user-editable, see PUT /api/config/radio/pager below.
     channels.append({
         "ch": 9,
-        "name": "",
+        "name": "Pager",
         "frequency_mhz": round(radio.pager_frequency_mhz, 4),
         "bandwidth_khz": 125.0,
         "spreading_factor": None,
