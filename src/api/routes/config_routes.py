@@ -84,14 +84,31 @@ def _refresh_channel_hash_map() -> None:
     )
 
 
+def _derive_channel_protocol(name: str) -> str:
+    """Per-channel protocol label for a plan with multi_sf_protocol="auto"
+    (e.g. eu868_reticulum()) -- the channel's own name, lowercased. Lets
+    channels sharing one physical sync word still show an honest
+    per-channel label instead of one fixed word for the whole group (a
+    spare channel genuinely isn't running the same protocol as the real
+    one just because they share ch0-7's demodulator register).
+
+    Empty string if ``name`` itself is empty -- harmless, since the
+    frontend only displays a channel's protocol when it's enabled, and
+    every unnamed channel in this codebase is also disabled.
+    """
+    return (name or "").strip().lower()
+
+
 def _concentrator_status(config: AppConfig) -> dict:
     """Serialize the SX1302 channel plan the concentrator source would run.
 
     Rebuilt with the same ``from_radio_config`` call the capture source
     makes, so the table reflects the live plan without touching hardware.
-    ch0-ch7's sync word/protocol label come from the plan itself
-    (``multi_sf_syncword``/``multi_sf_protocol`` -- 0x34/"lorawan" for
-    every plan except radio.band_plan="reticulum"'s own 0x12); ch8
+    ch0-ch7's sync word comes from the plan itself (``multi_sf_syncword``
+    -- 0x34 for every plan except radio.band_plan="reticulum"'s own
+    0x12). Protocol label is either the plan-wide ``multi_sf_protocol``
+    literal, or -- when that's the sentinel "auto" -- derived per-channel
+    from each channel's own name (see _derive_channel_protocol). ch8
     (service channel) is always Meshtastic 0x2B via direct register
     writes, unaffected by band_plan.
     """
@@ -121,6 +138,11 @@ def _concentrator_status(config: AppConfig) -> dict:
 
     channels = []
     for idx, ch in enumerate(plan.multi_sf_channels):
+        protocol = (
+            _derive_channel_protocol(ch.name)
+            if plan.multi_sf_protocol == "auto"
+            else plan.multi_sf_protocol
+        )
         channels.append({
             "ch": idx,
             "name": ch.name,
@@ -128,7 +150,7 @@ def _concentrator_status(config: AppConfig) -> dict:
             "bandwidth_khz": ch.bandwidth_khz,
             "spreading_factor": ch.spreading_factor,  # 0 = multi-SF
             "syncword": multi_sf_syncword_hex,
-            "protocol": plan.multi_sf_protocol,
+            "protocol": protocol,
             "rf_chain": _rf_chain(ch.frequency_hz),
             "enabled": ch.enabled,
         })

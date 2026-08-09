@@ -4,19 +4,39 @@
  * Read-only table of the full 9-slot concentrator plan the capture
  * source runs: per channel name, frequency, bandwidth, SF, sync word,
  * protocol, RF chain, and enabled state. ``name`` (optional, e.g.
- * eu868_reticulum()'s "Playground 1"-"Playground 7") is what
- * distinguishes individual channels when several share one plan-wide
- * protocol label -- Protocol alone can't tell ch0 "Reticulum" apart
- * from a same-sync-word spare channel once those are enabled too.
+ * eu868_reticulum()'s spare channels) is what distinguishes individual
+ * channels when several share one plan-wide protocol -- for a plan with
+ * multi_sf_protocol="auto", ``protocol`` itself IS each channel's own
+ * name lowercased (server-derived, see config_routes.py's
+ * _derive_channel_protocol()), so _protocolLabel() below has to handle
+ * arbitrary values, not just the 4 known protocols.
  * Data comes from the
  * ``concentrator`` block of GET /api/config (rebuilt server-side with
  * the same call the capture source makes). Hidden when the box has no
  * concentrator source configured.
  */
+/** Canonical display casing for the few protocols this dashboard actually
+ * knows about. Anything else (e.g. an "auto" plan's per-channel-name-
+ * derived label, like a phonetic-alphabet spare channel) falls back to
+ * a plain capitalized version of whatever string arrives -- see
+ * _protocolLabel(). */
+const KNOWN_PROTOCOL_LABELS = {
+    meshtastic: 'Meshtastic',
+    pager: 'Pager',
+    reticulum: 'Reticulum',
+    lorawan: 'LoRaWAN',
+};
+
 class RadioConcentratorCard {
     constructor(api) {
         this._api = api;
         this._root = null;
+    }
+
+    _protocolLabel(protocol) {
+        if (!protocol) return '';
+        return KNOWN_PROTOCOL_LABELS[protocol]
+            || (protocol.charAt(0).toUpperCase() + protocol.slice(1));
     }
 
     mount(rootEl) {
@@ -38,10 +58,7 @@ class RadioConcentratorCard {
             const sf = ch.protocol === 'pager'
                 ? `${(ch.datarate_bps / 1000).toFixed(1)}k FSK`
                 : (ch.spreading_factor ? `SF${ch.spreading_factor}` : 'SF7–12');
-            const proto = ch.protocol === 'meshtastic' ? 'Meshtastic'
-                : ch.protocol === 'pager' ? 'Pager'
-                : ch.protocol === 'reticulum' ? 'Reticulum'
-                : 'LoRaWAN';
+            const proto = this._protocolLabel(ch.protocol);
             const stateClass = ch.enabled
                 ? 'ch-table__pill ch-table__pill--on'
                 : 'ch-table__pill ch-table__pill--off';

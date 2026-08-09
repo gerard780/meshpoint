@@ -114,17 +114,19 @@ confirmed against `microReticulum_Firmware`'s own source, see
 the ±490 kHz IF window.
 
 ```
-radio_0 = radio_1 = 869.525 MHz  →  ch0:     Reticulum      (869.463 MHz, sync word 0x12)
-                                     ch1–ch7: "Playground 1"-"Playground 7"
+radio_0 = radio_1 = 869.525 MHz  →  ch0:     Reticulum (869.463 MHz, sync word 0x12)
+                                     ch1–ch7: PAPA/DELTA/TWO/ECHO/MIKE/CHARLIE/SIERRA
                                               (spare, same 0x12 sync word)
                                      ch8:     Meshtastic LongFast (sync word 0x2B, unchanged)
 ```
 
 ch1-ch7 are real, enabled, listening channels — not disabled placeholders —
 but with no protocol of their own, free spectrum for a future custom
-LoRa-chirp experiment. The usable window here is genuinely tight
-(869.035-870.000 MHz: capped on one side by the ±490 kHz IF limit, on the
-other by EU_868's own 870.000 MHz region ceiling — 965 kHz total, with
+LoRa-chirp experiment. Names are placeholders (a phonetic-alphabet spelling
+of the operator's own callsign, plus one extra) -- easy to rename, no other
+code depends on the exact strings. The usable window here is genuinely
+tight (869.035-870.000 MHz: capped on one side by the ±490 kHz IF limit, on
+the other by EU_868's own 870.000 MHz region ceiling — 965 kHz total, with
 ch0/ch8 already sitting in the middle of it), so the 7 spare frequencies
 are hand-picked for real guard band rather than evenly auto-spaced: 4 fit
 below the ch0/ch8 pair, 3 above.
@@ -132,20 +134,24 @@ below the ch0/ch8 pair, 3 above.
 | Channel | Name | Frequency | BW | SF | Protocol | RF chain | IF offset |
 |---|---|---|---|---|---|---|---|
 | ch0 | Reticulum | 869.463 MHz | 125 kHz | SF7–12 | Reticulum | RF0 | −62 000 Hz |
-| ch1 | Playground 1 | 869.055 MHz | 125 kHz | SF7–12 | Reticulum | RF0 | −470 000 Hz |
-| ch2 | Playground 2 | 869.155 MHz | 125 kHz | SF7–12 | Reticulum | RF0 | −370 000 Hz |
-| ch3 | Playground 3 | 869.255 MHz | 125 kHz | SF7–12 | Reticulum | RF0 | −270 000 Hz |
-| ch4 | Playground 4 | 869.355 MHz | 125 kHz | SF7–12 | Reticulum | RF0 | −170 000 Hz |
-| ch5 | Playground 5 | 869.665 MHz | 125 kHz | SF7–12 | Reticulum | RF0 | +140 000 Hz |
-| ch6 | Playground 6 | 869.765 MHz | 125 kHz | SF7–12 | Reticulum | RF0 | +240 000 Hz |
-| ch7 | Playground 7 | 869.865 MHz | 125 kHz | SF7–12 | Reticulum | RF0 | +340 000 Hz |
+| ch1 | PAPA | 869.055 MHz | 125 kHz | SF7–12 | Papa | RF0 | −470 000 Hz |
+| ch2 | DELTA | 869.155 MHz | 125 kHz | SF7–12 | Delta | RF0 | −370 000 Hz |
+| ch3 | TWO | 869.255 MHz | 125 kHz | SF7–12 | Two | RF0 | −270 000 Hz |
+| ch4 | ECHO | 869.355 MHz | 125 kHz | SF7–12 | Echo | RF0 | −170 000 Hz |
+| ch5 | MIKE | 869.665 MHz | 125 kHz | SF7–12 | Mike | RF0 | +140 000 Hz |
+| ch6 | CHARLIE | 869.765 MHz | 125 kHz | SF7–12 | Charlie | RF0 | +240 000 Hz |
+| ch7 | SIERRA | 869.865 MHz | 125 kHz | SF7–12 | Sierra | RF0 | +340 000 Hz |
 | ch8 | — | 869.525 MHz | 250 kHz | SF11 | Meshtastic | RF0 | 0 |
 
-"Protocol" reads "Reticulum" for all of ch0-ch7 here since it's a plan-wide
-label (they all share the one ch0-7 sync-word register) — `name` is what
-actually distinguishes ch0 from a spare Playground channel, both in this
-table and in the dashboard's own Concentrator Channels table (`ChannelConfig.
-name`, new alongside this plan; empty/unset for every other plan's channels).
+`multi_sf_protocol="auto"` here (unlike every other plan's plain string
+literal) — instead of one fixed word for the whole ch0-7 group,
+`config_routes.py`'s `_derive_channel_protocol()` uses each channel's own
+`name`, lowercased, as its displayed protocol. That's what actually
+distinguishes ch0 ("Reticulum") from a spare channel ("Papa", "Delta", ...)
+in the Concentrator Channels table — "protocol" alone couldn't, since the
+whole group shares one physical sync word. `eu868_lorawan()` stays on its
+plain `"lorawan"` literal (not `"auto"`) — its 5 real channels don't need
+individual protocol labels, only individual names for the table.
 
 (Both RF chains anchor to the same frequency here, so `_configure_if_channels()`'s
 `RF0 if freq_hz <= radio_0 + 500_000 else RF1` rule puts every channel on
@@ -154,7 +160,7 @@ RF0 — not a bug, just what happens when there's only one real anchor.)
 Meshtastic (ch8, its own genuinely independent sync-word register) and Pager
 (ch9, separate FSK silicon) are **unaffected either way** — this plan only
 changes what's on the shared ch0-7 register. If a second custom LoRa-chirp
-protocol gets built for one of the Playground channels, it would need to
+protocol gets built for one of the spare channels, it would need to
 also use sync word `0x12` to be received here (fine for something you
 design yourself — not for an existing protocol with its own fixed required
 sync word).

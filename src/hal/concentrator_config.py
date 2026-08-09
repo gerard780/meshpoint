@@ -238,10 +238,10 @@ class ConcentratorChannelPlan:
     @staticmethod
     def eu868_reticulum() -> ConcentratorChannelPlan:
         """EU868 alternate plan: Reticulum on ch0 instead of LoRaWAN,
-        Meshtastic unchanged on ch8, ch1-ch7 enabled as spare "Playground"
-        channels. Opt-in via radio.band_plan = "reticulum" --
-        eu868_lorawan() (the default) is untouched by this existing
-        alongside it.
+        Meshtastic unchanged on ch8, ch1-ch7 enabled as spare channels
+        with their own individual names. Opt-in via radio.band_plan =
+        "reticulum" -- eu868_lorawan() (the default) is untouched by
+        this existing alongside it.
 
         Same RF1 anchor (869.525 MHz) as eu868_lorawan() -- Reticulum's
         own network parameters (869.463 MHz / SF8 / BW125 / CR5) put its
@@ -253,16 +253,21 @@ class ConcentratorChannelPlan:
         register entirely -- not something the default plan should ever
         do silently.
 
-        ch1-ch7 ("Playground 1"-"Playground 7") are real, enabled,
-        listening channels -- but with no protocol of their own; they're
-        free spectrum for a future custom LoRa-chirp experiment (they'd
-        share this same 0x12 sync word -- fine for something you design
-        yourself, since you pick its sync word too; not fine for
-        receiving an existing protocol with its own fixed required sync
-        word, e.g. real LoRaWAN's 0x34). ``name`` (not ``protocol``, which
-        is plan-wide "reticulum" for all of ch0-ch7) is what distinguishes
-        the real Reticulum channel from a spare one in the Concentrator
-        Channels table.
+        ch1-ch7 are real, enabled, listening channels -- but with no
+        protocol of their own; they're free spectrum for a future custom
+        LoRa-chirp experiment (they'd share this same 0x12 sync word --
+        fine for something you design yourself, since you pick its sync
+        word too; not fine for receiving an existing protocol with its
+        own fixed required sync word, e.g. real LoRaWAN's 0x34). Named
+        PAPA/DELTA/TWO/ECHO/MIKE/CHARLIE (the operator's own callsign,
+        phonetic) plus one extra (SIERRA) -- placeholders, easy to rename
+        later, no other code depends on the exact strings.
+        multi_sf_protocol="auto" (see config_routes.py's
+        _derive_channel_protocol()) uses each channel's own name,
+        lowercased, as its displayed protocol -- that's what actually
+        distinguishes the real Reticulum channel from a spare one in the
+        Concentrator Channels table, since "protocol" alone can't (the
+        whole group shares one physical sync word).
 
         Frequencies are hand-picked, not evenly auto-spaced: the usable
         window here is genuinely tight (869.035-870.000 MHz, capped by
@@ -273,19 +278,19 @@ class ConcentratorChannelPlan:
         pair, 3 above.
 
         Channel map:
-          ch0  869.463 MHz  125 kHz  SF7–12  Reticulum      RF1  IF  –62 000
-          ch1  869.055 MHz  125 kHz  SF7–12  Playground 1   RF0  IF –470 000
-          ch2  869.155 MHz  125 kHz  SF7–12  Playground 2   RF0  IF –370 000
-          ch3  869.255 MHz  125 kHz  SF7–12  Playground 3   RF0  IF –270 000
-          ch4  869.355 MHz  125 kHz  SF7–12  Playground 4   RF0  IF –170 000
-          ch5  869.665 MHz  125 kHz  SF7–12  Playground 5   RF1  IF +140 000
-          ch6  869.765 MHz  125 kHz  SF7–12  Playground 6   RF1  IF +240 000
-          ch7  869.865 MHz  125 kHz  SF7–12  Playground 7   RF1  IF +340 000
-          ch8  869.525 MHz  250 kHz  SF11    Meshtastic     RF1  IF       0
+          ch0  869.463 MHz  125 kHz  SF7–12  Reticulum   RF1  IF  –62 000
+          ch1  869.055 MHz  125 kHz  SF7–12  PAPA        RF0  IF –470 000
+          ch2  869.155 MHz  125 kHz  SF7–12  DELTA       RF0  IF –370 000
+          ch3  869.255 MHz  125 kHz  SF7–12  TWO         RF0  IF –270 000
+          ch4  869.355 MHz  125 kHz  SF7–12  ECHO        RF0  IF –170 000
+          ch5  869.665 MHz  125 kHz  SF7–12  MIKE        RF1  IF +140 000
+          ch6  869.765 MHz  125 kHz  SF7–12  CHARLIE     RF1  IF +240 000
+          ch7  869.865 MHz  125 kHz  SF7–12  SIERRA      RF1  IF +340 000
+          ch8  869.525 MHz  250 kHz  SF11    Meshtastic  RF1  IF       0
 
         Sync word assignment (see sx1302_wrapper.py):
           ch0-ch7 multi-SF: Reticulum 0x12  (set_multi_sf_syncword(), see above --
-                                             applies to ALL of ch0-ch7, Playground
+                                             applies to ALL of ch0-ch7, the spare
                                              channels included, not just ch0)
           ch8   service:    Meshtastic 0x2B (direct register writes, unchanged)
         """
@@ -293,7 +298,10 @@ class ConcentratorChannelPlan:
             radio_0_freq_hz=869_525_000,
             radio_1_freq_hz=869_525_000,
             multi_sf_syncword=0x12,
-            multi_sf_protocol="reticulum",
+            # "auto": each channel's own name (lowercased) becomes its
+            # displayed protocol -- see _derive_channel_protocol() in
+            # config_routes.py.
+            multi_sf_protocol="auto",
         )
         plan.single_sf_channel = ChannelConfig(
             frequency_hz=869_525_000,
@@ -302,13 +310,18 @@ class ConcentratorChannelPlan:
         )
         plan.multi_sf_channels = [
             ChannelConfig(frequency_hz=869_463_000, name="Reticulum"),
-            ChannelConfig(frequency_hz=869_055_000, name="Playground 1"),
-            ChannelConfig(frequency_hz=869_155_000, name="Playground 2"),
-            ChannelConfig(frequency_hz=869_255_000, name="Playground 3"),
-            ChannelConfig(frequency_hz=869_355_000, name="Playground 4"),
-            ChannelConfig(frequency_hz=869_665_000, name="Playground 5"),
-            ChannelConfig(frequency_hz=869_765_000, name="Playground 6"),
-            ChannelConfig(frequency_hz=869_865_000, name="Playground 7"),
+            # ch1: reserved for a possible future "TechInc pager" project
+            # (name only, for now -- see the class docstring's note on
+            # what "auto" does and doesn't do).
+            # ch2-ch7: PAPA DELTA TWO ECHO MIKE CHARLIE -- phonetic
+            # spelling of the operator's own callsign.
+            ChannelConfig(frequency_hz=869_055_000, name="TechInc"),
+            ChannelConfig(frequency_hz=869_155_000, name="PAPA"),
+            ChannelConfig(frequency_hz=869_255_000, name="DELTA"),
+            ChannelConfig(frequency_hz=869_355_000, name="TWO"),
+            ChannelConfig(frequency_hz=869_665_000, name="ECHO"),
+            ChannelConfig(frequency_hz=869_765_000, name="MIKE"),
+            ChannelConfig(frequency_hz=869_865_000, name="CHARLIE"),
         ]
         return plan
 
