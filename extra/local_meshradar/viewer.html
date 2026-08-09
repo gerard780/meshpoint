@@ -68,6 +68,7 @@
         <div>
             <a href="/" style="color:var(--accent); text-decoration:none; margin-right:14px;">&larr; Dashboard</a>
             <button onclick="loadAll()">Refresh now</button>
+            <button onclick="window.location.href='/logout'">Logout</button>
         </div>
     </div>
 
@@ -131,6 +132,7 @@ async function loadAll() {
         document.getElementById('devices').innerHTML = table(devices, [
             { key: 'device_id', label: 'Device ID' },
             { key: 'device_name', label: 'Name' },
+            { key: 'ip_address', label: 'IP' },
             { key: 'hardware_description', label: 'Hardware' },
             { key: 'firmware_version', label: 'Firmware' },
             { key: 'last_seen', label: 'Connected since' },

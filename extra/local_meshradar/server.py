@@ -28,14 +28,17 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hmac
 import json
 import logging
+import secrets
 import sqlite3
 import threading
 from datetime import datetime, timezone
+from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
 import websockets
 
@@ -43,9 +46,33 @@ logger = logging.getLogger("local_meshradar")
 
 VIEWER_HTML_PATH = Path(__file__).parent / "viewer.html"
 DASHBOARD_HTML_PATH = Path(__file__).parent / "dashboard.html"
+LOGIN_HTML_PATH = Path(__file__).parent / "login.html"
 MANIFEST_PATH = Path(__file__).parent / "manifest.json"
 ASSETS_DIR = Path(__file__).parent / "assets"
 _ASSET_CONTENT_TYPES = {".png": "image/png", ".svg": "image/svg+xml"}
+
+# Single hardcoded credential pair -- this tool is meant for a trusted
+# local network (see README's "No auth enforcement" section, which this
+# closes the gap on); it's not a multi-user system, so one shared login
+# is enough to keep the dashboard off casual LAN/portscan discovery.
+AUTH_USERNAME = "viewer"
+AUTH_PASSWORD = "itoldyoualready"
+SESSION_COOKIE_NAME = "local_meshradar_session"
+
+# In-memory only -- sessions don't survive a server restart. Fine here:
+# there's no "remember me" requirement, and losing sessions on restart is
+# actually a feature (no stale acceptance of a cookie from a previous,
+# possibly-redeployed server).
+_valid_sessions: set[str] = set()
+
+
+def _check_credentials(username: str, password: str) -> bool:
+    # Constant-time comparisons so a timing side-channel can't leak how
+    # many leading characters of the real value a guess got right.
+    return (
+        hmac.compare_digest(username, AUTH_USERNAME)
+        and hmac.compare_digest(password, AUTH_PASSWORD)
+    )
 
 
 def _now() -> str:
@@ -75,6 +102,7 @@ def init_db(db_path: str) -> None:
                 altitude REAL,
                 hardware_description TEXT,
                 firmware_version TEXT,
+                ip_address TEXT,
                 first_seen TEXT,
                 last_seen TEXT
             );
@@ -145,6 +173,15 @@ def init_db(db_path: str) -> None:
             """
         )
         conn.commit()
+        # devices.ip_address didn't exist in earlier schema versions --
+        # CREATE TABLE IF NOT EXISTS above only helps a brand-new database;
+        # an existing local_meshradar.db needs the column added explicitly.
+        try:
+            conn.execute("ALTER TABLE devices ADD COLUMN ip_address TEXT")
+            conn.commit()
+        except sqlite3.OperationalError as e:
+            if "duplicate column" not in str(e).lower():
+                raise
     finally:
         conn.close()
 
@@ -164,6 +201,11 @@ def handle_register(db_path: str, message: dict) -> None:
         logger.warning("register message missing device_id, ignoring")
         return
 
+    # Stamped by ws_handler from websocket.remote_address just before this
+    # runs -- the register message itself never carries an IP, the TCP
+    # connection is the only place we can see one.
+    peer_ip = message.get("_peer_ip")
+
     now = _now()
     conn = _connect(db_path)
     try:
@@ -172,9 +214,9 @@ def handle_register(db_path: str, message: dict) -> None:
             INSERT INTO devices (
                 device_id, device_name, long_name, short_name,
                 latitude, longitude, altitude,
-                hardware_description, firmware_version,
+                hardware_description, firmware_version, ip_address,
                 first_seen, last_seen
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(device_id) DO UPDATE SET
                 device_name=excluded.device_name,
                 long_name=excluded.long_name,
@@ -184,6 +226,7 @@ def handle_register(db_path: str, message: dict) -> None:
                 altitude=excluded.altitude,
                 hardware_description=excluded.hardware_description,
                 firmware_version=excluded.firmware_version,
+                ip_address=excluded.ip_address,
                 last_seen=excluded.last_seen
             """,
             (
@@ -191,7 +234,7 @@ def handle_register(db_path: str, message: dict) -> None:
                 device.get("short_name"), device.get("latitude"),
                 device.get("longitude"), device.get("altitude"),
                 device.get("hardware_description"), device.get("firmware_version"),
-                now, now,
+                peer_ip, now, now,
             ),
         )
         conn.commit()
@@ -464,6 +507,9 @@ async def ws_handler(websocket, db_path: str) -> None:
                 logger.debug("ignoring message type=%s from %s", msg_type, device_id)
                 continue
 
+            if msg_type == "register" and peer:
+                message["_peer_ip"] = peer[0]
+
             try:
                 # Handlers are synchronous sqlite3 calls -- offload so one
                 # slow write can't stall the event loop for other connections.
@@ -499,13 +545,34 @@ def make_http_handler(db_path: str, ws_port: int):
         def log_message(self, fmt, *args) -> None:  # noqa: A002 -- stdlib signature
             logger.debug("http: " + fmt, *args)
 
-        def _send_json(self, payload, status: int = 200) -> None:
+        def _send_json(self, payload, status: int = 200, extra_headers: dict | None = None) -> None:
             body = json.dumps(payload).encode("utf-8")
             self.send_response(status)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
+            for key, value in (extra_headers or {}).items():
+                self.send_header(key, value)
             self.end_headers()
             self.wfile.write(body)
+
+        def _session_token(self) -> str | None:
+            cookie_header = self.headers.get("Cookie")
+            if not cookie_header:
+                return None
+            cookie: SimpleCookie = SimpleCookie()
+            cookie.load(cookie_header)
+            morsel = cookie.get(SESSION_COOKIE_NAME)
+            return morsel.value if morsel else None
+
+        def _authenticated(self) -> bool:
+            token = self._session_token()
+            return token is not None and token in _valid_sessions
+
+        def _redirect(self, location: str) -> None:
+            self.send_response(302)
+            self.send_header("Location", location)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
 
         def _send_file(self, path: Path, content_type: str) -> None:
             body = path.read_bytes()
@@ -537,9 +604,33 @@ def make_http_handler(db_path: str, ws_port: int):
 
         def do_GET(self) -> None:  # noqa: N802 -- stdlib method name
             parsed = urlparse(self.path)
+
+            if parsed.path == "/logout":
+                _valid_sessions.discard(self._session_token())
+                self.send_response(302)
+                self.send_header("Location", "/login")
+                self.send_header("Set-Cookie", f"{SESSION_COOKIE_NAME}=; Path=/; Max-Age=0")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+
+            is_public = (
+                parsed.path in ("/login", "/login.html")
+                or parsed.path == "/manifest.json"
+                or parsed.path.startswith("/assets/")
+            )
+            if not is_public and not self._authenticated():
+                if parsed.path.startswith("/api/"):
+                    self._send_json({"error": "unauthorized"}, status=401)
+                else:
+                    self._redirect(f"/login?next={quote(self.path, safe='')}")
+                return
+
             conn = _connect(db_path)
             try:
-                if parsed.path in ("/", "/index.html", "/dashboard", "/dashboard.html"):
+                if parsed.path in ("/login", "/login.html"):
+                    self._send_html(LOGIN_HTML_PATH)
+                elif parsed.path in ("/", "/index.html", "/dashboard", "/dashboard.html"):
                     self._send_html(DASHBOARD_HTML_PATH, inject_ws_port=True)
                 elif parsed.path in ("/viewer", "/viewer.html"):
                     self._send_html(VIEWER_HTML_PATH)
@@ -596,6 +687,34 @@ def make_http_handler(db_path: str, ws_port: int):
                     self._send_json({"error": "not found"}, status=404)
             finally:
                 conn.close()
+
+        def do_POST(self) -> None:  # noqa: N802 -- stdlib method name
+            parsed = urlparse(self.path)
+            if parsed.path != "/api/auth/login":
+                self._send_json({"error": "not found"}, status=404)
+                return
+
+            length = int(self.headers.get("Content-Length", "0") or "0")
+            raw = self.rfile.read(length) if length else b""
+            try:
+                body = json.loads(raw) if raw else {}
+            except json.JSONDecodeError:
+                body = {}
+
+            username = str(body.get("username", ""))
+            password = str(body.get("password", ""))
+            if not _check_credentials(username, password):
+                self._send_json({"ok": False, "detail": "invalid_credentials"}, status=401)
+                return
+
+            token = secrets.token_urlsafe(32)
+            _valid_sessions.add(token)
+            self._send_json(
+                {"ok": True},
+                extra_headers={
+                    "Set-Cookie": f"{SESSION_COOKIE_NAME}={token}; Path=/; HttpOnly; SameSite=Lax",
+                },
+            )
 
     return Handler
 

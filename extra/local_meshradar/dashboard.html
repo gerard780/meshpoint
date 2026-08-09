@@ -495,6 +495,7 @@
             <a href="/viewer">Simple viewer &rarr;</a>
             <button onclick="loadAll()">Refresh now</button>
             <button id="theme-toggle-btn">Theme</button>
+            <button onclick="window.location.href='/logout'">Logout</button>
         </div>
     </div>
 
@@ -1678,6 +1679,7 @@ document.getElementById('pdm-overlay').addEventListener('click', (e) => {
 // shows, just one device at a time instead of a whole table.
 function openDeviceModal(d) {
     const heardAt = deviceActivityById[d.device_id];
+    const hasPos = isValidPosition(d.latitude, d.longitude);
     const modal = document.getElementById('pdm-modal');
     modal.innerHTML = `
         <div class="pdm-header">
@@ -1689,11 +1691,18 @@ function openDeviceModal(d) {
         </div>
         ${pdmLayer('Device', [
             { label: 'Device ID', value: esc(d.device_id) },
+            { label: 'IP address', value: d.ip_address ? esc(d.ip_address) : null },
             { label: 'Hardware', value: d.hardware_description ? esc(d.hardware_description) : null },
             { label: 'Firmware', value: d.firmware_version ? esc(d.firmware_version) : null },
+            { label: 'First seen', value: d.first_seen ? relTime(d.first_seen) : null },
             { label: 'Connected since', value: d.last_seen ? relTime(d.last_seen) : null },
             { label: 'Last heard', value: heardAt ? relTime(heardAt) : null },
         ])}
+        ${hasPos ? pdmLayer('Position', [
+            { label: 'Latitude', value: d.latitude },
+            { label: 'Longitude', value: d.longitude },
+            { label: 'Altitude', value: d.altitude != null ? `${Math.round(d.altitude)} m` : null },
+        ]) : ''}
     `;
     document.getElementById('pdm-close-btn').addEventListener('click', closePacketModal);
     document.getElementById('pdm-overlay').classList.add('pdm-overlay--open');

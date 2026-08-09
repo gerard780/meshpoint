@@ -49,6 +49,18 @@ Two listeners start:
 Useful flags: `--ws-port`, `--http-port`, `--db <path>` (default
 `local_meshradar.db` next to the script), `--verbose`.
 
+## Login
+
+The HTTP dashboard/viewer/API are gated behind a login page
+(`http://<this-machine>:8080/login`, styled after Meshpoint's own
+radar sign-in) — a single hardcoded credential pair, `AUTH_USERNAME` /
+`AUTH_PASSWORD` near the top of `server.py` (default `viewer` /
+`itoldyoualready`). Sessions are an in-memory cookie, so they don't
+survive a server restart. This is still not real multi-user auth — see
+"No auth enforcement" below for what it does and doesn't protect against.
+The `ws://.../8765` ingest port (where Meshpoint units and the browser's
+live-update socket connect) is unaffected; it never carried this data.
+
 Two pages:
 
 - `http://<this-machine>:8080/` — the main dashboard, same theme (colors,
@@ -121,7 +133,9 @@ venv path instead of the system interpreter.
 
 SQLite (`local_meshradar.db`), four tables:
 
-- `devices` — one row per Meshpoint unit, upserted from each `register`.
+- `devices` — one row per Meshpoint unit, upserted from each `register`
+  (including the connecting IP, `ip_address`, taken from the WebSocket
+  peer address — shown in the dashboard's device popup).
 - `nodes` — one row per `(device_id, node_id)`, upserted from every
   `heartbeat.nodes[]` entry — this is "latest known state," not history.
 - `packets` — one row per decoded packet ever received, append-only.
@@ -175,6 +189,13 @@ repeatable sync. Always `--dry-run` first if unsure.
   (`ping`, `get_status`, `restart_service`, etc.) if the server sends
   `{"type": "command", ...}` — this receiver never does. Fully optional;
   add it later if remote control turns out to matter.
-- **No auth enforcement.** This is meant for a trusted local network. Don't
-  expose port 8765/8080 to the public internet without adding real auth in
-  front of it (a reverse proxy with basic auth, a VPN, etc.).
+- **No real multi-user auth.** The HTTP port (8080) has a single shared
+  login (see "Login" above) gating the dashboard/viewer/API, but it's a
+  single hardcoded credential pair in plaintext in `server.py`, not a
+  proper auth system — no per-user accounts, no rate limiting/lockout, no
+  HTTPS of its own. The ingest port (8765) has no auth at all: Meshpoint's
+  `Authorization`/`X-Device-Id` headers are only ever logged, never
+  checked. This is still meant for a trusted local network — don't expose
+  either port to the public internet without fronting it with something
+  that actually does this properly (a reverse proxy with real auth + TLS,
+  a VPN, etc.).
