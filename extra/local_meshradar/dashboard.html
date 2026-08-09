@@ -1203,6 +1203,10 @@ function renderNodeList() {
             const heardAt = lastActivityByDeviceNode[`${m.device_id}:${m.node_id}`] || m.last_heard;
             return { m, signal, rssi: round1(signal?.rssi), snr: round1(signal?.snr), heardAt };
         });
+        // Freshest receiver first -- whichever mesh point actually has
+        // the node "in front of it" right now leads the pill row instead
+        // of whatever order the RSSI sort above happened to leave them in.
+        memberInfos.sort((a, b) => new Date(b.heardAt) - new Date(a.heardAt));
         const maxHeardAt = memberInfos.reduce(
             (best, info) => (!best || new Date(info.heardAt) > new Date(best) ? info.heardAt : best), null,
         );
