@@ -6,6 +6,8 @@
  *   - TopbarMeshcoreChip    (companion lamp · name · MHz · channel)
  *   - TopbarSerialChip      (one badge per Meshtastic USB serial device)
  *   - TopbarDapnetChip      (one badge per DAPNET/POCSAG companion device)
+ *   - TopbarPagerChip       (single badge, emergency pager project)
+ *   - TopbarReticulumChip   (own address · peer count, own 15s poll -- runtime state, not config)
  *   - TopbarActions         (right-side quick-action buttons)
  *
  * Data: /api/config on a 10s cadence; dashboard WebSocket for connection lamp.
@@ -29,6 +31,9 @@ class TopbarController {
         );
         this._pager = new TopbarPagerChip(
             rootEl.querySelector('#topbar-pager-group'),
+        );
+        this._reticulum = new TopbarReticulumChip(
+            rootEl.querySelector('#topbar-reticulum-group'),
         );
         this._actions = new TopbarActions(
             rootEl.querySelector('.topbar-actions'),
@@ -98,6 +103,7 @@ class TopbarController {
             this._serial.setSerial(cfg.serial || []);
             this._dapnet.setDapnet(cfg.dapnet_status || []);
             this._pager.setPager(cfg.radio_pager || null);
+            this._reticulum.setReticulum(cfg.reticulum || null);
             document.dispatchEvent(
                 new CustomEvent('meshpoint:configUpdated', { detail: cfg }),
             );

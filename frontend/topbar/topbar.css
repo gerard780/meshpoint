@@ -493,6 +493,43 @@
     box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.35);
 }
 
+/* --- Reticulum chip (magenta) ----------------------------------------
+ * Same structure/layout as .topbar-serial above -- .topbar-reticulum is
+ * added alongside it on the root element, same pattern .topbar-dapnet
+ * uses. Magenta chosen because every other named accent (cyan, blue,
+ * purple, green, red, amber) is already spoken for as either a brand
+ * color (Meshtastic/Serial cyan, DAPNET/Pager blue, MeshCore purple)
+ * or a status color (green/red/amber for online/offline/reconnecting)
+ * -- picking a sixth distinct hue rather than reusing one, so six
+ * simultaneous chips stay visually distinguishable at a glance. */
+.topbar-reticulum {
+    border-color: rgba(236, 72, 153, 0.45);
+    background: rgba(236, 72, 153, 0.08);
+    box-shadow:
+        0 0 14px rgba(236, 72, 153, 0.22),
+        inset 0 0 18px rgba(236, 72, 153, 0.05);
+}
+
+.topbar-reticulum .topbar-serial__brand {
+    color: #ec4899;
+    text-shadow: 0 0 8px rgba(236, 72, 153, 0.4);
+    border-right-color: rgba(236, 72, 153, 0.28);
+}
+
+.topbar-reticulum .topbar-serial__preset {
+    border-left-color: rgba(236, 72, 153, 0.22);
+}
+
+.topbar-reticulum .topbar-serial__freq {
+    color: #ec4899;
+}
+
+.topbar-reticulum:not(.topbar-serial--offline):not(.topbar-serial--reconnecting):focus-visible {
+    outline: none;
+    border-color: rgba(236, 72, 153, 0.9);
+    box-shadow: 0 0 0 2px rgba(236, 72, 153, 0.35);
+}
+
 /* --- Action group ----------------------------------------------- */
 
 .topbar-actions {

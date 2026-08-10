@@ -32,11 +32,13 @@ def init_routes(service: LxmfService, message_repo: MessageRepository) -> None:
 async def reticulum_status():
     if _service is None:
         return {"enabled": False, "running": False}
+    peer_count = len(await _service.list_peers()) if _service.own_address else 0
     return {
         "enabled": True,
         "running": _service.own_address is not None,
         "available": _service.available,
         "own_address": _service.own_address,
+        "peer_count": peer_count,
     }
 
 

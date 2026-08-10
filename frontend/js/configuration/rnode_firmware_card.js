@@ -60,6 +60,10 @@ class RnodeFirmwareConfigCard {
                             ↻ Rescan USB
                         </button>
                     </label>
+                    <label class="cfg-field cfg-field--toggle cfg-firmware-board-field">
+                        <input type="checkbox" data-rnode-erase-first>
+                        <span class="cfg-field__label">Erase EEPROM first (required to reflash a board already provisioned as an RNode)</span>
+                    </label>
                     <div class="cfg-card__actions">
                         <button class="terminal-button terminal-button--primary"
                                 type="button" data-rnode-firmware-flash>
@@ -196,8 +200,10 @@ class RnodeFirmwareConfigCard {
     async _flashRnodeFirmware() {
         const boardSelect = this._root.querySelector('[data-rnode-firmware-board]');
         const deviceSelect = this._root.querySelector('[data-rnode-firmware-device]');
+        const eraseFirstInput = this._root.querySelector('[data-rnode-erase-first]');
         const board = boardSelect?.value;
         const port = deviceSelect?.value;
+        const eraseFirst = eraseFirstInput ? eraseFirstInput.checked : false;
         if (!board || !port) return;
 
         const status = this._root.querySelector('[data-rnode-firmware-status]');
@@ -206,9 +212,12 @@ class RnodeFirmwareConfigCard {
 
         const ok = await window.confirmModal({
             label: 'Flash RNode firmware',
-            description: `Flash ${boardLabel} firmware onto "${deviceLabel}", provision its `
-                + 'EEPROM, and set its firmware hash? This replaces whatever is currently on '
-                + 'the board -- not reversible from here.',
+            description: (eraseFirst
+                ? `Erase the EEPROM on "${deviceLabel}", then flash ${boardLabel} firmware `
+                  + 'onto it, provision its EEPROM, and set its firmware hash? '
+                : `Flash ${boardLabel} firmware onto "${deviceLabel}", provision its `
+                  + 'EEPROM, and set its firmware hash? ')
+                + 'This replaces whatever is currently on the board -- not reversible from here.',
         });
         if (!ok) return;
 
@@ -225,7 +234,7 @@ class RnodeFirmwareConfigCard {
         try {
             finalResult = await window.UpdateStreamClient.postNdjson(
                 '/api/rnode/firmware/flash/stream',
-                { board, port },
+                { board, port, erase_first: eraseFirst },
                 (event) => {
                     if (event.type === 'started' && Array.isArray(event.cmd)) {
                         this._appendOutput(`$ ${event.cmd.join(' ')}`);
@@ -243,10 +252,14 @@ class RnodeFirmwareConfigCard {
         }
 
         const success = !!(finalResult && finalResult.success);
+        const alreadyProvisioned = !!(finalResult && finalResult.already_provisioned);
         status.dataset.kind = success ? 'success' : 'error';
-        status.textContent = success
-            ? 'Flashed, provisioned, and firmware hash set.'
-            : `Failed (exit code ${finalResult ? finalResult.returncode : '?'}). See output below.`;
+        status.textContent = alreadyProvisioned
+            ? 'This board is already flashed and provisioned -- nothing to do. '
+              + 'Check "Erase EEPROM first" to force a full reinstall.'
+            : success
+                ? 'Flashed, provisioned, and firmware hash set.'
+                : `Failed (exit code ${finalResult ? finalResult.returncode : '?'}). See output below.`;
         if (!success && outputPre) outputPre.hidden = false;
         const toggleBtn = this._root.querySelector('[data-rnode-firmware-toggle-output]');
         if (toggleBtn && outputPre) {

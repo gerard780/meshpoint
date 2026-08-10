@@ -170,9 +170,16 @@ _BOARDS = {
 # Printed only when args.autoinstall is set AND the post-write EEPROM
 # read-back confirms rnode.provisioned -- i.e. flash + EEPROM bootstrap
 # + firmware-hash-set all genuinely succeeded. A 0 returncode alone
-# isn't a reliable success signal here (e.g. an "already installed and
-# provisioned" board exits early, harmlessly, without this string).
+# isn't a reliable success signal here.
 _SUCCESS_MARKER = "RNode Firmware autoinstallation complete!"
+
+# A board that's already correctly flashed and provisioned exits here
+# instead -- confirmed live (a real device hit this exact path on a
+# second run). This is a GOOD outcome (nothing needed doing), not a
+# failure -- without treating it as success too, the dashboard would
+# show "Failed" for a board that's actually already in the desired
+# state, which is exactly backwards.
+_ALREADY_PROVISIONED_MARKER = "This device is already installed and provisioned"
 
 
 def _ndjson(payload: dict) -> bytes:
@@ -251,6 +258,7 @@ async def _stream_autoinstall(port: str, sequence: list[str]) -> AsyncIterator[b
 
     queue: asyncio.Queue = asyncio.Queue()
     saw_success_marker = False
+    saw_already_provisioned = False
 
     async def pump(stream: Optional[asyncio.StreamReader], name: str) -> None:
         if stream is not None:
@@ -271,8 +279,11 @@ async def _stream_autoinstall(port: str, sequence: list[str]) -> AsyncIterator[b
         if item is None:
             pending -= 1
             continue
-        if _SUCCESS_MARKER in item.get("text", ""):
+        text = item.get("text", "")
+        if _SUCCESS_MARKER in text:
             saw_success_marker = True
+        elif _ALREADY_PROVISIONED_MARKER in text:
+            saw_already_provisioned = True
         yield _ndjson(item)
 
     await stdout_task
@@ -280,7 +291,65 @@ async def _stream_autoinstall(port: str, sequence: list[str]) -> AsyncIterator[b
     returncode = await process.wait()
     yield _ndjson({
         "type": "result",
-        "result": {"returncode": returncode, "success": saw_success_marker},
+        "result": {
+            "returncode": returncode,
+            "success": saw_success_marker or saw_already_provisioned,
+            "already_provisioned": saw_already_provisioned,
+        },
+    })
+
+
+async def _stream_eeprom_wipe(port: str) -> AsyncIterator[bytes]:
+    """Runs ``rnodeconf --eeprom-wipe <port>`` -- unlike autoinstall,
+    this is fully non-interactive (no stdin sequence needed, confirmed
+    from source: it just logs a warning, wipes, hard-resets, and
+    exits) and prints no distinct success marker, so a 0 returncode is
+    the only signal available here."""
+    cmd = [_RNODECONF_BIN, "--eeprom-wipe", port]
+    yield _ndjson({"type": "started", "cmd": cmd})
+    try:
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            env=_rnodeconf_env(),
+        )
+    except (FileNotFoundError, OSError) as exc:
+        yield _ndjson({
+            "type": "result",
+            "result": {"returncode": -1, "success": False, "error": str(exc)},
+        })
+        return
+
+    queue: asyncio.Queue = asyncio.Queue()
+
+    async def pump(stream: Optional[asyncio.StreamReader], name: str) -> None:
+        if stream is not None:
+            while True:
+                line = await stream.readline()
+                if not line:
+                    break
+                text = line.decode("utf-8", errors="replace").rstrip("\n")
+                await queue.put({"type": "line", "stream": name, "text": text})
+        await queue.put(None)
+
+    stdout_task = asyncio.create_task(pump(process.stdout, "stdout"))
+    stderr_task = asyncio.create_task(pump(process.stderr, "stderr"))
+
+    pending = 2
+    while pending:
+        item = await queue.get()
+        if item is None:
+            pending -= 1
+            continue
+        yield _ndjson(item)
+
+    await stdout_task
+    await stderr_task
+    returncode = await process.wait()
+    yield _ndjson({
+        "type": "result",
+        "result": {"returncode": returncode, "success": returncode == 0},
     })
 
 
@@ -333,6 +402,7 @@ async def firmware_targets(_claims: SessionClaims = Depends(require_admin)) -> d
 class FlashRequest(BaseModel):
     board: str
     port: str
+    erase_first: bool = False
 
 
 @router.post("/flash/stream")
@@ -381,7 +451,10 @@ async def flash_firmware_stream(
     async def body() -> AsyncIterator[bytes]:
         with audit.timed_action(
             user=claims.subject, action="rnode_firmware.flash",
-            params={"board": req.board, "port": port, "released_rnsd": release_rnsd},
+            params={
+                "board": req.board, "port": port,
+                "released_rnsd": release_rnsd, "erase_first": req.erase_first,
+            },
         ) as ctx:
             if release_rnsd:
                 yield _ndjson({
@@ -397,6 +470,35 @@ async def flash_firmware_stream(
 
             success = False
             try:
+                if req.erase_first:
+                    # A board that's already provisioned refuses to
+                    # reflash (see _ALREADY_PROVISIONED_MARKER) --
+                    # rnodeconf's own docs say wiping the EEPROM first
+                    # is the way to force a real reinstall. Aborts
+                    # before ever attempting the flash if the wipe
+                    # itself fails, same as any other precondition.
+                    yield _ndjson({
+                        "type": "line", "stream": "stdout",
+                        "text": "Erasing EEPROM first…",
+                    })
+                    wipe_ok = False
+                    async for chunk in _stream_eeprom_wipe(port):
+                        yield chunk
+                        event = json.loads(chunk)
+                        if event.get("type") == "result":
+                            wipe_ok = bool((event.get("result") or {}).get("success"))
+                    if not wipe_ok:
+                        yield _ndjson({
+                            "type": "line", "stream": "stderr",
+                            "text": "EEPROM erase failed -- aborting before attempting to flash.",
+                        })
+                        return
+                    yield _ndjson({
+                        "type": "line", "stream": "stdout",
+                        "text": "Waiting for the board to finish resetting…",
+                    })
+                    await asyncio.sleep(2.0)
+
                 async for chunk in _stream_autoinstall(port, board["seq"]):
                     yield chunk
                     event = json.loads(chunk)
