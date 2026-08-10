@@ -4,7 +4,22 @@ import time
 import RNS
 import LXMF
 
-reticulum = RNS.Reticulum(loglevel=RNS.LOG_VERBOSE)
+# Must match rnsd's own configdir (config.reticulum.reticulum_config_dir in
+# local.yaml, "data/reticulum/rns_config" under /opt/meshpoint by default)
+# for two reasons, not just one:
+#  1. With no configdir at all, RNS falls back to ~/.reticulum, resolved
+#     against $HOME -- if this runs as the `meshpoint` system user (e.g.
+#     `sudo -u meshpoint ...`), that's /home/meshpoint, which doesn't
+#     exist (meshpoint is a --no-create-home service account) and isn't
+#     writable -- the exact PermissionError meshpoint's own service hit
+#     before it got its own explicit configdir.
+#  2. Even running as a different user with a real writable $HOME, the
+#     shared-instance RPC channel to rnsd authenticates *per-configdir* --
+#     a client using any other configdir won't reliably exchange messages
+#     with a peer attached through this same rnsd, even though outbound
+#     sends may appear to work.
+CONFIG_DIR = os.environ.get("RETICULUM_CONFIG_DIR", "/opt/meshpoint/data/reticulum/rns_config")
+reticulum = RNS.Reticulum(configdir=CONFIG_DIR, loglevel=RNS.LOG_VERBOSE)
 
 IDENTITY_PATH = "./reticulum_client_test_identity"
 if os.path.exists(IDENTITY_PATH):
