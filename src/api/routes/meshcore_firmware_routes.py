@@ -17,10 +17,11 @@ asset list. ``GET /releases/latest`` returns whichever of the three was
 published most recently, which happens to currently be the companion one
 each cycle but isn't guaranteed to stay that way -- so this module fetches
 the releases LIST and explicitly picks the newest ``companion-`` tagged
-one, rather than trusting ``/releases/latest`` directly (unlike this
-project's own pre-existing "Check for updates" feature in
-``meshcore_config_routes.py``, which does trust it -- a latent bug noted
-but not fixed here, out of scope for this feature).
+one, rather than trusting ``/releases/latest`` directly. This project's
+older "Check for updates" feature in ``meshcore_config_routes.py`` used
+to trust ``/releases/latest`` directly -- a latent bug found while
+building this module -- and has since been fixed to use the same
+releases-list-plus-filter approach.
 
 Board list is derived LIVE from whichever release+flavor is actually
 selected (``_board_list_from_release_sync``), not a hardcoded curated

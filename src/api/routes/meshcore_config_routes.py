@@ -42,8 +42,20 @@ _meshcore_sources: list = []
 # state worth watching automatically; this keeps GitHub API usage to exactly
 # what a user actually asks for (same reasoning as update_check.py's own
 # GitHub call for Meshpoint's own software, just not on an automatic timer).
+#
+# The releases LIST, not /releases/latest: MeshCore tags THREE separate
+# GitHub releases per version bump (companion-vX.Y.Z, repeater-vX.Y.Z,
+# room-server-vX.Y.Z), each with its own asset list -- /releases/latest
+# returns whichever published most recently, which isn't guaranteed to be
+# the companion one. This used to trust /releases/latest directly (a real
+# bug -- could report the wrong latest_version/release_url whenever a
+# repeater/room-server release happened to publish last) until
+# meshcore_firmware_routes.py's own _companion_releases_sync() was written
+# with the correct fix for the flasher card and this endpoint just never
+# got the same fix ported back. Now filters the list for the newest
+# companion- tagged entry, mirroring that same logic.
 _FIRMWARE_RELEASES_URL = (
-    "https://api.github.com/repos/meshcore-dev/MeshCore/releases/latest"
+    "https://api.github.com/repos/meshcore-dev/MeshCore/releases?per_page=20"
 )
 _SEMVER_RE = re.compile(r"v?(\d+)\.(\d+)\.(\d+)")
 # Confirmed against a real release: the git build hash only appears in asset
@@ -71,13 +83,22 @@ def _semver_and_hash(version_str: str) -> tuple[Optional[tuple[int, int, int]], 
 
 
 def _fetch_latest_firmware_release_sync() -> Optional[dict]:
+    """Returns the newest companion- tagged release from the list, not
+    whichever release GitHub's own /releases/latest happens to consider
+    most recent (see the module-level comment above _FIRMWARE_RELEASES_URL)."""
     try:
         req = urllib.request.Request(
             _FIRMWARE_RELEASES_URL,
             headers={"Accept": "application/vnd.github+json"},
         )
         with urllib.request.urlopen(req, timeout=10) as resp:
-            return json.loads(resp.read().decode())
+            releases = json.loads(resp.read().decode())
+        if not isinstance(releases, list):
+            return None
+        for release in releases:
+            if str(release.get("tag_name", "")).startswith("companion-"):
+                return release
+        return None
     except Exception:
         logger.debug(
             "Failed to fetch latest MeshCore firmware release", exc_info=True,
