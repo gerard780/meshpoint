@@ -715,18 +715,44 @@ if [ "$INSTALL_ARDUINO" = "1" ]; then
         arduino-cli --config-file "$ARDUINO_CLI_CONFIG" core install "esp32:esp32@${ESP32_CORE_VERSION}"
     fi
 
-    info "Installing pocsag_companion sketch libraries..."
-    for lib in \
-        "Adafruit GFX Library@1.12.6" \
-        "Adafruit SSD1306@2.5.17" \
-        "RadioLib@7.7.1" \
-        "ArduinoJson@7.4.3" \
-        "Async TCP" \
-        "ESP Async WebServer@3.12.0"
-    do
-        arduino-cli --config-file "$ARDUINO_CLI_CONFIG" lib install "$lib" \
-            || warn "Could not install library: ${lib}"
+    # Upfront skip check, same shape as arduino-cli/esp32 core just
+    # above: arduino-cli's own `lib install` is already idempotent
+    # (an "Already installed X@Y" line means no download happened --
+    # nothing here ever re-fetches these on a routine re-run), but it
+    # still re-ran a check per library every time with no whole-step
+    # short-circuit. Folder names use arduino-cli's own library-
+    # manager convention (spaces -> underscores) under
+    # directories.user/libraries -- a name that doesn't match just
+    # falls through to the existing always-safe install loop below,
+    # same fail-open behavior as before this check existed.
+    _POCSAG_LIB_DIRS=(
+        "Adafruit_GFX_Library" "Adafruit_SSD1306" "RadioLib"
+        "ArduinoJson" "Async_TCP" "ESP_Async_WebServer"
+    )
+    _pocsag_libs_present=1
+    for lib_dir in "${_POCSAG_LIB_DIRS[@]}"; do
+        if [ ! -d "${ARDUINO_CLI_HOME}/user/libraries/${lib_dir}" ]; then
+            _pocsag_libs_present=0
+            break
+        fi
     done
+
+    if [ "$_pocsag_libs_present" = "1" ]; then
+        info "pocsag_companion sketch libraries already installed, skipping"
+    else
+        info "Installing pocsag_companion sketch libraries..."
+        for lib in \
+            "Adafruit GFX Library@1.12.6" \
+            "Adafruit SSD1306@2.5.17" \
+            "RadioLib@7.7.1" \
+            "ArduinoJson@7.4.3" \
+            "Async TCP" \
+            "ESP Async WebServer@3.12.0"
+        do
+            arduino-cli --config-file "$ARDUINO_CLI_CONFIG" lib install "$lib" \
+                || warn "Could not install library: ${lib}"
+        done
+    fi
 
     # The `meshpoint` system user isn't created until step 20 (it needs
     # MESHPOINT_DIR to exist first, for its own chown/group-grant work) --

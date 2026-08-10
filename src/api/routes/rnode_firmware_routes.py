@@ -289,11 +289,22 @@ async def _run_systemctl(*args: str) -> tuple[int, str]:
     return returncode, output.decode("utf-8", errors="replace").strip()
 
 
-def _rnsd_owns_port(port: str) -> bool:
+def _rnsd_owns_port(port_aliases: set) -> bool:
+    """``port_aliases`` should be every known alias (device/stable_path/
+    by_id/by_path) of the *matched* device, not just the single string
+    the client submitted -- ``reticulum.rnode_serial_port`` in
+    local.yaml and whatever alias the dashboard's own port picker
+    happened to submit are both valid identifiers for the same
+    physical device, but rarely the same literal string (e.g. one's a
+    by-id path, the other's by-path). Comparing only the submitted
+    string against the configured one produced a real live bug:
+    rnsd's port genuinely matched but this returned False, so rnsd
+    never got released and the flash failed with "Could not find
+    specified port" (rnsd still had it open) -- confirmed live."""
     return bool(
         _config is not None
         and _config.reticulum.rnode_serial_port
-        and _config.reticulum.rnode_serial_port == port
+        and _config.reticulum.rnode_serial_port in port_aliases
     )
 
 
@@ -330,17 +341,31 @@ async def flash_firmware_stream(
         raise HTTPException(400, "Unknown board selection")
 
     from src.hal.usb_classifier import list_serial_ports_with_stable_paths
-    real_ports = {
-        value
-        for dev in list_serial_ports_with_stable_paths()
-        if dev.vid is not None
-        for value in (dev.device, dev.stable_path, dev.by_id, dev.by_path)
-        if value
-    }
-    if req.port not in real_ports:
+    matched_aliases: Optional[set] = None
+    canonical_device: Optional[str] = None
+    for dev in list_serial_ports_with_stable_paths():
+        if dev.vid is None:
+            continue
+        aliases = {v for v in (dev.device, dev.stable_path, dev.by_id, dev.by_path) if v}
+        if req.port in aliases:
+            matched_aliases = aliases
+            canonical_device = dev.device
+            break
+    if matched_aliases is None or canonical_device is None:
         raise HTTPException(400, "Selected port is not a currently connected USB-serial device")
-    port = req.port
-    release_rnsd = _rnsd_owns_port(port)
+    # rnodeconf matches its `port` argument against pyserial's own
+    # list_ports.comports() by exact `port.device` equality (confirmed
+    # from RNS/Utilities/rnodeconf.py source) -- comports() only ever
+    # returns canonical /dev/ttyUSBx-style paths, never a by-id/by-path
+    # symlink, even though those are equally valid for actually opening
+    # the device. Passing a stable alias here (which every other flash
+    # route in this codebase does, and which is the right choice for a
+    # *persisted* config value like reticulum.rnode_serial_port) fails
+    # with "Could not find specified port" every time -- confirmed
+    # live, independent of whether rnsd holds the port or not. rnodeconf
+    # itself is the one exception that needs the live canonical path.
+    port = canonical_device
+    release_rnsd = _rnsd_owns_port(matched_aliases)
 
     async def body() -> AsyncIterator[bytes]:
         with audit.timed_action(
