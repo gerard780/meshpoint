@@ -99,14 +99,63 @@ class RepeaterPoller:
             logger.debug("Repeater poller stop raised", exc_info=True)
 
     async def _loop(self) -> None:
-        # Small initial delay so the companion roster is loaded first.
         try:
-            await asyncio.sleep(45)
+            # A blind fixed delay here used to race the companion's own
+            # connect/reconnect timing directly -- confirmed live: a
+            # companion whose USB reconnect (see meshcore_usb_source.py's
+            # own DTR-reset recovery) took longer than this delay to
+            # settle still saw its first-ever repeater poll fail with
+            # "contact not in companion roster", because the clock below
+            # started counting from poller-start, not from whenever the
+            # companion actually finished reconnecting. Waiting for the
+            # TX client's own `connected` first means the 45s roster-sync
+            # grace period actually starts after the serial handshake is
+            # done, not before it. Bounded to 180s so a companion that
+            # genuinely never connects doesn't stall the poller forever --
+            # it just falls through to the existing per-poll retry/backoff
+            # in _poll_one(), same behavior as before this fix.
+            await self._wait_for_connected(timeout=180.0)
+            # Additional delay so the (now-connected) companion's roster
+            # has a chance to actually populate -- connected and
+            # roster-synced aren't the same moment; the roster still needs
+            # to load from the companion's own flash and/or hear a fresh
+            # advertisement over RF. Bumped from 45s to 90s after live
+            # evidence this can't be fully solved by just waiting for
+            # `connected`: a companion that reconnected in ~7s (fast --
+            # meshcore_usb_source.py's own DTR-pulse-on-first-retry fix
+            # working as intended) still had an empty roster for this
+            # specific repeater 38+ seconds later. The real gate is
+            # "has this repeater sent an advertisement recently," which
+            # depends on the repeater's own advert interval, not anything
+            # this process controls -- 90s is a pragmatic, still-modest
+            # bet at covering more repeaters' typical advert cadence, not
+            # a guarantee. A repeater that advertises less often than
+            # this will still occasionally miss the very first poll after
+            # a companion reset; the existing per-poll retry (3 attempts)
+            # and the regular recurring interval remain the real safety
+            # net for that case.
+            await asyncio.sleep(90)
             while True:
                 await self._poll_round()
                 await asyncio.sleep(self._interval_s)
         except asyncio.CancelledError:
             pass
+
+    async def _wait_for_connected(self, timeout: float) -> None:
+        """Polls ``self._tx.connected`` until true or ``timeout`` elapses.
+
+        Best-effort: ``self._tx`` not exposing a ``connected`` attribute
+        at all (a stub/test double, or a future TX client shape) just
+        falls through immediately rather than raising -- this is a
+        startup-timing nicety, not something that should ever block the
+        poller from eventually running.
+        """
+        loop = asyncio.get_event_loop()
+        deadline = loop.time() + timeout
+        while loop.time() < deadline:
+            if getattr(self._tx, "connected", True):
+                return
+            await asyncio.sleep(2.0)
 
     async def _poll_round(self) -> None:
         first = True
