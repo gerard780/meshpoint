@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from src.transmit.meshcore_channel_sync import MeshcoreChannelSync
+from src.transmit.meshcore_contacts import MeshcoreContactParser
 
 logger = logging.getLogger(__name__)
 
@@ -392,21 +393,8 @@ class MeshCoreTxClient:
 
     @staticmethod
     def _normalize_contact_payload(payload) -> list[dict]:
-        """Accept both dict-keyed-by-pubkey and list formats.
-
-        Defensively filters values to dicts only. Some firmware
-        revisions of the MeshCore companion return a payload like
-        ``{"contact_count": 5, ...}`` where some values are ints
-        and some are nested dicts; we only want the nested-dict
-        contact entries. Non-dict values (ints, strings, lists)
-        are silently dropped so a payload-shape change in the
-        companion firmware can never crash get_contacts.
-        """
-        if isinstance(payload, dict):
-            return [v for v in payload.values() if isinstance(v, dict)]
-        if isinstance(payload, list):
-            return [e for e in payload if isinstance(e, dict)]
-        return []
+        """Delegate to MeshcoreContactParser (kept for existing tests)."""
+        return MeshcoreContactParser.normalize_payload(payload)
 
     async def get_radio_info(self) -> Optional[RadioStatus]:
         """Read companion radio parameters from the cached SELF_INFO frame.
@@ -447,10 +435,8 @@ class MeshCoreTxClient:
     async def get_contacts(self) -> list[dict]:
         """Retrieve the companion's contact list.
 
-        Each entry inside the response can shape-shift between
-        firmware versions, so the per-entry parse is wrapped in
-        a defensive isinstance check + try/except so one weird
-        contact never poisons the whole list.
+        ``meshcore`` may return ``None`` on timeout; that is treated as
+        empty rather than raising on ``.payload``.
         """
         if not self.connected:
             return []
@@ -459,34 +445,13 @@ class MeshCoreTxClient:
                 self._mc.commands.get_contacts(),
                 timeout=10.0,
             )
-            entries = self._normalize_contact_payload(result.payload)
+        except asyncio.TimeoutError:
+            logger.warning("get_contacts timed out waiting for companion")
+            return []
         except Exception:
             logger.exception("Failed to retrieve MeshCore contacts")
             return []
 
-        contacts: list[dict] = []
-        for i, entry in enumerate(entries):
-            if not isinstance(entry, dict):
-                continue
-            try:
-                name = (
-                    entry.get("adv_name")
-                    or entry.get("name")
-                    or ""
-                )
-                pk = entry.get("public_key", "")
-                if name and pk:
-                    contacts.append({
-                        "index": i,
-                        "name": name,
-                        "public_key": pk,
-                        "last_seen": entry.get("lastmod", 0),
-                    })
-            except Exception:
-                logger.debug(
-                    "get_contacts: skipping malformed entry at index %d",
-                    i, exc_info=True,
-                )
-                continue
+        contacts = MeshcoreContactParser.from_command_result(result)
         logger.info("get_contacts: %d contacts parsed", len(contacts))
         return contacts
