@@ -504,7 +504,8 @@ class MeshcoreConfigCard {
                 const link = isSafeUrl
                     ? ` — <a href="${this._esc(result.release_url)}" target="_blank" rel="noopener">release notes</a>`
                     : '';
-                status.innerHTML = `Update available: ${this._esc(result.latest_version || '?')}${link}`;
+                status.innerHTML = `Update available: ${this._esc(result.latest_version || '?')}${link}`
+                    + ` — <a class="cfg-inline-link" href="#/configuration/firmware">flash it</a>`;
             } else {
                 status.dataset.kind = 'ok';
                 status.textContent = 'Up to date';
