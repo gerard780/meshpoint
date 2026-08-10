@@ -87,6 +87,10 @@ def enrich_config_payload(cfg: AppConfig, base: dict) -> dict:
         "min_relay_rssi": relay.min_relay_rssi,
         "max_relay_rssi": relay.max_relay_rssi,
     }
+    base["reticulum"] = {
+        "enabled": cfg.reticulum.enabled,
+        "display_name": cfg.reticulum.display_name,
+    }
     base["dapnet"] = {
         "blacklist_capcodes": list(cfg.dapnet.blacklist_capcodes or []),
         "ignore_capcodes": list(cfg.dapnet.ignore_capcodes or []),

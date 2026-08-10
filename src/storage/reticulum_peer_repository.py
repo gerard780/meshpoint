@@ -51,12 +51,24 @@ class ReticulumPeerRepository:
             (destination_hash,),
         )
         if existing:
-            await self._db.execute(
-                """UPDATE reticulum_peers
-                   SET display_name = ?, aspect = ?, last_seen = ?
-                   WHERE destination_hash = ?""",
-                (display_name, aspect, now, destination_hash),
-            )
+            if display_name:
+                # A later announce with no decodable display name (no
+                # app_data, or a decode failure) must not blank out a
+                # name we already learned from an earlier one -- only
+                # overwrite when this announce actually carries one.
+                await self._db.execute(
+                    """UPDATE reticulum_peers
+                       SET display_name = ?, aspect = ?, last_seen = ?
+                       WHERE destination_hash = ?""",
+                    (display_name, aspect, now, destination_hash),
+                )
+            else:
+                await self._db.execute(
+                    """UPDATE reticulum_peers
+                       SET aspect = ?, last_seen = ?
+                       WHERE destination_hash = ?""",
+                    (aspect, now, destination_hash),
+                )
         else:
             await self._db.execute(
                 """INSERT INTO reticulum_peers

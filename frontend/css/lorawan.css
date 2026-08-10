@@ -6,7 +6,8 @@
 .section[data-section="lorawan"],
 .section[data-section="dapnet"],
 .section[data-section="meshtastic"],
-.section[data-section="meshcore"] {
+.section[data-section="meshcore"],
+.section[data-section="reticulum"] {
     overflow-y: auto;
 }
 

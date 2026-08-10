@@ -180,6 +180,19 @@
                             <span class="sidebar__label">DAPNET</span>
                         </a>
                     </li>
+                    <li class="sidebar__item" data-requires-config="reticulum.enabled">
+                        <a href="#/reticulum" class="sidebar__link" data-route="reticulum">
+                            <span class="sidebar__icon">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <circle cx="5" cy="6" r="2"/>
+                                    <circle cx="19" cy="6" r="2"/>
+                                    <circle cx="12" cy="18" r="2"/>
+                                    <path d="M6.7 7.3 10.3 16.3M17.3 7.3 13.7 16.3M7 6h10"/>
+                                </svg>
+                            </span>
+                            <span class="sidebar__label">Reticulum</span>
+                        </a>
+                    </li>
                     <li class="sidebar__item">
                         <a href="#/messages" class="sidebar__link" data-route="messages">
                             <span class="sidebar__icon">
@@ -622,6 +635,10 @@
 
             <section class="section" data-section="meshcore" style="display:none">
                 <div id="meshcore-panel"></div>
+            </section>
+
+            <section class="section" data-section="reticulum" style="display:none">
+                <div id="reticulum-panel"></div>
             </section>
 
             <section class="section" data-section="lorawan" style="display:none">
@@ -1162,6 +1179,7 @@
     <script src="js/listener_panel.js"></script>
     <script src="js/meshtastic_panel.js"></script>
     <script src="js/meshcore_panel.js"></script>
+    <script src="js/reticulum_panel.js"></script>
     <script src="js/app.js"></script>
 </body>
 </html>

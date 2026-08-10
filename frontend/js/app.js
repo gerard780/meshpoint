@@ -41,7 +41,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     const router = new Router({
         defaultRoute: 'dashboard',
         allowedRoutes: [
-            'dashboard', 'meshtastic', 'meshcore', 'lorawan', 'dapnet', 'pager', 'listener', 'stats', 'rf', 'repeaters', 'topology', 'messages', 'radio', 'terminal',
+            'dashboard', 'meshtastic', 'meshcore', 'lorawan', 'dapnet', 'reticulum', 'pager', 'listener', 'stats', 'rf', 'repeaters', 'topology', 'messages', 'radio', 'terminal',
             'configuration/identity', 'configuration/radio',
             'configuration/channels', 'configuration/transmit',
             'configuration/mqtt',
@@ -156,6 +156,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     _bootTopologyPanel(router);
     _bootMeshtasticPanel(router);
     _bootMeshCorePanel(router);
+    _bootReticulumPanel(router);
 
     const nodeMap = new NodeMap('map');
     const packetFeed = new SimplePacketFeed('packet-tbody');
@@ -369,6 +370,15 @@ function _bootMeshCorePanel(router) {
     const panel = new window.MeshCorePanel();
     router.onRouteChange((route) => {
         if (route === 'meshcore') panel.show();
+        else panel.hide();
+    });
+}
+
+function _bootReticulumPanel(router) {
+    if (!window.ReticulumPanel) return;
+    const panel = new window.ReticulumPanel();
+    router.onRouteChange((route) => {
+        if (route === 'reticulum') panel.show();
         else panel.hide();
     });
 }
