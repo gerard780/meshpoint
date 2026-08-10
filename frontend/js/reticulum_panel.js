@@ -93,6 +93,14 @@ class ReticulumPanel {
                     <div class="stat-card__value" id="rt-stat-peers">--</div>
                 </div>
                 <div class="stat-card">
+                    <div class="stat-card__label">People</div>
+                    <div class="stat-card__value" id="rt-stat-people">--</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-card__label">Infrastructure</div>
+                    <div class="stat-card__value" id="rt-stat-infra">--</div>
+                </div>
+                <div class="stat-card">
                     <div class="stat-card__label">Conversations</div>
                     <div class="stat-card__value" id="rt-stat-conversations">--</div>
                 </div>
@@ -271,6 +279,13 @@ class ReticulumPanel {
             const peers = await r.json();
             this._peers = peers;
             this._setText('rt-stat-peers', peers.length);
+            // "People" = actual message recipients (lxmf.delivery);
+            // everything else (lxmf.propagation, nomadnetwork.node) is
+            // network infrastructure, not a person to message -- same
+            // split _renderSendPeers() already applies to the picker.
+            const peopleCount = peers.filter((p) => p.aspect === 'lxmf.delivery').length;
+            this._setText('rt-stat-people', peopleCount);
+            this._setText('rt-stat-infra', peers.length - peopleCount);
             this._renderPeers();
             this._renderSendPeers();
         } catch (_) {}
