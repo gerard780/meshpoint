@@ -13,6 +13,13 @@
  */
 
 const RT_TAB_STORE_KEY = 'meshpoint.rtTab';
+// The public Reticulum network's peer count grows unbounded (1000+
+// after a few hours) -- rendering every row gets visibly heavy, so the
+// Peers tab shows only the most recent RT_PEER_LIMIT by default with a
+// "Show all" toggle, same idea as MeshCore/DAPNET's server-side
+// "(last 100)" caption, just client-side since this list has no
+// backend limit param to match.
+const RT_PEER_LIMIT = 100;
 
 // Reuses MeshCore/Meshtastic's own mt-badge--* color set (lorawan.css)
 // rather than adding new CSS -- same idea, three aspects instead of
@@ -31,6 +38,7 @@ class ReticulumPanel {
         this._refreshTimer = null;
         this._mounted = false;
         this._peers = [];
+        this._peersShowAll = false;
         this._sendPeerSearchQuery = '';
         // Fails open like every other panel's own guard (no identity/role
         // info at all means show it) -- the real security boundary is
@@ -142,6 +150,7 @@ class ReticulumPanel {
                             <p class="lw-empty" id="rt-peer-empty" style="display:none">
                                 No Reticulum peers heard yet.
                             </p>
+                            <p class="lw-panel__limit" id="rt-peer-limit-note" style="display:none"></p>
                         </div>
                     </div>
                     <div data-rt-view="messages" hidden>
@@ -322,16 +331,44 @@ class ReticulumPanel {
     _renderPeers() {
         const tbody = document.getElementById('rt-peer-tbody');
         const empty = document.getElementById('rt-peer-empty');
+        const limitNote = document.getElementById('rt-peer-limit-note');
         if (!tbody) return;
 
         if (!this._peers.length) {
             tbody.innerHTML = '';
             if (empty) empty.style.display = '';
+            if (limitNote) limitNote.style.display = 'none';
             return;
         }
         if (empty) empty.style.display = 'none';
 
-        tbody.innerHTML = this._peers.map((p) => `
+        // Already sorted last_seen DESC by the API -- truncating to the
+        // first RT_PEER_LIMIT just keeps the most recently active peers,
+        // which is what you want when there are 1000+ rows. "Show all"
+        // is a client-side toggle, not a server call -- the full list
+        // is already in memory from the one /api/reticulum/peers fetch.
+        const total = this._peers.length;
+        const truncated = !this._peersShowAll && total > RT_PEER_LIMIT;
+        const visible = truncated ? this._peers.slice(0, RT_PEER_LIMIT) : this._peers;
+
+        if (limitNote) {
+            if (total > RT_PEER_LIMIT) {
+                limitNote.style.display = '';
+                limitNote.innerHTML = truncated
+                    ? `Showing ${RT_PEER_LIMIT} of ${total} peers — `
+                      + `<button type="button" class="lw-link-btn" id="rt-peer-show-all">Show all</button>`
+                    : `Showing all ${total} peers — `
+                      + `<button type="button" class="lw-link-btn" id="rt-peer-show-less">Show last ${RT_PEER_LIMIT}</button>`;
+                document.getElementById('rt-peer-show-all')
+                    ?.addEventListener('click', () => { this._peersShowAll = true; this._renderPeers(); });
+                document.getElementById('rt-peer-show-less')
+                    ?.addEventListener('click', () => { this._peersShowAll = false; this._renderPeers(); });
+            } else {
+                limitNote.style.display = 'none';
+            }
+        }
+
+        tbody.innerHTML = visible.map((p) => `
             <tr>
                 <td class="lw-time">${this._fmtTime(p.last_seen)}</td>
                 <td class="mt-name">${this._esc(p.display_name || '--')}</td>
