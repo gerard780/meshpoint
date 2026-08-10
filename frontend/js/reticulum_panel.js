@@ -14,6 +14,18 @@
 
 const RT_TAB_STORE_KEY = 'meshpoint.rtTab';
 
+// Reuses MeshCore/Meshtastic's own mt-badge--* color set (lorawan.css)
+// rather than adding new CSS -- same idea, three aspects instead of
+// packet types. delivery = an actual message recipient (cyan, same
+// weight as a text packet); propagation/nomadnetwork.node are both
+// infrastructure, not people, so they get the more muted routing/info
+// colors.
+const RT_ASPECT_BADGES = {
+    'lxmf.delivery':      'mt-badge--text',
+    'lxmf.propagation':   'mt-badge--routing',
+    'nomadnetwork.node':  'mt-badge--nodeinfo',
+};
+
 class ReticulumPanel {
     constructor(identity) {
         this._refreshTimer = null;
@@ -309,7 +321,7 @@ class ReticulumPanel {
                 <td class="lw-time">${this._fmtTime(p.last_seen)}</td>
                 <td class="mt-name">${this._esc(p.display_name || '--')}</td>
                 <td class="lw-id">${this._esc(p.destination_hash)}</td>
-                <td>${this._esc(p.aspect)}</td>
+                <td>${this._fmtAspect(p.aspect)}</td>
                 <td class="lw-time">${this._fmtTime(p.first_seen)}</td>
             </tr>
         `).join('');
@@ -425,6 +437,11 @@ class ReticulumPanel {
         } finally {
             btn.disabled = false;
         }
+    }
+
+    _fmtAspect(aspect) {
+        const cls = RT_ASPECT_BADGES[aspect] || '';
+        return `<span class="mt-badge ${cls}">${this._esc(aspect || '--')}</span>`;
     }
 
     _fmtTime(ts) {
