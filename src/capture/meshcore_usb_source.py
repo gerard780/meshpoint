@@ -72,6 +72,11 @@ class MeshcoreUsbCaptureSource(CaptureSource):
         return "meshcore_usb"
 
     @property
+    def connected(self) -> bool:
+        """True while the MeshCore companion serial session is live."""
+        return self._connected
+
+    @property
     def is_running(self) -> bool:
         return self._running
 

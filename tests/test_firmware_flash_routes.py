@@ -149,5 +149,18 @@ class TestFirmwareRouteAuth(unittest.TestCase):
         self.assertIn("--erase-all", args)
 
 
+class TestMeshcoreSourceConnectedProperty(unittest.TestCase):
+    """Flash stream uses source.connected; SerialSource already exposes it."""
+
+    def test_meshcore_usb_exposes_connected(self):
+        from src.capture.meshcore_usb_source import MeshcoreUsbCaptureSource
+        from src.config import MeshcoreUsbConfig
+
+        source = MeshcoreUsbCaptureSource(MeshcoreUsbConfig())
+        self.assertFalse(source.connected)
+        source._connected = True
+        self.assertTrue(source.connected)
+
+
 if __name__ == "__main__":
     unittest.main()

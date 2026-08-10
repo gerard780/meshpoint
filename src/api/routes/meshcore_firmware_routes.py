@@ -312,12 +312,17 @@ async def flash_meshcore_stream(
                 "text": f"Using MeshCore {fw['tag']} ({fw['flavor']}).",
             })
 
-            released = source is not None and source.connected
+            # Always stop a matched source before esptool — even when
+            # handshake failed, background reconnect still races the port.
+            released = source is not None
             if released:
                 yield _ndjson({
                     "type": "line",
                     "stream": "stdout",
-                    "text": f"Releasing {port} ({source.name} was connected)…",
+                    "text": (
+                        f"Releasing {port} ({source.name}"
+                        f"{'' if source.connected else ' reconnect loop'})…"
+                    ),
                 })
                 await source.stop()
 
@@ -350,7 +355,8 @@ async def flash_meshcore_stream(
                         "stream": "stdout",
                         "text": "Waiting for the board to finish rebooting…",
                     })
-                    await asyncio.sleep(3.0)
+                    # ESP32-S3 USB companions often need >3s after flash.
+                    await asyncio.sleep(10.0)
                     await source.start()
                     yield _ndjson({
                         "type": "line",
