@@ -88,6 +88,18 @@ class TestEspToolHelpers(unittest.TestCase):
         ):
             self.assertEqual(resolver.resolve(), "esptool")
 
+    def test_resolver_uses_venv_sibling_without_resolve(self):
+        resolver = EspToolBinaryResolver()
+        fake_python = Path("/opt/meshpoint/venv/bin/python")
+        fake_esptool = Path("/opt/meshpoint/venv/bin/esptool")
+
+        def is_file(self: Path) -> bool:
+            return str(self) == str(fake_esptool)
+
+        with patch("src.api.firmware.esptool_binary.sys.executable", str(fake_python)):
+            with patch.object(Path, "is_file", is_file):
+                self.assertEqual(resolver.resolve(), str(fake_esptool))
+
 
 class TestFirmwareRouteAuth(unittest.TestCase):
     def setUp(self):
