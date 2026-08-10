@@ -315,13 +315,12 @@ class RepeatersTab {
             .map((rd) => {
                 const type = RepeatersTab.TYPE_LABELS[rd.type] || rd.type;
                 const unit = RepeatersTab.UNITS[rd.type] || '';
-                // Up to 2 decimals, trailing zeros trimmed (4.11, 37.7, 0, 52).
-                const num = parseFloat(Number(rd.value).toFixed(2));
+                const formatted = this._formatLppValue(rd.type, rd.value, unit);
                 return {
                     channel: rd.channel,
                     label: `Ch${rd.channel} ${type}`,
-                    value: `${num}${unit ? ' ' + unit : ''}`,
-                    isZero: Number.isFinite(num) && num === 0,
+                    value: formatted.text,
+                    isZero: formatted.isZero,
                 };
             });
 
@@ -334,6 +333,33 @@ class RepeatersTab {
         return rows
             .filter((row) => channelHasNonZero.get(row.channel))
             .map((row) => [row.label, row.value]);
+    }
+
+    /** Cayenne LPP's "gps" type is a composite {lat, lon, alt} reading,
+     * not a single number like every other LPP type here -- Number(value)
+     * on that object silently produces NaN, which used to render as the
+     * literal text "NaN" (caught live: a repeater's Ch1 gps reading did
+     * exactly that). Tries common key spellings for the composite case;
+     * anything else that fails to parse as a number (any type, not just
+     * gps -- a genuinely unexpected payload shape) falls back to an
+     * explicit placeholder instead of leaking NaN into the UI. */
+    _formatLppValue(type, value, unit) {
+        if (type === 'gps' && value && typeof value === 'object') {
+            const lat = value.latitude ?? value.lat;
+            const lon = value.longitude ?? value.lon ?? value.lng;
+            const alt = value.altitude ?? value.alt;
+            if (lat != null && lon != null) {
+                const altText = alt != null ? `, ${Number(alt).toFixed(0)}m` : '';
+                return { text: `${Number(lat).toFixed(5)}, ${Number(lon).toFixed(5)}${altText}`, isZero: false };
+            }
+            return { text: '(unsupported format)', isZero: false };
+        }
+        // Up to 2 decimals, trailing zeros trimmed (4.11, 37.7, 0, 52).
+        const num = parseFloat(Number(value).toFixed(2));
+        if (!Number.isFinite(num)) {
+            return { text: '(unsupported format)', isZero: false };
+        }
+        return { text: `${num}${unit ? ' ' + unit : ''}`, isZero: num === 0 };
     }
 
     _airtime(s) {
