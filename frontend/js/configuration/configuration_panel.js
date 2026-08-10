@@ -4,8 +4,8 @@
  * Single responsibility: load ``/api/config`` once, mount the right
  * editable card into each Configuration subsection container, and
  * re-render every card on data changes. The subsections (Identity,
- * Radio, Channels, MeshCore, Serial, Transmit, MQTT, GPS, Storage,
- * Peripherals, Repeater Poll, Metrics)
+ * Radio, Channels, MeshCore, Serial, Reticulum, Transmit, MQTT, GPS,
+ * Storage, Peripherals, Repeater Poll, Metrics)
  * all mount dedicated editable cards from ``frontend/js/configuration/``.
  * ("Storage" lives under the Settings sidebar group, not Configuration --
  * kept on this same panel/route prefix regardless, see storage_card.js.)
@@ -282,6 +282,14 @@ class ConfigurationPanel {
                 const card = new window.RepeaterPollConfigCard(api);
                 card.mount(host);
                 this._cards.set('repeater-poll', card);
+            }
+        } else if (section === 'reticulum' && window.ReticulumConfigCard) {
+            const host = document.getElementById('cfg-reticulum-panel');
+            if (host) {
+                host.innerHTML = '';
+                const card = new window.ReticulumConfigCard(api);
+                card.mount(host);
+                this._cards.set('reticulum', card);
             }
         } else if (section === 'metrics' && window.MetricsConfigCard) {
             const host = document.getElementById('cfg-metrics-panel');

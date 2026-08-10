@@ -74,6 +74,7 @@ from src.api.routes import (
     pager_firmware_routes,
     rfenv_companion_firmware_routes,
     reticulum_companion_firmware_routes,
+    reticulum_config_routes,
     reticulum_routes,
     rnode_firmware_routes,
     meshtastic_firmware_routes,
@@ -545,6 +546,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.include_router(lorawan_routes.router, dependencies=protected)
     app.include_router(dapnet_routes.router, dependencies=protected)
     app.include_router(reticulum_routes.router, dependencies=protected)
+    app.include_router(reticulum_config_routes.router, dependencies=protected)
     app.include_router(emergency_pager_routes.router, dependencies=protected)
     app.include_router(listener_routes.router, dependencies=protected)
     app.include_router(pager_routes.p2000_router, dependencies=protected)
@@ -1894,6 +1896,7 @@ def _init_routes(
     dapnet_routes.init_routes(coord.packet_repo, device_name=_dev_name)
     if reticulum_service is not None and message_repo is not None:
         reticulum_routes.init_routes(reticulum_service, message_repo)
+    reticulum_config_routes.init_routes(config=config)
     rnode_firmware_routes.init_routes(config=config)
     emergency_pager_routes.init_routes(
         packet_repo=coord.packet_repo,

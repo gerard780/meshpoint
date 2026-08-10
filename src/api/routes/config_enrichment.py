@@ -90,6 +90,14 @@ def enrich_config_payload(cfg: AppConfig, base: dict) -> dict:
     base["reticulum"] = {
         "enabled": cfg.reticulum.enabled,
         "display_name": cfg.reticulum.display_name,
+        "rnode_serial_port": cfg.reticulum.rnode_serial_port,
+        "rnode_frequency_hz": cfg.reticulum.rnode_frequency_hz,
+        "rnode_bandwidth_hz": cfg.reticulum.rnode_bandwidth_hz,
+        "rnode_tx_power": cfg.reticulum.rnode_tx_power,
+        "rnode_spreading_factor": cfg.reticulum.rnode_spreading_factor,
+        "rnode_coding_rate": cfg.reticulum.rnode_coding_rate,
+        "backbone_host": cfg.reticulum.backbone_host,
+        "backbone_port": cfg.reticulum.backbone_port,
     }
     base["dapnet"] = {
         "blacklist_capcodes": list(cfg.dapnet.blacklist_capcodes or []),
