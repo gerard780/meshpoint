@@ -187,6 +187,39 @@ if [ "$INSTALL_PLATFORMIO" = "1" ] && ! command -v pio &>/dev/null && [ -t 0 ]; 
     esac
 fi
 
+# rnsd (the Reticulum Network Stack daemon) is genuinely optional --
+# most installs will never touch Reticulum at all (config.reticulum.
+# enabled defaults to false). rns/lxmf are already regular Python deps
+# (requirements.txt), so rnsd itself is already installed into
+# /opt/meshpoint/venv/bin/rnsd by the normal venv setup below with zero
+# extra work here -- this prompt is only about whether to install and
+# enable the systemd service (scripts/rnsd.service) that runs it, not
+# about installing rnsd itself. "systemctl is-enabled" stands in for
+# "already set up", same already-installed-short-circuit reasoning as
+# PlatformIO/arduino-cli above.
+INSTALL_RNSD=1
+for arg in "$@"; do
+    case "$arg" in
+        --skip-rnsd) INSTALL_RNSD=0 ;;
+    esac
+done
+if [ "$INSTALL_RNSD" = "1" ] && ! systemctl is-enabled rnsd &>/dev/null && [ -t 0 ]; then
+    echo ""
+    echo "One more optional piece: native Reticulum/LXMF messaging"
+    echo "(the dashboard's Reticulum page) needs rnsd running as its own"
+    echo "always-on shared instance -- meshpoint attaches to it as a"
+    echo "client rather than opening the radio itself. Skip this if you"
+    echo "don't have an RNode or don't plan to use Reticulum; re-run this"
+    echo "installer later (without --skip-rnsd) to add it, or enable it"
+    echo "manually with 'systemctl enable --now rnsd'."
+    echo ""
+    read -r -p "Install and enable the rnsd service in this install? [y/N] " rnsd_reply || rnsd_reply=""
+    case "$rnsd_reply" in
+        [yY]*) INSTALL_RNSD=1 ;;
+        *) INSTALL_RNSD=0 ;;
+    esac
+fi
+
 # Sections 6-11 below are all downstream of one physical USB RTL-SDR
 # dongle: the rtl-sdr userspace library + kernel DVB blacklist, then
 # five decoders built/installed on top of it -- redsea (RDS), multimon-ng
@@ -1136,7 +1169,28 @@ systemctl daemon-reload
 systemctl enable meshpoint
 info "Service enabled (will start after 'meshpoint setup')"
 
-# ── 24. Install network watchdog ──────────────────────────────────
+# ── 24. Install rnsd service (Reticulum, opt-in) ──────────────────
+#
+# Deliberately NOT a dependency of meshpoint.service (see that unit's
+# own After=rnsd.service comment) -- installed and enabled
+# independently so meshpoint's core service never requires this to
+# exist or succeed. write_rnsd_config.py (rnsd.service's own
+# ExecStartPre) generates rnsd's config from local.yaml's reticulum:
+# section on every start, so nothing needs configuring here beyond the
+# service itself -- the RNode serial port etc. get set later via
+# local.yaml/the dashboard.
+
+if [ "$INSTALL_RNSD" = "1" ]; then
+    info "Installing rnsd service..."
+    cp "${MESHPOINT_DIR}/scripts/rnsd.service" /etc/systemd/system/rnsd.service
+    systemctl daemon-reload
+    systemctl enable rnsd
+    info "rnsd service enabled (will start on next boot, or 'systemctl start rnsd' now)"
+else
+    info "Skipping rnsd service (Reticulum/LXMF messaging won't be available) -- re-run without --skip-rnsd, or answer Y next time, to add it later"
+fi
+
+# ── 25. Install network watchdog ──────────────────────────────────
 
 info "Installing WiFi network watchdog..."
 cp "${MESHPOINT_DIR}/${WATCHDOG_SERVICE_FILE}" /etc/systemd/system/network-watchdog.service
@@ -1145,7 +1199,7 @@ systemctl enable network-watchdog
 systemctl start network-watchdog 2>/dev/null || warn "Could not start network-watchdog (will start on next boot)"
 info "Network watchdog enabled"
 
-# ── 25. Install mDNS (Avahi) for meshpoint.local discovery ────────
+# ── 26. Install mDNS (Avahi) for meshpoint.local discovery ────────
 #
 # Lets the Pi be reached as meshpoint.local (or <hostname>.local) on
 # the LAN without knowing its IP -- useful right after a fresh flash
@@ -1166,13 +1220,13 @@ fi
 
 systemctl enable --now avahi-daemon
 
-# ── 26. Install CLI tool ───────────────────────────────────────────
+# ── 27. Install CLI tool ───────────────────────────────────────────
 
 info "Installing meshpoint CLI..."
 chmod +x "${MESHPOINT_DIR}/${CLI_SCRIPT}"
 ln -sf "${MESHPOINT_DIR}/${CLI_SCRIPT}" /usr/local/bin/meshpoint
 
-# ── 27. Add fastfetch login banner ────────────────────────────────
+# ── 28. Add fastfetch login banner ────────────────────────────────
 #
 # Shows a system-info banner on every interactive login shell for the
 # `pi` user. Idempotent: skips if already present.
