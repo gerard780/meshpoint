@@ -219,3 +219,76 @@ class MeshcoreRadioTimeoutRecovery:
             and int(info.spreading_factor) == int(sf)
             and int(info.coding_rate) == int(cr)
         )
+
+
+class MeshcoreRadioSetCoordinator:
+    """Apply radio params with timeout reconnect-verify and one live retry.
+
+    Observed on RAK V2: EU→USA/Canada often returns no_event_received and
+    the companion comes back still on the old preset. A second set_radio
+    on the freshly reconnected link usually succeeds (same as a manual
+    re-click once MeshCore is green again).
+    """
+
+    _POST_RECONNECT_SETTLE_SECONDS = 1.5
+
+    async def run(
+        self,
+        *,
+        apply: Callable[..., Awaitable[SendResult]],
+        trigger_reconnect: Callable[[str], None],
+        wait_connected: Callable[[float], Awaitable[bool]],
+        get_radio_info: Callable[[], Awaitable[Optional[RadioStatus]]],
+        freq: float,
+        bw: float,
+        sf: int,
+        cr: int,
+    ) -> SendResult:
+        result = await apply(freq, bw, sf, cr)
+        if result.success:
+            trigger_reconnect(
+                f"radio set to {freq:.3f} MHz / BW{bw:.1f} "
+                f"/ SF{sf} / CR{cr} -- rebooting"
+            )
+            return result
+        if not result.timed_out:
+            return result
+
+        trigger_reconnect(result.error or "set_radio timed out")
+        verified = await MeshcoreRadioTimeoutRecovery().verify(
+            wait_connected=wait_connected,
+            get_radio_info=get_radio_info,
+            freq=freq,
+            bw=bw,
+            sf=sf,
+            cr=cr,
+        )
+        if verified.success:
+            return verified
+
+        if not await wait_connected(5.0):
+            return verified
+
+        logger.warning(
+            "set_radio still on old preset after reconnect; "
+            "retrying once on live link"
+        )
+        await asyncio.sleep(self._POST_RECONNECT_SETTLE_SECONDS)
+        retry = await apply(freq, bw, sf, cr)
+        if retry.success:
+            trigger_reconnect(
+                f"radio set to {freq:.3f} MHz / BW{bw:.1f} "
+                f"/ SF{sf} / CR{cr} -- rebooting (retry)"
+            )
+            return retry
+        if retry.timed_out:
+            trigger_reconnect(retry.error or "set_radio timed out")
+            return await MeshcoreRadioTimeoutRecovery().verify(
+                wait_connected=wait_connected,
+                get_radio_info=get_radio_info,
+                freq=freq,
+                bw=bw,
+                sf=sf,
+                cr=cr,
+            )
+        return retry

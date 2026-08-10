@@ -145,6 +145,48 @@ class TestSetRadioParamsTimeoutRecovery(unittest.IsolatedAsyncioTestCase):
         self.assertIn("timed out", source._trigger_reconnect.call_args[0][0])
         verify.assert_awaited_once()
 
+    async def test_mismatch_retries_once_on_live_link(self):
+        from src.transmit.meshcore_radio_apply import MeshcoreRadioSetCoordinator
+
+        apply = AsyncMock(
+            side_effect=[
+                SendResult(
+                    success=False, error="set_radio timed out", timed_out=True
+                ),
+                SendResult(success=True, event_type="set_radio"),
+            ]
+        )
+        trigger = MagicMock()
+        mismatch = SendResult(
+            success=False,
+            error="still on 869.618",
+            timed_out=True,
+        )
+
+        with patch.object(
+            MeshcoreRadioTimeoutRecovery,
+            "verify",
+            new=AsyncMock(return_value=mismatch),
+        ), patch(
+            "src.transmit.meshcore_radio_apply.asyncio.sleep",
+            new=AsyncMock(),
+        ):
+            result = await MeshcoreRadioSetCoordinator().run(
+                apply=apply,
+                trigger_reconnect=trigger,
+                wait_connected=AsyncMock(return_value=True),
+                get_radio_info=AsyncMock(return_value=None),
+                freq=910.525,
+                bw=62.5,
+                sf=7,
+                cr=5,
+            )
+
+        self.assertTrue(result.success)
+        self.assertEqual(apply.await_count, 2)
+        self.assertEqual(trigger.call_count, 2)
+        self.assertIn("retry", trigger.call_args_list[-1][0][0])
+
 
 if __name__ == "__main__":
     unittest.main()

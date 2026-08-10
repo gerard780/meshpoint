@@ -335,9 +335,9 @@ class MeshCoreTxClient:
     ) -> SendResult:
         """Set companion radio params over the live USB connection, then reboot.
 
-        On success, kick reconnect so the capture source recovers after
-        reboot. On timeout, also reconnect then verify radio params:
-        cross-band set_radio often reboots without an OK event.
+        Cross-band changes often return no_event_received and leave the
+        companion on the old preset after reconnect. Coordinator verifies
+        after reconnect and retries once on the live link.
         Credit: javastraat/meshpoint 471d572
         """
         if not self.connected:
@@ -345,32 +345,30 @@ class MeshCoreTxClient:
 
         from src.transmit.meshcore_radio_apply import (
             MeshcoreRadioApply,
-            MeshcoreRadioTimeoutRecovery,
+            MeshcoreRadioSetCoordinator,
         )
 
         freq = round(float(freq), 3)
         bw = round(float(bw), 1)
-        result = await MeshcoreRadioApply().apply(self._mc, freq, bw, sf, cr)
-        if result.timed_out:
+        sf = int(sf)
+        cr = int(cr)
+        applier = MeshcoreRadioApply()
+
+        def _trigger(reason: str) -> None:
             trigger = getattr(self._source, "_trigger_reconnect", None)
             if callable(trigger):
-                trigger(result.error or "set_radio timed out")
-            return await MeshcoreRadioTimeoutRecovery().verify(
-                wait_connected=self._wait_until_connected,
-                get_radio_info=self.get_radio_info,
-                freq=freq,
-                bw=bw,
-                sf=int(sf),
-                cr=int(cr),
-            )
-        if result.success:
-            trigger = getattr(self._source, "_trigger_reconnect", None)
-            if callable(trigger):
-                trigger(
-                    f"radio set to {freq:.3f} MHz / BW{bw:.1f} "
-                    f"/ SF{sf} / CR{cr} -- rebooting"
-                )
-        return result
+                trigger(reason)
+
+        return await MeshcoreRadioSetCoordinator().run(
+            apply=lambda f, b, s, c: applier.apply(self._mc, f, b, s, c),
+            trigger_reconnect=_trigger,
+            wait_connected=self._wait_until_connected,
+            get_radio_info=self.get_radio_info,
+            freq=freq,
+            bw=bw,
+            sf=sf,
+            cr=cr,
+        )
 
     async def _wait_until_connected(self, timeout_seconds: float) -> bool:
         """Poll live source connect state after a reconnect kick."""
