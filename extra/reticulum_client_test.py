@@ -21,7 +21,11 @@ import LXMF
 CONFIG_DIR = os.environ.get("RETICULUM_CONFIG_DIR", "/opt/meshpoint/data/reticulum/rns_config")
 reticulum = RNS.Reticulum(configdir=CONFIG_DIR, loglevel=RNS.LOG_VERBOSE)
 
-IDENTITY_PATH = "./reticulum_client_test_identity"
+# Anchored to /tmp explicitly, not a relative "./" path -- this script is
+# meant to be copied to and run from /tmp (world-writable) as the
+# `meshpoint` user, but the *current directory* at invocation time can be
+# anything (e.g. a pi-owned checkout), which meshpoint can't write into.
+IDENTITY_PATH = os.environ.get("RETICULUM_TEST_IDENTITY", "/tmp/reticulum_client_test_identity")
 if os.path.exists(IDENTITY_PATH):
     identity = RNS.Identity.from_file(IDENTITY_PATH)
     print(f"Loaded existing identity from {IDENTITY_PATH}")
@@ -30,7 +34,7 @@ else:
     identity.to_file(IDENTITY_PATH)
     print(f"Generated new identity, saved to {IDENTITY_PATH}")
 
-router = LXMF.LXMRouter(storagepath="./lxmf_test_storage")
+router = LXMF.LXMRouter(storagepath=os.environ.get("RETICULUM_TEST_STORAGE", "/tmp/lxmf_test_storage"))
 source = router.register_delivery_identity(identity, display_name="MeshpointTest")
 
 def message_received(message):
