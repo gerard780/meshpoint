@@ -765,6 +765,20 @@ const PROTOCOL_COLORS = {
 };
 function protocolColor(p) { return PROTOCOL_COLORS[p] || 'var(--dim)'; }
 
+// Explicit map, not a slice(0, 2) fallback -- "meshcore" and "meshtastic"
+// share the same first two letters ("me"), so a naive slice produced "ME"
+// for meshcore too (confirmed live: a MeshCore ROUTER node's badge showed
+// "ME" instead of "MC", visually indistinguishable from Meshtastic's own
+// badge color-coding aside).
+const PROTOCOL_ABBR = {
+    meshtastic: 'MT',
+    meshcore: 'MC',
+    lorawan: 'LO',
+    dapnet: 'DP',
+    pager: 'PG',
+};
+function protocolAbbr(p) { return PROTOCOL_ABBR[p] || (p || '').slice(0, 2).toUpperCase(); }
+
 // Meshtastic node roles -- see meshtastic.protobuf.config_pb2.Config.DeviceConfig.Role.
 // `n.role` arrives over the wire as a raw numeric enum (e.g. "12"), same
 // as hardware_model below -- ROLE_NAMES resolves it to the name string
@@ -1426,7 +1440,7 @@ function renderNodeList() {
                         <div class="node-card__time">${relTime(newestHeard)}</div>
                     </div>
                     <span class="node-star ${isFav ? 'active' : ''}" data-node-key="${esc(g.key)}">&#9733;</span>
-                    <span class="proto-badge" style="color:${protocolColor(members[0].protocol)}; border-color:${protocolColor(members[0].protocol)}">${members[0].protocol === 'meshtastic' ? 'MT' : (members[0].protocol || '').slice(0, 2).toUpperCase()}</span>
+                    <span class="proto-badge" style="color:${protocolColor(members[0].protocol)}; border-color:${protocolColor(members[0].protocol)}">${protocolAbbr(members[0].protocol)}</span>
                 </div>
                 ${receiverPills}
                 ${deviceRows}
