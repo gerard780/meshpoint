@@ -95,6 +95,21 @@ CREATE TABLE IF NOT EXISTS messages (
 CREATE INDEX IF NOT EXISTS idx_messages_node ON messages(node_id);
 CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp);
 CREATE INDEX IF NOT EXISTS idx_messages_direction ON messages(direction);
+
+-- Reticulum/LXMF peer roster, built from received announces (not
+-- packets -- Reticulum has no equivalent of Meshtastic/MeshCore's
+-- NodeInfo packet, so `nodes` doesn't fit). Chat history itself reuses
+-- the `messages` table above with protocol='reticulum' and node_id set
+-- to the peer's LXMF destination hash -- no separate messages table.
+CREATE TABLE IF NOT EXISTS reticulum_peers (
+    destination_hash TEXT PRIMARY KEY,
+    display_name      TEXT,
+    aspect            TEXT NOT NULL,
+    first_seen        TEXT NOT NULL,
+    last_seen         TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_reticulum_peers_last_seen ON reticulum_peers(last_seen);
 """
 
 

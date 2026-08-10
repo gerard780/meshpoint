@@ -74,6 +74,7 @@ from src.api.routes import (
     pager_firmware_routes,
     rfenv_companion_firmware_routes,
     reticulum_companion_firmware_routes,
+    reticulum_routes,
     meshtastic_firmware_routes,
     meshcore_firmware_routes,
     spectrum_routes,
@@ -104,7 +105,9 @@ from src.coordinator import PipelineCoordinator
 from src.log_format import print_banner, print_packet, setup_logging
 from src.models.device_identity import DeviceIdentity, _stable_device_id
 from src.models.packet import Packet
+from src.reticulum.lxmf_service import LxmfService
 from src.storage.message_repository import MessageRepository
+from src.storage.reticulum_peer_repository import ReticulumPeerRepository
 from src.api.telemetry.noise_floor import NoiseFloorTracker
 from src.api.telemetry.spectral_scan_service import SpectralScanService
 from src.api.telemetry.rfenv_companion_scan_service import RfEnvCompanionScanService
@@ -129,6 +132,7 @@ noise_floor_tracker = NoiseFloorTracker()
 _noise_floor_emitter_task = None
 _spectral_scan_service: SpectralScanService | None = None
 _rfenv_companion_service: RfEnvCompanionScanService | None = None
+_reticulum_service: LxmfService | None = None
 _rtl_listener: RtlListener | None = None
 _p2000_listener: PagerListener | None = None
 _pagers_listener: PagerListener | None = None
@@ -212,6 +216,19 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         await pipeline.start()
 
         message_repo = MessageRepository(pipeline.database)
+
+        global _reticulum_service
+        if config.reticulum.enabled:
+            _reticulum_service = LxmfService(
+                display_name=config.reticulum.display_name,
+                identity_path=config.reticulum.identity_path,
+                lxmf_storage_dir=config.reticulum.lxmf_storage_dir,
+                message_repo=message_repo,
+                peer_repo=ReticulumPeerRepository(pipeline.database),
+                ws_manager=ws_manager,
+            )
+            await _reticulum_service.start()
+
         tx_service = _build_tx_service(config, pipeline)
         mc_source = _find_meshcore_source(pipeline)
         meshcore_tx_ref = None
@@ -387,6 +404,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             tx_service,
             message_repo,
             channel_hash_resolver=channel_hash_resolver,
+            reticulum_service=_reticulum_service,
         )
         _init_dangerous_registry(pipeline)
         global _rtl_listener, _p2000_listener, _pagers_listener, _pocsag_listener, _rtl433_listener, _dab_listener, _adsb_listener
@@ -423,6 +441,8 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
             await _spectral_scan_service.stop()
         if _rfenv_companion_service is not None:
             await _rfenv_companion_service.stop()
+        if _reticulum_service is not None:
+            await _reticulum_service.stop()
         if _noise_floor_emitter_task is not None:
             _noise_floor_emitter_task.cancel()
             try:
@@ -521,6 +541,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.include_router(stats_routes.router)
     app.include_router(lorawan_routes.router, dependencies=protected)
     app.include_router(dapnet_routes.router, dependencies=protected)
+    app.include_router(reticulum_routes.router, dependencies=protected)
     app.include_router(emergency_pager_routes.router, dependencies=protected)
     app.include_router(listener_routes.router, dependencies=protected)
     app.include_router(pager_routes.p2000_router, dependencies=protected)
@@ -1765,6 +1786,7 @@ def _init_routes(
     tx_service: TxService | None = None,
     message_repo: MessageRepository | None = None,
     channel_hash_resolver=None,
+    reticulum_service: LxmfService | None = None,
 ) -> None:
     identity_routes.init_routes(identity, auth_subsystem.service)
     network_mapper = NetworkMapper(coord.node_repo)
@@ -1867,6 +1889,8 @@ def _init_routes(
     _dev_name = config.device.device_name or "meshpoint"
     lorawan_routes.init_routes(coord.packet_repo, device_name=_dev_name)
     dapnet_routes.init_routes(coord.packet_repo, device_name=_dev_name)
+    if reticulum_service is not None and message_repo is not None:
+        reticulum_routes.init_routes(reticulum_service, message_repo)
     emergency_pager_routes.init_routes(
         packet_repo=coord.packet_repo,
         concentrator_source=_find_concentrator_source(coord),

@@ -707,6 +707,27 @@ class DapnetConfig:
 
 
 @dataclass
+class ReticulumConfig:
+    """Native Reticulum/LXMF messaging (companion to extra/heltec_v4_reticulum_bron).
+
+    Disabled by default, and deliberately so: meshpoint's own
+    ``RNS.Reticulum()`` call must only ever run *after* ``rnsd`` is
+    already up as the local shared instance -- attach as a client, same
+    as reticulum-meshchat does. If rnsd isn't running yet when this
+    starts, RNS falls back to reading ``~/.reticulum/config`` and
+    opening the RNode/TCP interfaces itself, which would then fight
+    rnsd for them once it starts. Until rnsd runs as an ordered systemd
+    unit (planned for install.sh, not done yet), this stays opt-in so a
+    routine meshpoint restart can't silently grab the radio.
+    """
+
+    enabled: bool = False
+    display_name: str = "Meshpoint"
+    identity_path: str = "data/reticulum/identity"
+    lxmf_storage_dir: str = "data/reticulum/lxmf"
+
+
+@dataclass
 class AppConfig:
     radio: RadioConfig = field(default_factory=RadioConfig)
     meshtastic: MeshtasticConfig = field(default_factory=MeshtasticConfig)
@@ -728,6 +749,7 @@ class AppConfig:
     repeater_poll: RepeaterPollConfig = field(default_factory=RepeaterPollConfig)
     update_check: UpdateCheckConfig = field(default_factory=UpdateCheckConfig)
     dapnet: DapnetConfig = field(default_factory=DapnetConfig)
+    reticulum: ReticulumConfig = field(default_factory=ReticulumConfig)
 
 
 def _resolve_radio_frequency(radio: "RadioConfig") -> None:
@@ -845,6 +867,7 @@ def _apply_yaml(cfg: AppConfig, path: Path) -> None:
         "repeater_poll": cfg.repeater_poll,
         "update_check": cfg.update_check,
         "dapnet": cfg.dapnet,
+        "reticulum": cfg.reticulum,
     }
 
     unknown_keys: list[str] = []
