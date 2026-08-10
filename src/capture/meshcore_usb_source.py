@@ -296,7 +296,22 @@ class MeshcoreUsbCaptureSource(CaptureSource):
                     return
 
                 attempt += 1
-                if attempt >= 2 and self._resolved_port:
+                # Confirmed live on a TTGO LoRa32: two plain retries (each
+                # eating a full _MESHCORE_COMMAND_TIMEOUT_SECONDS=12s
+                # handshake timeout) both failed with "No response from
+                # meshcore node" -- recovery only happened once the pulse
+                # fired on the 2nd retry (the old attempt >= 2 threshold).
+                # That's strong evidence some boards' USB-CDC stack comes
+                # up wedged and needs an actual reset, not just more
+                # patience -- pulsing starting on the 1st retry instead
+                # skips one whole wasted 12s timeout (~41s total recovery
+                # down to ~21s). Still not on attempt 0 (the very first
+                # try): a board that's simply mid-boot and would have
+                # answered fine on its own shouldn't eat a reset (and the
+                # ~15-20s of RX downtime a reset costs, see
+                # _health_check_loop's docstring) before even one plain
+                # attempt has been given a chance.
+                if attempt >= 1 and self._resolved_port:
                     await asyncio.to_thread(
                         self._pulse_dtr_reset, self._resolved_port
                     )
