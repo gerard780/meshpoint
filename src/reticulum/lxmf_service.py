@@ -68,6 +68,7 @@ class LxmfService:
     def __init__(
         self,
         display_name: str,
+        reticulum_config_dir: str,
         identity_path: str,
         lxmf_storage_dir: str,
         message_repo: MessageRepository,
@@ -75,6 +76,7 @@ class LxmfService:
         ws_manager: WebSocketManager,
     ):
         self._display_name = display_name
+        self._reticulum_config_dir = Path(reticulum_config_dir)
         self._identity_path = Path(identity_path)
         self._lxmf_storage_dir = lxmf_storage_dir
         self._message_repo = message_repo
@@ -107,10 +109,21 @@ class LxmfService:
 
         self._loop = asyncio.get_running_loop()
 
+        # Explicit configdir -- RNS.Reticulum()'s own default is
+        # ~/.reticulum, which resolves against $HOME for whatever user
+        # runs this process. The meshpoint systemd user has no real
+        # home directory, which crashes RNS trying to create its local
+        # client-side storage there. This directory only needs to be
+        # writable by meshpoint itself -- it does not need to match
+        # rnsd's own configdir (see ReticulumConfig's docstring).
+        self._reticulum_config_dir.mkdir(parents=True, exist_ok=True)
+
         # RNS.Reticulum() blocks briefly while it probes for a local
         # shared instance -- off the event loop so it can't stall
         # startup of everything else.
-        reticulum = await self._loop.run_in_executor(None, RNS.Reticulum)
+        reticulum = await self._loop.run_in_executor(
+            None, lambda: RNS.Reticulum(configdir=str(self._reticulum_config_dir))
+        )
         logger.info(
             "Reticulum instance ready (config dir: %s)", reticulum.configdir
         )

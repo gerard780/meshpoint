@@ -719,10 +719,23 @@ class ReticulumConfig:
     rnsd for them once it starts. Until rnsd runs as an ordered systemd
     unit (planned for install.sh, not done yet), this stays opt-in so a
     routine meshpoint restart can't silently grab the radio.
+
+    ``reticulum_config_dir`` deliberately does NOT default to
+    ``~/.reticulum`` (RNS's own default): the ``meshpoint`` systemd
+    user is ``--no-create-home``, so ``$HOME`` resolves to a
+    ``/home/meshpoint`` that doesn't exist and can't be created --
+    confirmed live (``PermissionError`` on ``RNS.Reticulum()`` at
+    startup). Pointing this at meshpoint's own writable ``data/`` tree
+    instead sidesteps that entirely. This does NOT need to match the
+    configdir ``rnsd`` itself uses (e.g. the ``pi`` user's
+    ``~/.reticulum``) -- shared-instance discovery happens over a fixed
+    local port, independent of the client's own configdir; this
+    directory is purely meshpoint's own local client-side cache.
     """
 
     enabled: bool = False
     display_name: str = "Meshpoint"
+    reticulum_config_dir: str = "data/reticulum/rns_config"
     identity_path: str = "data/reticulum/identity"
     lxmf_storage_dir: str = "data/reticulum/lxmf"
 

@@ -221,6 +221,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
         if config.reticulum.enabled:
             _reticulum_service = LxmfService(
                 display_name=config.reticulum.display_name,
+                reticulum_config_dir=config.reticulum.reticulum_config_dir,
                 identity_path=config.reticulum.identity_path,
                 lxmf_storage_dir=config.reticulum.lxmf_storage_dir,
                 message_repo=message_repo,
