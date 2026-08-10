@@ -115,7 +115,12 @@ class SerialConfigCard {
             ports.map((p) => [p.stable_path, p]),
         );
         list.innerHTML = ports.map((p) => {
-            const label = this._esc(p.description || p.device);
+            const desc = this._esc(p.description || p.device);
+            const pathHint = p.by_path
+                ? 'by-path'
+                : (p.by_id ? 'by-id' : 'device');
+            const gpsTag = p.port_class === 'gps_known' ? ' [GPS]' : '';
+            const label = `${desc}${gpsTag} (${pathHint})`;
             const value = this._esc(p.stable_path);
             return `<option value="${value}">${label}</option>`;
         }).join('');
@@ -149,9 +154,11 @@ class SerialConfigCard {
             <label class="cfg-field">
                 <span class="cfg-field__label">Pinned serial port</span>
                 <input class="cfg-field__input" type="text" list="serial-ports-list"
-                       placeholder="/dev/serial/by-path/… (blank = auto-detect)"
+                       placeholder="/dev/serial/by-path/… (preferred; blank = auto-detect)"
                        value="${port}" data-device-port>
                 <span class="cfg-field__resolved" data-device-resolved hidden></span>
+                <span class="cfg-field__hint"
+                      data-device-port-warn hidden></span>
             </label>
             <label class="cfg-field cfg-field--narrow">
                 <span class="cfg-field__label">Baud rate</span>
@@ -212,15 +219,29 @@ class SerialConfigCard {
 
     _updateResolvedPort(input) {
         const hint = input.parentElement.querySelector('[data-device-resolved]');
+        const warn = input.parentElement.querySelector('[data-device-port-warn]');
         if (!hint) return;
         const value = (input.value || '').trim();
-        const info = this._portsByStable.get(value);
+        const info = this._portsByStable.get(value)
+            || [...this._portsByStable.values()].find(
+                (p) => p.device === value || p.by_id === value || p.by_path === value,
+            );
         if (info && info.device && info.device !== value) {
             hint.hidden = false;
             hint.textContent = `→ ${info.device}`;
         } else {
             hint.hidden = true;
             hint.textContent = '';
+        }
+        if (warn) {
+            if (info && info.port_class === 'gps_known') {
+                warn.hidden = false;
+                warn.textContent = info.held_hint
+                    || 'This looks like a GPS receiver; gpsd may hold it.';
+            } else {
+                warn.hidden = true;
+                warn.textContent = '';
+            }
         }
     }
 
@@ -248,10 +269,20 @@ class SerialConfigCard {
         status.textContent = 'Saving…';
 
         const devices = [];
+        let gpsSelected = false;
         this._devicesEl.querySelectorAll('.cfg-companion').forEach((div) => {
             const serialPort = (div.querySelector('[data-device-port]')?.value || '').trim();
             if (!serialPort) {
                 return;
+            }
+            const info = this._portsByStable.get(serialPort)
+                || [...this._portsByStable.values()].find(
+                    (p) => p.device === serialPort
+                        || p.by_id === serialPort
+                        || p.by_path === serialPort,
+                );
+            if (info && info.port_class === 'gps_known') {
+                gpsSelected = true;
             }
             devices.push({
                 label: (div.querySelector('[data-device-label]')?.value || '').trim(),
@@ -259,6 +290,18 @@ class SerialConfigCard {
                 serial_baud: Number(div.querySelector('[data-device-baud]')?.value) || 115200,
             });
         });
+
+        if (gpsSelected) {
+            const ok = window.confirm(
+                'One or more selected ports look like GPS receivers. '
+                + 'gpsd may hold them and Meshtastic capture will fail. Save anyway?',
+            );
+            if (!ok) {
+                status.dataset.kind = '';
+                status.textContent = 'Save cancelled.';
+                return;
+            }
+        }
 
         const result = await this._api.put('/api/config/capture/serial-devices', {
             enable_source: this._root.querySelector('[data-serial-enable]').checked,

@@ -845,6 +845,40 @@ the other browser will get bumped.
 
 ---
 
+## Meshtastic USB serial
+
+### Serial port open failed but the dashboard and concentrator still work
+
+**Cause:** The Meshtastic USB capture source could not open its configured
+port (busy, wrong path, held by `gpsd`, or no radio on that path). Before
+v0.7.9 this raised during startup and aborted the whole FastAPI lifespan,
+so the concentrator and MeshCore sources died with it.
+
+**Fix:** On current firmware the serial source soft-fails: it logs a WARN,
+leaves serial idle, and retries in the background. Concentrator RX/TX and
+other sources keep running. Check:
+
+```bash
+sudo journalctl -u meshpoint --since "5 min ago" | grep -iE 'serial|Failed to open'
+```
+
+Confirm Configuration → Serial points at a Meshtastic USB device (prefer a
+`/dev/serial/by-path/…` entry), not a GPS receiver. If `gpsd` holds the
+port, stop gpsd for that device or pick a different USB port for the radio.
+
+### GPS receiver picked as Meshtastic serial port
+
+**Cause:** A u-blox (or similar) USB GPS appears in the same `/dev/ttyACM*`
+list as Heltec / T-Beam radios. Saving it under Configuration → Serial makes
+Meshtastic capture try to open a GPS port that `gpsd` often already holds.
+
+**Fix:** On the Serial card, ports classified as GPS show a **[GPS]** tag and
+an amber warning. Prefer `/dev/serial/by-path/…` for the Meshtastic radio.
+Leave GPS for Configuration → GPS / `gpsd`. After correcting the pin, save
+and restart.
+
+---
+
 ## MeshCore companion
 
 ### Dashboard says not connected but MeshCore packets appear in logs

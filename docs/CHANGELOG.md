@@ -2,6 +2,16 @@
 
 ### Unreleased
 
+#### Capture and serial
+
+- **Busy Meshtastic serial no longer kills the service.** If a configured USB
+  serial port fails to open (held by gpsd, wrong path, or busy), that source
+  soft-fails and retries in the background while the concentrator and other
+  capture sources keep running.
+- **GPS vs radio port picker hints.** Configuration → Serial marks known GPS
+  USB devices, prefers `/dev/serial/by-path/…` labels, and warns before save
+  when a GPS-class port is selected as a Meshtastic serial device.
+
 #### Dashboard
 
 - **Firmware page shows installed companion versions.** Configuration → Firmware

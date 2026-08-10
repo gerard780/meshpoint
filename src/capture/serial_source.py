@@ -8,65 +8,18 @@ from typing import AsyncIterator, Optional
 
 from src.capture.base import CaptureSource
 from src.capture.serial_radio_handshake import SerialRadioHandshake
+from src.capture.serial_self_origin import SerialSelfOriginFilter
 from src.models.packet import RawCapture
 from src.models.signal import SignalMetrics
 from src.radio.channel_frequency import resolve_frequency_mhz
 
 logger = logging.getLogger(__name__)
 
+# Re-export for existing test imports.
+__all__ = ["SerialCaptureSource", "SerialSelfOriginFilter"]
 
-class SerialSelfOriginFilter:
-    """Drops a USB stick's self-telemetry/nodeinfo; keeps its own text.
-
-    meshtastic-python publishes the stick's locally originated beacons on
-    the same ``meshtastic.receive`` topic as over-the-air packets. Those
-    beacons have no real RF signal (firmware leaves rxRssi/rxSnr at 0),
-    so the pipeline would otherwise store spammy −100 dBm readings.
-
-    Text from a BLE/WiFi client on the same stick is exempt: it is real
-    chat content and must reach Messages even though ``from`` is the
-    stick's own node id.
-
-    Credit: javastraat/meshpoint ``db4de9f`` + ``c190b3e``.
-    """
-
-    _TEXT_PORTNUMS = frozenset({"TEXT_MESSAGE_APP", 1})
-
-    def __init__(self, own_node_num: Optional[int] = None) -> None:
-        self._own_node_num = own_node_num
-
-    @property
-    def own_node_num(self) -> Optional[int]:
-        return self._own_node_num
-
-    def set_own_node_num(self, node_num: Optional[int]) -> None:
-        self._own_node_num = node_num
-
-    @staticmethod
-    def read_own_node_num(interface) -> Optional[int]:
-        """Best-effort read of ``interface.myInfo.my_node_num``."""
-        try:
-            return int(interface.myInfo.my_node_num)
-        except Exception:
-            logger.debug(
-                "Could not read own node number from serial interface",
-                exc_info=True,
-            )
-            return None
-
-    def should_drop(self, packet: dict) -> bool:
-        if self._own_node_num is None:
-            return False
-        if packet.get("from") != self._own_node_num:
-            return False
-        return not self._is_text_message(packet)
-
-    @classmethod
-    def _is_text_message(cls, packet: dict) -> bool:
-        decoded = packet.get("decoded")
-        if not isinstance(decoded, dict):
-            return False
-        return decoded.get("portnum") in cls._TEXT_PORTNUMS
+_RECONNECT_INITIAL_DELAY_S = 5.0
+_RECONNECT_MAX_DELAY_S = 60.0
 
 
 class SerialCaptureSource(CaptureSource):
@@ -91,6 +44,7 @@ class SerialCaptureSource(CaptureSource):
         self._self_origin = SerialSelfOriginFilter()
         self._radio_info: dict = {"channel_table": {}}
         self._queue: asyncio.Queue[RawCapture] = asyncio.Queue(maxsize=500)
+        self._reconnect_task: Optional[asyncio.Task] = None
 
     @property
     def name(self) -> str:
@@ -113,10 +67,33 @@ class SerialCaptureSource(CaptureSource):
         return None
 
     async def start(self) -> None:
+        """Open the stick; soft-fail busy/wrong ports so other sources stay up."""
+        self._running = True
         try:
-            import meshtastic.serial_interface
-            from pubsub import pub
+            await asyncio.to_thread(self._open_interface)
+        except ImportError:
+            self._running = False
+            logger.error(
+                "meshtastic package not installed. "
+                "Install with: pip install meshtastic"
+            )
+            raise
+        except Exception:
+            logger.warning(
+                "Failed to open serial interface on %s; other capture "
+                "sources stay up. Will retry in background (port may be "
+                "held by gpsd or another process, or the path may be wrong).",
+                self._port or "auto-detect",
+                exc_info=True,
+            )
+            self._schedule_reconnect()
 
+    def _open_interface(self) -> None:
+        """Blocking open + handshake. Raises on failure."""
+        import meshtastic.serial_interface
+        from pubsub import pub
+
+        try:
             if self._port:
                 self._interface = meshtastic.serial_interface.SerialInterface(
                     devPath=self._port
@@ -143,7 +120,6 @@ class SerialCaptureSource(CaptureSource):
                 self._radio_info["channel_table"] = {}
 
             pub.subscribe(self._on_receive, "meshtastic.receive")
-            self._running = True
             region = self._radio_info.get("region")
             freq = resolve_frequency_mhz(
                 region=region,
@@ -152,7 +128,8 @@ class SerialCaptureSource(CaptureSource):
                 channel_name=self._radio_info.get("channel_name"),
                 modem_preset=self._radio_info.get("modem_preset"),
                 use_preset=self._radio_info.get("use_preset", True),
-                frequency_offset=self._radio_info.get("frequency_offset") or 0.0,
+                frequency_offset=self._radio_info.get("frequency_offset")
+                or 0.0,
                 override_frequency=self._radio_info.get("override_frequency")
                 or 0.0,
             )
@@ -174,15 +151,53 @@ class SerialCaptureSource(CaptureSource):
                     region or "?",
                     freq,
                 )
-        except ImportError:
-            logger.error(
-                "meshtastic package not installed. "
-                "Install with: pip install meshtastic"
-            )
-            raise
         except Exception:
-            logger.exception("Failed to open serial interface")
+            if self._interface is not None:
+                try:
+                    self._interface.close()
+                except Exception:
+                    pass
+                self._interface = None
+            self._self_origin.set_own_node_num(None)
             raise
+
+    def _schedule_reconnect(self) -> None:
+        if self._reconnect_task and not self._reconnect_task.done():
+            return
+        self._reconnect_task = asyncio.create_task(
+            self._reconnect_until_connected(),
+            name=f"{self.name}-reconnect",
+        )
+
+    async def _reconnect_until_connected(self) -> None:
+        delay = _RECONNECT_INITIAL_DELAY_S
+        try:
+            while self._running and not self.connected:
+                await asyncio.sleep(delay)
+                if not self._running:
+                    return
+                try:
+                    await asyncio.to_thread(self._open_interface)
+                    logger.info(
+                        "Serial capture recovered on %s",
+                        self._port or "auto-detect",
+                    )
+                    return
+                except ImportError:
+                    self._running = False
+                    raise
+                except Exception:
+                    logger.warning(
+                        "Serial reconnect still failing on %s; retry in %.0fs",
+                        self._port or "auto-detect",
+                        min(delay * 2, _RECONNECT_MAX_DELAY_S),
+                        exc_info=True,
+                    )
+                    delay = min(delay * 2, _RECONNECT_MAX_DELAY_S)
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            logger.exception("Serial reconnect loop error on %s", self.name)
 
     @property
     def connected(self) -> bool:
@@ -298,6 +313,13 @@ class SerialCaptureSource(CaptureSource):
 
     async def stop(self) -> None:
         self._running = False
+        if self._reconnect_task:
+            self._reconnect_task.cancel()
+            try:
+                await self._reconnect_task
+            except asyncio.CancelledError:
+                pass
+            self._reconnect_task = None
         self._self_origin.set_own_node_num(None)
         if self._interface:
             try:

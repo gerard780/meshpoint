@@ -137,6 +137,7 @@ class StablePortInfo:
     description: str
     vid: Optional[int]
     pid: Optional[int]
+    port_class: PortClass = PortClass.UNKNOWN
 
 
 def list_serial_ports_with_stable_paths() -> list[StablePortInfo]:
@@ -167,9 +168,20 @@ def list_serial_ports_with_stable_paths() -> list[StablePortInfo]:
                 description=description,
                 vid=info.vid,
                 pid=info.pid,
+                port_class=info.port_class,
             )
         )
     return ports
+
+
+def serial_port_held_hint(port_class: PortClass) -> Optional[str]:
+    """Operator hint when a picker entry is risky for Meshtastic serial."""
+    if port_class is PortClass.GPS_KNOWN:
+        return (
+            "This looks like a GPS receiver; gpsd may hold the port "
+            "and Meshtastic capture will fail until the port is free."
+        )
+    return None
 
 
 def should_skip_for_meshcore_probe(port: str) -> bool:
