@@ -250,14 +250,38 @@ class ReticulumConfigCard {
                 `<option value="${this._esc(p.stable_path)}">${this._esc(this._portOptionLabel(p, usage))}</option>`,
             );
         });
-        // The configured port may belong to a board that's currently
-        // unplugged -- keep it selectable/visible rather than silently
-        // reverting the field to "none" underneath the user.
-        if (pending && !ports.some((p) => p.stable_path === pending)) {
+        // The configured port may be saved under a different alias than
+        // the one this enumeration happens to report (e.g. a raw
+        // /dev/ttyUSBn value in local.yaml vs. a by-id stable_path here
+        // for the same physical device) -- match against every known
+        // alias, not just stable_path, or an actually-connected board
+        // wrongly shows as unplugged (real bug, caught live: a pinned
+        // "/dev/ttyUSB0" showed "not currently connected" even though
+        // the very same device was listed two rows above as
+        // "ttyUSB0 — CP2102"). Only fall back to the synthetic
+        // "not currently connected" option when truly no enumerated
+        // port matches any alias.
+        const pendingConnected = pending && ports.some((p) => (
+            [p.device, p.stable_path, p.by_id, p.by_path].includes(pending)
+        ));
+        if (pending && !pendingConnected) {
             options.push(`<option value="${this._esc(pending)}">${this._esc(pending)} (not currently connected)</option>`);
         }
         this._serialPort.innerHTML = options.join('');
-        this._serialPort.value = pending;
+        // The <option> values are always each port's own stable_path
+        // (never a raw device/by_id/by_path alias), so a pending value
+        // saved under a different alias must be resolved to that same
+        // stable_path before assigning -- setting .value to an alias
+        // that matches no <option> just silently leaves the picker on
+        // its first entry ("-- none --").
+        if (pendingConnected) {
+            const match = ports.find((p) => (
+                [p.device, p.stable_path, p.by_id, p.by_path].includes(pending)
+            ));
+            this._serialPort.value = match.stable_path;
+        } else {
+            this._serialPort.value = pending;
+        }
     }
 
     async _onSubmit(event) {
