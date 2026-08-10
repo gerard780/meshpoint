@@ -555,3 +555,41 @@ select.cfg-field__input option:checked {
         grid-template-columns: 1fr;
     }
 }
+
+/* Configuration → Firmware flash cards
+ * Credit: javastraat/meshpoint 85fb576 */
+.cfg-firmware-board-field {
+    margin-bottom: 14px;
+}
+
+.cfg-firmware-field {
+    max-width: 340px;
+}
+
+.cfg-firmware-rescan {
+    align-self: flex-start;
+    margin-top: 4px;
+    padding: 4px 10px;
+    font-size: 12px;
+}
+
+.cfg-firmware-output {
+    margin: 12px 0 0;
+    padding: 10px 12px;
+    max-height: 260px;
+    overflow: auto;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    line-height: 1.45;
+    color: rgba(243, 244, 246, 0.85);
+    white-space: pre-wrap;
+}
+
+@media (max-width: 480px) {
+    .cfg-firmware-field {
+        max-width: none;
+    }
+}

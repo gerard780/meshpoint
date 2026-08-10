@@ -136,6 +136,26 @@ class ConfigurationPanel {
                 card.mount(host);
                 this._cards.set('serial', card);
             }
+        } else if (section === 'firmware') {
+            const host = document.getElementById('cfg-firmware-panel');
+            if (host) {
+                host.innerHTML = `
+                    <div class="cfg-section">
+                        <div data-cfg-firmware-meshcore></div>
+                        <div data-cfg-firmware-meshtastic></div>
+                    </div>
+                `;
+                if (window.MeshcoreFirmwareConfigCard) {
+                    const mc = new window.MeshcoreFirmwareConfigCard(api);
+                    mc.mount(host.querySelector('[data-cfg-firmware-meshcore]'));
+                    this._cards.set('firmware-meshcore', mc);
+                }
+                if (window.MeshtasticFirmwareConfigCard) {
+                    const mt = new window.MeshtasticFirmwareConfigCard(api);
+                    mt.mount(host.querySelector('[data-cfg-firmware-meshtastic]'));
+                    this._cards.set('firmware-meshtastic', mt);
+                }
+            }
         } else if (section === 'transmit' && window.TransmitConfigCard) {
             const host = document.getElementById('cfg-transmit-panel');
             if (host) {

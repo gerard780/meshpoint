@@ -15,6 +15,7 @@
 - **MeshCore command-timeout reconnect.** Timed-out companion commands (send, advert, rename) mark the USB source for immediate reconnect instead of leaving a wedged command channel looking "connected" until the health loop notices.
 - **MeshCore live radio presets.** Configuration → MeshCore can apply community frequency/BW/SF/CR presets over the open USB connection (companion reboots and reconnects). CLI `meshpoint meshcore-radio` and the setup wizard use the full 20-entry community preset list; short US/EU/ANZ aliases still work.
 - **Serial live modem controls.** Configuration → Serial can set a connected stick's Region, modem preset, NodeInfo/telemetry intervals, and Bluetooth over the open USB link (device NVS; no Meshpoint yaml rewrite).
+- **Configuration → Firmware.** Flash official Meshtastic or MeshCore companion firmware from GitHub releases via esptool (version / flavor / board / port / NDJSON stream). Erase-everything defaults off for in-place upgrades; `install.sh` installs `esptool` into the Meshpoint venv when missing.
 
 ### v0.7.8 (July 2026)
 

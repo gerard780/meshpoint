@@ -255,6 +255,23 @@ banner, so this only bites users running install.sh on v0.7.0 once.
 
 ## Install and pip
 
+### Configuration → Firmware: `esptool` not found / flash fails immediately
+
+**Cause:** The dashboard flash path shells out to `esptool`. Fresh installs
+and upgrades that skip `scripts/install.sh` may not have it in the Meshpoint
+venv.
+
+**Fix:** Re-run the installer (installs `esptool` into the venv when missing),
+or install it manually:
+
+```bash
+sudo /opt/meshpoint/venv/bin/pip install --upgrade esptool
+sudo systemctl restart meshpoint
+```
+
+Then open **Configuration → Firmware**, pick board/port, and flash again.
+Leave **Erase everything** unchecked for in-place upgrades of the same stack.
+
 ### `error: externally-managed-environment`
 
 **Cause:** Raspberry Pi OS Bookworm and later use PEP 668 externally-managed

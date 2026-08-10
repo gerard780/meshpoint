@@ -45,6 +45,8 @@ from src.api.routes import (
     identity_routes,
     messages,
     meshcore_config_routes,
+    meshcore_firmware_routes,
+    meshtastic_firmware_routes,
     mqtt_config_routes,
     nodeinfo_routes,
     position_broadcast_routes,
@@ -293,7 +295,9 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.include_router(gps_status.router, dependencies=protected)
     app.include_router(system_config_routes.router, dependencies=protected)
     app.include_router(meshcore_config_routes.router, dependencies=protected)
+    app.include_router(meshcore_firmware_routes.router, dependencies=protected)
     app.include_router(serial_config_routes.router, dependencies=protected)
+    app.include_router(meshtastic_firmware_routes.router, dependencies=protected)
     app.include_router(config_routes.router, dependencies=protected)
     app.include_router(stats_routes.router, dependencies=protected)
     app.include_router(rf_routes.router, dependencies=protected)
@@ -851,10 +855,19 @@ def _inject_tx_gain_into_source(coord: PipelineCoordinator) -> None:
 
 def _find_meshcore_source(coord: PipelineCoordinator):
     """Find the MeshCore USB capture source if it exists."""
-    for src in coord.capture_coordinator._sources:
-        if src.name == "meshcore_usb":
-            return src
-    return None
+    sources = _find_meshcore_sources(coord)
+    return sources[0] if sources else None
+
+
+def _find_meshcore_sources(coord: PipelineCoordinator) -> list:
+    """MeshCore USB capture sources (for firmware flash stop/restart)."""
+    from src.capture.meshcore_usb_source import MeshcoreUsbCaptureSource
+
+    return [
+        src
+        for src in coord.capture_coordinator._sources
+        if isinstance(src, MeshcoreUsbCaptureSource)
+    ]
 
 
 def _find_serial_sources(coord: PipelineCoordinator) -> list:
@@ -1385,7 +1398,15 @@ def _init_routes(
     gps_status.init_routes(location_source=coord.location_source)
     system_config_routes.init_routes(config=config)
     meshcore_config_routes.init_routes(config=config, tx_service=tx_service)
+    meshcore_firmware_routes.init_routes(
+        config=config,
+        meshcore_sources=_find_meshcore_sources(coord),
+    )
     serial_config_routes.init_routes(
+        config=config,
+        serial_sources=_find_serial_sources(coord),
+    )
+    meshtastic_firmware_routes.init_routes(
         config=config,
         serial_sources=_find_serial_sources(coord),
     )

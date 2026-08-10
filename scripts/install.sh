@@ -469,6 +469,18 @@ source "${MESHPOINT_DIR}/venv/bin/activate"
 pip install --upgrade pip -q
 pip install -r "${MESHPOINT_DIR}/requirements.txt" -q
 pip install pyserial -q
+
+# Configuration → Firmware flash (Meshtastic / MeshCore) needs a bare
+# `esptool` on PATH for the meshpoint service. Install into the venv so
+# the daemon sees it without touching system Python.
+# Credit: javastraat/meshpoint (esptool install path adapted for venv).
+if command -v esptool &>/dev/null; then
+    info "esptool already on PATH, skipping"
+else
+    info "Installing esptool into Meshpoint venv..."
+    pip install --upgrade esptool -q
+fi
+
 deactivate
 
 # ── 7. Create data directory ───────────────────────────────────────
