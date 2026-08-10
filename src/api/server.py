@@ -1894,6 +1894,7 @@ def _init_routes(
     dapnet_routes.init_routes(coord.packet_repo, device_name=_dev_name)
     if reticulum_service is not None and message_repo is not None:
         reticulum_routes.init_routes(reticulum_service, message_repo)
+    rnode_firmware_routes.init_routes(config=config)
     emergency_pager_routes.init_routes(
         packet_repo=coord.packet_repo,
         concentrator_source=_find_concentrator_source(coord),

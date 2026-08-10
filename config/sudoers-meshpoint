@@ -16,6 +16,15 @@ meshpoint ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart meshpoint
 meshpoint ALL=(ALL) NOPASSWD: /usr/bin/systemctl stop meshpoint
 meshpoint ALL=(ALL) NOPASSWD: /usr/bin/systemctl daemon-reload
 
+# rnsd release/reconnect around an RNode firmware flash (see
+# rnode_firmware_routes.py) -- rnsd holds the RNode's serial port open
+# continuously as its own live interface, which conflicts with
+# rnodeconf needing exclusive access to flash. Scoped to rnsd only,
+# same NOPASSWD shape as meshpoint's own service-control lines above.
+meshpoint ALL=(ALL) NOPASSWD: /usr/bin/systemctl stop rnsd
+meshpoint ALL=(ALL) NOPASSWD: /usr/bin/systemctl start rnsd
+meshpoint ALL=(ALL) NOPASSWD: /usr/bin/systemctl is-active rnsd
+
 # ── Self-update apply chain (Settings → Updates) ──────────────────────
 # /opt/meshpoint is owned by root, so all repo mutations need sudo.
 # Branch arg is wildcarded so any release channel (main, rc-074,

@@ -55,10 +55,18 @@ from src.api.audit import AuditLogWriter
 from src.api.audit.dependencies import get_audit_writer
 from src.api.auth.dependencies import require_admin
 from src.api.auth.jwt_session import SessionClaims
+from src.config import AppConfig
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/rnode/firmware", tags=["config", "reticulum"])
+
+_config: Optional[AppConfig] = None
+
+
+def init_routes(config: AppConfig) -> None:
+    global _config
+    _config = config
 
 
 def _resolve_rnodeconf_bin() -> str:
@@ -265,6 +273,30 @@ async def _stream_autoinstall(port: str, sequence: list[str]) -> AsyncIterator[b
     })
 
 
+async def _run_systemctl(*args: str) -> tuple[int, str]:
+    """Runs ``sudo systemctl <args>``, returning (returncode, combined
+    output). Scoped to exactly the three ``rnsd`` subcommands granted
+    in config/sudoers-meshpoint -- see that file's own comment for why
+    this exists (rnsd holds the RNode's serial port open continuously,
+    conflicting with rnodeconf needing exclusive access to flash)."""
+    process = await asyncio.create_subprocess_exec(
+        "sudo", "systemctl", *args,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+    )
+    output = await process.stdout.read() if process.stdout else b""
+    returncode = await process.wait()
+    return returncode, output.decode("utf-8", errors="replace").strip()
+
+
+def _rnsd_owns_port(port: str) -> bool:
+    return bool(
+        _config is not None
+        and _config.reticulum.rnode_serial_port
+        and _config.reticulum.rnode_serial_port == port
+    )
+
+
 @router.get("/targets")
 async def firmware_targets(_claims: SessionClaims = Depends(require_admin)) -> dict:
     return {
@@ -308,18 +340,54 @@ async def flash_firmware_stream(
     if req.port not in real_ports:
         raise HTTPException(400, "Selected port is not a currently connected USB-serial device")
     port = req.port
+    release_rnsd = _rnsd_owns_port(port)
 
     async def body() -> AsyncIterator[bytes]:
         with audit.timed_action(
             user=claims.subject, action="rnode_firmware.flash",
-            params={"board": req.board, "port": port},
+            params={"board": req.board, "port": port, "released_rnsd": release_rnsd},
         ) as ctx:
+            if release_rnsd:
+                yield _ndjson({
+                    "type": "line", "stream": "stdout",
+                    "text": f"Stopping rnsd (holds {port} open as its own RNode interface)…",
+                })
+                rc, out = await _run_systemctl("stop", "rnsd")
+                if rc != 0:
+                    yield _ndjson({
+                        "type": "line", "stream": "stderr",
+                        "text": f"Could not stop rnsd (exit {rc}): {out}",
+                    })
+
             success = False
-            async for chunk in _stream_autoinstall(port, board["seq"]):
-                yield chunk
-                event = json.loads(chunk)
-                if event.get("type") == "result":
-                    success = bool((event.get("result") or {}).get("success"))
+            try:
+                async for chunk in _stream_autoinstall(port, board["seq"]):
+                    yield chunk
+                    event = json.loads(chunk)
+                    if event.get("type") == "result":
+                        success = bool((event.get("result") or {}).get("success"))
+            finally:
+                if release_rnsd:
+                    yield _ndjson({
+                        "type": "line", "stream": "stdout",
+                        "text": "Waiting for the board to finish rebooting…",
+                    })
+                    await asyncio.sleep(3.0)
+                    yield _ndjson({
+                        "type": "line", "stream": "stdout",
+                        "text": "Restarting rnsd…",
+                    })
+                    await _run_systemctl("start", "rnsd")
+                    rc, out = await _run_systemctl("is-active", "rnsd")
+                    yield _ndjson({
+                        "type": "line", "stream": "stdout",
+                        "text": (
+                            "rnsd reconnected." if rc == 0
+                            else f"rnsd did NOT come back up (status: {out}) -- "
+                                 "check `systemctl status rnsd`."
+                        ),
+                    })
+
             ctx.set_result("success" if success else "error")
 
     return StreamingResponse(
