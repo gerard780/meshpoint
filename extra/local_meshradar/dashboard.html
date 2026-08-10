@@ -748,6 +748,24 @@ const PROTOCOL_COLORS = {
 function protocolColor(p) { return PROTOCOL_COLORS[p] || 'var(--dim)'; }
 
 // Meshtastic node roles -- see meshtastic.protobuf.config_pb2.Config.DeviceConfig.Role.
+// `n.role` arrives over the wire as a raw numeric enum (e.g. "12"), same
+// as hardware_model below -- ROLE_NAMES resolves it to the name string
+// ROLE_ICONS is actually keyed by. Kept in sync with 0-10 in the main
+// Meshpoint app's own node_cards.js/node_drawer.js _roleName(), plus 11/12
+// (ROUTER_LATE/CLIENT_BASE) which that table is missing but ROLE_ICONS
+// already anticipated -- verified against the real protobuf enum.
+const ROLE_NAMES = {
+    0: 'CLIENT', 1: 'CLIENT_MUTE', 2: 'ROUTER', 3: 'ROUTER_CLIENT',
+    4: 'REPEATER', 5: 'TRACKER', 6: 'SENSOR', 7: 'TAK', 8: 'CLIENT_HIDDEN',
+    9: 'LOST_AND_FOUND', 10: 'TAK_TRACKER', 11: 'ROUTER_LATE', 12: 'CLIENT_BASE',
+};
+function roleName(role) {
+    if (role == null || role === '') return null;
+    if (typeof role === 'number' || /^\d+$/.test(String(role))) {
+        return ROLE_NAMES[Number(role)] || `ROLE_${role}`;
+    }
+    return String(role).toUpperCase();
+}
 const ROLE_ICONS = {
     ROUTER: '&#8593;', ROUTER_CLIENT: '&#8593;', ROUTER_LATE: '&#8593;',
     REPEATER: '&#8596;',
@@ -759,8 +777,67 @@ const ROLE_ICONS = {
 };
 function roleIcon(role) {
     if (!role) return '';
-    const icon = ROLE_ICONS[role];
-    return icon ? `<span class="role-badge" title="${esc(role)}">${icon}</span>` : '';
+    const name = roleName(role);
+    const icon = ROLE_ICONS[name];
+    return icon ? `<span class="role-badge" title="${esc(name)}">${icon}</span>` : '';
+}
+
+// Meshtastic HardwareModel protobuf enum -> human-readable name. Duplicated
+// from frontend/js/meshtastic_hw_names.js rather than shared/imported --
+// this directory is deliberately self-contained (see README.md), same as
+// every other extra/ tool in this repo.
+const HW_NAMES = {
+    0: 'UNSET',
+    1: 'TLORA V2', 2: 'TLORA V1', 3: 'TLORA V2 1.6', 4: 'TBEAM',
+    5: 'HELTEC V2.0', 6: 'TBEAM V0.7', 7: 'T-ECHO', 8: 'TLORA V1.1.3',
+    9: 'RAK4631', 10: 'HELTEC V2.1', 11: 'HELTEC V1', 12: 'LILYGO TBEAM S3',
+    13: 'RAK11200', 14: 'NANO G1', 15: 'TLORA V2.1 1.8', 16: 'TLORA T3 S3',
+    17: 'NANO G1 EXPLORER', 18: 'NANO G2 ULTRA', 19: 'LORA TYPE',
+    20: 'WIPHONE', 21: 'WIO WM1110', 22: 'RAK2560', 23: 'HELTEC HRU 3601',
+    24: 'HELTEC WIRELESS BRIDGE', 25: 'STATION G1', 26: 'RAK11310',
+    27: 'SENSELORA RP2040', 28: 'SENSELORA S3', 29: 'CANARYONE',
+    30: 'RP2040 LORA', 31: 'STATION G2', 32: 'LORA RELAY V1',
+    33: 'T-ECHO PLUS', 34: 'PPR', 35: 'GENIEBLOCKS', 36: 'NRF52 UNKNOWN',
+    37: 'PORTDUINO', 38: 'ANDROID SIM', 39: 'DIY V1', 40: 'NRF52840 PCA10059',
+    41: 'DR DEV', 42: 'M5STACK', 43: 'HELTEC V3', 44: 'HELTEC WSL V3',
+    45: 'BETAFPV 2400 TX', 46: 'BETAFPV 900 NANO TX', 47: 'RPI PICO',
+    48: 'HELTEC WIRELESS TRACKER', 49: 'HELTEC WIRELESS PAPER',
+    50: 'T-DECK', 51: 'T-WATCH S3', 52: 'PICOMPUTER S3', 53: 'HELTEC HT62',
+    54: 'EBYTE ESP32 S3', 55: 'ESP32 S3 PICO', 56: 'CHATTER 2',
+    57: 'HELTEC WIRELESS PAPER V1.0', 58: 'HELTEC WIRELESS TRACKER V1.0',
+    59: 'UNPHONE', 60: 'TD LORAC', 61: 'CDEBYTE EORA S3', 62: 'TWC MESH V4',
+    63: 'NRF52 PROMICRO DIY', 64: 'RADIOMASTER 900 BANDIT NANO',
+    65: 'HELTEC CAPSULE SENSOR V3', 66: 'HELTEC VISION MASTER T190',
+    67: 'HELTEC VISION MASTER E213', 68: 'HELTEC VISION MASTER E290',
+    69: 'HELTEC MESH NODE T114', 70: 'SENSECAP INDICATOR',
+    71: 'TRACKER T1000-E', 72: 'RAK3172', 73: 'WIO E5',
+    74: 'RADIOMASTER 900 BANDIT', 75: 'ME25LS01 4Y10TD',
+    76: 'RP2040 FEATHER RFM95', 77: 'M5STACK COREBASIC', 78: 'M5STACK CORE2',
+    79: 'RPI PICO2', 80: 'M5STACK CORES3', 81: 'SEEED XIAO S3', 82: 'MS24SF1',
+    83: 'TLORA C6', 84: 'WISMESH TAP', 85: 'ROUTASTIC', 86: 'MESH-TAB',
+    87: 'MESHLINK', 88: 'XIAO NRF52 KIT', 89: 'THINKNODE M1',
+    90: 'THINKNODE M2', 91: 'T-ETH-ELITE', 92: 'HELTEC SENSOR HUB',
+    93: 'MUZI BASE', 94: 'HELTEC MESH POCKET', 95: 'SEEED SOLAR NODE',
+    96: 'NOMADSTAR METEOR PRO', 97: 'CROWPANEL', 98: 'LINK 32',
+    99: 'SEEED WIO TRACKER L1', 100: 'SEEED WIO TRACKER L1 EINK',
+    101: 'MUZI R1 NEO', 102: 'T-DECK PRO', 103: 'T-LORA PAGER',
+    104: 'M5STACK RESERVED', 105: 'WISMESH TAG', 106: 'RAK3312',
+    107: 'THINKNODE M5', 108: 'HELTEC MESH SOLAR', 109: 'T-ECHO LITE',
+    110: 'HELTEC V4', 111: 'M5STACK C6L', 112: 'M5STACK CARDPUTER ADV',
+    113: 'HELTEC WIRELESS TRACKER V2', 114: 'T-WATCH ULTRA',
+    115: 'THINKNODE M3', 116: 'WISMESH TAP V2', 117: 'RAK3401',
+    118: 'RAK6421', 119: 'THINKNODE M4', 120: 'THINKNODE M6',
+    121: 'MESHSTICK 1262', 122: 'TBEAM 1 WATT', 123: 'T5 S3 EPAPER PRO',
+    124: 'TBEAM BPF', 125: 'MINI EPAPER S3', 126: 'TDISPLAY S3 PRO',
+    127: 'HELTEC MESH NODE T096', 128: 'TRACKER T1000-E PRO',
+    129: 'THINKNODE M7',
+    255: 'PRIVATE HW',
+};
+function hardwareName(model) {
+    if (model == null || model === '') return null;
+    const num = Number(model);
+    if (!Number.isNaN(num)) return HW_NAMES[num] || String(model);
+    return String(model);
 }
 
 function packetDetails(p) {
@@ -1251,7 +1328,7 @@ function renderNodeList() {
         const telemetry = members.map((m) => parseJsonSafe(m.latest_telemetry_json)).find(Boolean);
 
         const extraBadges = [];
-        if (hardwareModel) extraBadges.push(`<span class="badge">${esc(hardwareModel)}</span>`);
+        if (hardwareModel) extraBadges.push(`<span class="badge">${esc(hardwareName(hardwareModel))}</span>`);
         if (hasPosition && altitude != null) extraBadges.push(`<span class="badge">&#9650; ${Math.round(altitude)}m</span>`);
         if (telemetry?.voltage != null) extraBadges.push(`<span class="badge">&#9889;${round1(telemetry.voltage)}V</span>`);
         if (telemetry?.battery_level != null) extraBadges.push(`<span class="badge">&#128267;${Math.round(telemetry.battery_level)}%</span>`);
@@ -1575,8 +1652,8 @@ function openNodeDrawer(n) {
         </div>
         ${ndSection('Node Info', [
             { label: 'Protocol', value: esc(n.protocol) },
-            { label: 'Role', value: n.role ? esc(n.role) : null },
-            { label: 'Hardware', value: n.hardware_model ? esc(n.hardware_model) : null },
+            { label: 'Role', value: n.role ? esc(roleName(n.role)) : null },
+            { label: 'Hardware', value: n.hardware_model ? esc(hardwareName(n.hardware_model)) : null },
             { label: 'Firmware', value: n.firmware_version ? esc(n.firmware_version) : null },
             { label: 'Heard via', value: heardViaValue },
             { label: 'Packets', value: n.packet_count },
