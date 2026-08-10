@@ -65,6 +65,8 @@ class ReticulumPanel {
                 <h2 class="lw-panel__title">Reticulum</h2>
                 <div class="lw-panel__actions">
                     <span class="lw-panel__limit" id="rt-own-address"></span>
+                    <button class="terminal-button" type="button" id="rt-announce-btn"
+                            ${this._isAdmin ? '' : 'hidden'}>Announce now</button>
                     <button class="terminal-button" type="button" id="rt-refresh-btn">Refresh</button>
                 </div>
             </header>
@@ -179,6 +181,8 @@ class ReticulumPanel {
 
         document.getElementById('rt-refresh-btn')
             ?.addEventListener('click', () => this._load());
+        document.getElementById('rt-announce-btn')
+            ?.addEventListener('click', () => this._handleAnnounce());
         root.querySelectorAll('[data-rt-tab]').forEach((btn) => {
             btn.addEventListener('click', () => this._setTab(btn.dataset.rtTab));
         });
@@ -335,6 +339,37 @@ class ReticulumPanel {
                 <td class="lw-num">${c.unread_count ? c.unread_count : ''}</td>
             </tr>
         `).join('');
+    }
+
+    async _handleAnnounce() {
+        const btn = document.getElementById('rt-announce-btn');
+        if (!btn) return;
+        btn.disabled = true;
+        try {
+            const r = await fetch('/api/reticulum/announce', {
+                method: 'POST', credentials: 'same-origin',
+            });
+            this._toast(r.ok ? 'Announce sent.' : 'Announce failed.');
+        } catch (_) {
+            this._toast('Announce failed.');
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
+    _toast(message) {
+        // Same shared #r-toast pill app.js's own _toastAdminRequired()
+        // uses -- reused directly rather than adding a second mechanism.
+        let toast = document.getElementById('r-toast');
+        if (!toast) {
+            toast = document.createElement('div');
+            toast.id = 'r-toast';
+            toast.className = 'r-toast';
+            document.body.appendChild(toast);
+        }
+        toast.textContent = message;
+        toast.classList.add('r-toast--visible');
+        setTimeout(() => toast.classList.remove('r-toast--visible'), 2500);
     }
 
     async _handleSend(event) {

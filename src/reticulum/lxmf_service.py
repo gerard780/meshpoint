@@ -42,6 +42,14 @@ from src.storage.reticulum_peer_repository import ReticulumPeerRepository
 
 _ANNOUNCE_ASPECTS = ("lxmf.delivery", "lxmf.propagation", "nomadnetwork.node")
 
+# Total wait budget for a cold-cache path request in send_message():
+# 5 x 1s = 5s. Long enough for a same-network shared-instance response
+# (confirmed live these resolve in well under a second once the master
+# actually has the destination), short enough not to hang an HTTP
+# request indefinitely for a genuinely offline/unknown peer.
+_PATH_REQUEST_RETRIES = 5
+_PATH_REQUEST_POLL_INTERVAL_S = 1.0
+
 
 class _AnnounceHandler:
     """Bridges RNS.Transport's announce callback (fired on RNS's own
@@ -225,16 +233,38 @@ class LxmfService:
 
     async def send_message(self, destination_hash_hex: str, text: str) -> int:
         """Sends a direct LXMF message. Raises ValueError if the
-        destination hasn't announced yet (its public key is unknown --
-        the same real constraint reticulum-meshchat's own UI has)."""
+        destination's identity still can't be resolved after actively
+        requesting its path (see below) -- the same real constraint
+        reticulum-meshchat's own UI has, just with a real attempt at
+        discovery first rather than failing on a cold local cache."""
         if not self.available or self._router is None or self._source is None:
             raise RuntimeError("Reticulum service is not running")
 
         dest_hash = bytes.fromhex(destination_hash_hex)
         identity = RNS.Identity.recall(dest_hash)
         if identity is None:
+            # Identity.recall() only finds destinations we've seen a real
+            # announce for -- a peer we only know about because a message
+            # arrived FROM them (a Link handshake) isn't necessarily in
+            # that same table yet, confirmed live: meshpoint received a
+            # message from a peer's fresh session and still couldn't
+            # recall() them seconds later to reply. request_path() asks
+            # the network (or, on a shared instance, effectively asks
+            # rnsd) to (re)announce that destination if it's reachable,
+            # same as reticulum-meshchat and other real RNS apps do
+            # before giving up -- not just a testing convenience, this
+            # is the correct way to handle a cold cache in production too.
+            RNS.Transport.request_path(dest_hash)
+            for _ in range(_PATH_REQUEST_RETRIES):
+                await asyncio.sleep(_PATH_REQUEST_POLL_INTERVAL_S)
+                identity = RNS.Identity.recall(dest_hash)
+                if identity is not None:
+                    break
+
+        if identity is None:
             raise ValueError(
-                "Unknown destination -- no announce received from this peer yet"
+                "Unknown destination -- requested its path but got no "
+                "response; this peer may be offline or has never announced"
             )
 
         destination = RNS.Destination(
@@ -259,3 +289,14 @@ class LxmfService:
 
     async def list_peers(self):
         return await self._peer_repo.list_peers()
+
+    def announce(self) -> None:
+        """Re-sends meshpoint's own delivery announce on demand -- lets
+        a peer whose local cache is cold (e.g. a freshly-attached
+        client that missed the last automatic announce, exactly the
+        failure mode send_message()'s own request_path/retry logic
+        above works around) learn our identity immediately instead of
+        waiting for the next automatic one."""
+        if self._source is None:
+            raise RuntimeError("Reticulum service is not running")
+        self._source.announce()

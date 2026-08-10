@@ -74,3 +74,14 @@ async def reticulum_send(
     except RuntimeError as exc:
         raise HTTPException(503, str(exc))
     return {"id": row_id, "status": "sent"}
+
+
+@router.post("/announce")
+async def reticulum_announce(_claims: SessionClaims = Depends(require_admin)):
+    if _service is None:
+        raise HTTPException(503, "Reticulum companion is disabled")
+    try:
+        _service.announce()
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc))
+    return {"status": "announced"}
