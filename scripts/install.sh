@@ -593,7 +593,15 @@ else
     pip3 install --upgrade esptool --break-system-packages
 fi
 
-if command -v meshcore-cli &>/dev/null; then
+# command -v alone isn't reliable here: pipx symlinks into
+# ~/.local/bin, which `pipx ensurepath` only adds to *future* login
+# shells' rc files -- not this script's own current PATH, and not
+# necessarily the next run's either. Without the second check, a
+# successfully-installed meshcore-cli still looks "missing" and gets
+# reinstalled on every single run. Also check pipx's own install
+# record directly (same idea as the rtl-sdr fix: test the real
+# installed thing, not a proxy for it).
+if command -v meshcore-cli &>/dev/null || [ -d "$HOME/.local/share/pipx/venvs/meshcore-cli" ]; then
     info "MeshCore CLI already installed, skipping"
 else
     info "Installing MeshCore CLI..."

@@ -118,12 +118,15 @@ class LxmfService:
         # rnsd's own configdir (see ReticulumConfig's docstring).
         self._reticulum_config_dir.mkdir(parents=True, exist_ok=True)
 
-        # RNS.Reticulum() blocks briefly while it probes for a local
-        # shared instance -- off the event loop so it can't stall
-        # startup of everything else.
-        reticulum = await self._loop.run_in_executor(
-            None, lambda: RNS.Reticulum(configdir=str(self._reticulum_config_dir))
-        )
+        # Deliberately NOT run via run_in_executor: RNS.Reticulum()'s
+        # own __init__ calls signal.signal(SIGINT, ...), which Python
+        # only permits from the main thread -- doing this from a
+        # worker thread raises "signal only works in main thread"
+        # (confirmed live). It's a one-time startup call before the
+        # server accepts requests, same as the synchronous SX1302 HAL
+        # init earlier in this same lifespan -- acceptable to block on
+        # briefly here.
+        reticulum = RNS.Reticulum(configdir=str(self._reticulum_config_dir))
         logger.info(
             "Reticulum instance ready (config dir: %s)", reticulum.configdir
         )
