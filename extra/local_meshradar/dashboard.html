@@ -45,6 +45,14 @@
         --accent-purple: #a855f7;
         --accent-amber: #f59e0b;
         --accent-red: #ef4444;
+        /* RGB triplets (no rgb()/rgba() wrapper) so rgba(var(--accent-green-rgb), .4)
+           can build a translucent version of whichever theme is active --
+           badge borders/glows need this, not just solid `color`/`background`. */
+        --accent-green-rgb: 0, 229, 160;
+        --accent-cyan-rgb: 6, 182, 212;
+        --accent-purple-rgb: 168, 85, 247;
+        --accent-amber-rgb: 245, 158, 11;
+        --accent-red-rgb: 239, 68, 68;
         --overlay-soft: rgba(255,255,255,0.04);
     }
     /* "Auto" (no data-theme attribute at all) follows the OS -- these
@@ -65,6 +73,11 @@
             --accent-purple: #9333ea;
             --accent-amber: #b45309;
             --accent-red: #dc2626;
+            --accent-green-rgb: 5, 150, 105;
+            --accent-cyan-rgb: 8, 145, 178;
+            --accent-purple-rgb: 147, 51, 234;
+            --accent-amber-rgb: 180, 83, 9;
+            --accent-red-rgb: 220, 38, 38;
             --overlay-soft: rgba(0,0,0,0.04);
         }
     }
@@ -81,6 +94,11 @@
         --accent-purple: #9333ea;
         --accent-amber: #b45309;
         --accent-red: #dc2626;
+        --accent-green-rgb: 5, 150, 105;
+        --accent-cyan-rgb: 8, 145, 178;
+        --accent-purple-rgb: 147, 51, 234;
+        --accent-amber-rgb: 180, 83, 9;
+        --accent-red-rgb: 220, 38, 38;
         --overlay-soft: rgba(0,0,0,0.04);
     }
     * { box-sizing: border-box; }
@@ -300,7 +318,7 @@
         border: 1px solid var(--border); border-radius: 6px;
         padding: 4px 8px; background: var(--bg);
     }
-    .fav-toggle.active { color: #f59e0b; border-color: #f59e0b; }
+    .fav-toggle.active { color: var(--accent-amber); border-color: var(--accent-amber); }
 
     /* #nodes is .nodes-section's flex-filling scroll area (the section
        is as tall as the map beside it); .node-list itself is just a
@@ -324,10 +342,10 @@
     }
     .node-card__title { flex: 1; min-width: 0; }
     .node-card__name { font-size: 13px; display: flex; align-items: center; gap: 5px; }
-    .status-dot { width: 6px; height: 6px; border-radius: 50%; background: #00e5a0; display: inline-block; }
+    .status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent-green); display: inline-block; }
     .node-card__time { font-size: 11px; color: var(--dim); }
     .node-star { cursor: pointer; color: var(--dim); font-size: 13px; }
-    .node-star.active { color: #f59e0b; }
+    .node-star.active { color: var(--accent-amber); }
     .proto-badge {
         font-size: 10px; padding: 1px 5px; border-radius: 4px;
         border: 1px solid var(--border); color: var(--dim);
@@ -355,9 +373,9 @@
         background: var(--overlay-soft); color: var(--dim);
         border: 1px solid var(--border);
     }
-    .badge.quality-good { color: #00e5a0; border-color: rgba(0,229,160,0.4); }
-    .badge.quality-fair { color: #f59e0b; border-color: rgba(245,158,11,0.4); }
-    .badge.quality-weak { color: #ef4444; border-color: rgba(239,68,68,0.4); }
+    .badge.quality-good { color: var(--accent-green); border-color: rgba(var(--accent-green-rgb), 0.4); }
+    .badge.quality-fair { color: var(--accent-amber); border-color: rgba(var(--accent-amber-rgb), 0.4); }
+    .badge.quality-weak { color: var(--accent-red); border-color: rgba(var(--accent-red-rgb), 0.4); }
     .signal-bars { display: inline-flex; align-items: flex-end; gap: 1px; height: 10px; }
     .signal-bars i { width: 3px; background: var(--border); display: block; }
     .signal-bars i:nth-child(1) { height: 3px; }
@@ -379,7 +397,7 @@
         padding: 5px 8px; font-family: inherit; font-size: 12px;
     }
     .packets-count {
-        background: rgba(0,229,160,0.12); color: var(--accent-green);
+        background: rgba(var(--accent-green-rgb), 0.12); color: var(--accent-green);
         border-radius: 999px; padding: 3px 10px; font-size: 12px; font-weight: 600;
         margin-left: auto;
     }
