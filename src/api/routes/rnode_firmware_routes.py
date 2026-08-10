@@ -214,8 +214,19 @@ async def _stream_autoinstall(port: str, sequence: list[str]) -> AsyncIterator[b
     ``input()`` calls are strictly sequential synchronous reads, so
     queued lines satisfy each prompt in order regardless of whether
     its prompt text has been printed yet -- confirmed against the real
-    source, not assumed."""
-    cmd = [_RNODECONF_BIN, "-a", port]
+    source, not assumed.
+
+    ``--baud-flash 115200`` overrides rnodeconf's own default
+    (921600): live-caught a real esptool write failure
+    (``StopIteration`` in its serial reader, i.e. a dropped/desynced
+    byte stream) partway through flashing a real Heltec V3 at the
+    default rate -- rnodeconf's own error output recommends this exact
+    flag for boards with high-speed flashing trouble. Defaulted here
+    rather than exposed as a UI option: a few extra seconds of flash
+    time is a small price for not needing a retry, and 115200 is safe
+    for every board this card supports.
+    """
+    cmd = [_RNODECONF_BIN, "-a", "--baud-flash", "115200", port]
     yield _ndjson({"type": "started", "cmd": cmd})
     try:
         process = await asyncio.create_subprocess_exec(
