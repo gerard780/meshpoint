@@ -186,6 +186,13 @@ class ReticulumPanel {
         root.querySelectorAll('[data-rt-tab]').forEach((btn) => {
             btn.addEventListener('click', () => this._setTab(btn.dataset.rtTab));
         });
+        const messageTbody = document.getElementById('rt-message-tbody');
+        if (messageTbody) {
+            messageTbody.addEventListener('click', (e) => {
+                const tr = e.target.closest('tr[data-node-id]');
+                if (tr) this._markRead(tr.dataset.nodeId);
+            });
+        }
         document.getElementById('rt-send-form')
             ?.addEventListener('submit', (e) => this._handleSend(e));
 
@@ -308,6 +315,15 @@ class ReticulumPanel {
         `).join('');
     }
 
+    async _markRead(nodeId) {
+        try {
+            await fetch(`/api/messages/conversation/${encodeURIComponent(nodeId)}/read`, {
+                method: 'POST', credentials: 'same-origin',
+            });
+        } catch (_) {}
+        this._loadMessages();
+    }
+
     async _loadMessages() {
         try {
             const r = await fetch('/api/messages/conversations');
@@ -332,7 +348,8 @@ class ReticulumPanel {
         if (empty) empty.style.display = 'none';
 
         tbody.innerHTML = conversations.map((c) => `
-            <tr>
+            <tr class="lw-pkt-row" data-node-id="${this._esc(c.node_id)}"
+                ${c.unread_count ? 'title="Click to mark as read"' : ''}>
                 <td class="lw-time">${this._fmtTime(c.last_timestamp)}</td>
                 <td class="mt-name">${this._esc(c.node_name || c.node_id)}</td>
                 <td>${this._esc(c.last_message || '')}</td>
