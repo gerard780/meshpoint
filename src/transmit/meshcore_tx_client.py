@@ -415,6 +415,60 @@ class MeshCoreTxClient:
             logger.exception("Failed to read MeshCore radio info")
             return None
 
+    async def get_device_info(self) -> Optional[dict]:
+        """Return companion DEVICE_INFO (firmware version / model / build).
+
+        Prefers the capture-source cache (filled on connect before
+        auto-fetch starts, refreshed by health checks). Falls back to a
+        live ``send_device_query`` under the command lock with auto-fetch
+        paused when the cache is empty.
+        """
+        cached = self._cached_device_info()
+        if cached and (cached.get("version") or cached.get("model")):
+            return cached
+
+        from src.transmit.meshcore_device_info import MeshcoreDeviceInfoQuery
+
+        if not self.connected:
+            return cached
+        try:
+            async with self._cmd_lock:
+                if not self.connected or self._mc is None:
+                    return cached
+                await self._pause_auto_fetch()
+                try:
+                    live = await MeshcoreDeviceInfoQuery().run(
+                        mc=self._mc,
+                        cmd_lock=None,
+                        connected=True,
+                    )
+                finally:
+                    await self._resume_auto_fetch()
+            if live:
+                self._store_device_info_cache(live)
+                return live
+        except Exception:
+            logger.exception("MeshCore get_device_info failed")
+        finally:
+            await self._run_post_command()
+        return cached
+
+    def _cached_device_info(self) -> Optional[dict]:
+        source = self._source
+        if source is None:
+            return None
+        info = getattr(source, "last_device_info", None)
+        return info if isinstance(info, dict) else None
+
+    def _store_device_info_cache(self, info: dict) -> None:
+        source = self._source
+        if source is None:
+            return
+        try:
+            source._last_device_info = info
+        except Exception:
+            logger.debug("Could not store MeshCore DEVICE_INFO cache", exc_info=True)
+
     async def sync_channels(self, channel_keys: dict) -> None:
         """Sync configured channels to the companion device."""
         if not self.connected:

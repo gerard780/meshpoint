@@ -4,6 +4,10 @@
 
 #### Dashboard
 
+- **Firmware page shows installed companion versions.** Configuration → Firmware
+  queries the connected MeshCore stick (`DEVICE_INFO`) and Meshtastic serial
+  sticks (`metadata.firmware_version`) so operators can see what is already on
+  the board before flashing.
 - **Externally powered battery display.** Meshtastic battery level `101` shows as Powered instead of a bogus percentage on node cards, drawer, packet feed, detail modal, and metrics chart. Battery chips use green/amber/red severity tiers.
 - **Hardware model names on node cards.** Shared HardwareModel lookup translates enum codes to readable names on cards and the node drawer (same map as Stats).
 - **Configuration GET errors toast.** Failed Configuration reads (empty dropdowns, rate limits) show a toast instead of failing silently.

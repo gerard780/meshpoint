@@ -65,6 +65,7 @@ class MeshcoreUsbCaptureSource(CaptureSource):
         self._reconnect_in_progress: bool = False
         self._last_rf_signal: Optional[SignalMetrics] = None
         self._last_event_at: float = 0.0
+        self._last_device_info: Optional[dict] = None
         self._on_connected_callback = None
 
     @property
@@ -75,6 +76,11 @@ class MeshcoreUsbCaptureSource(CaptureSource):
     def connected(self) -> bool:
         """True while the MeshCore companion serial session is live."""
         return self._connected
+
+    @property
+    def last_device_info(self) -> Optional[dict]:
+        """Cached DEVICE_INFO (version / model / build), if queried."""
+        return self._last_device_info
 
     @property
     def is_running(self) -> bool:
@@ -187,6 +193,7 @@ class MeshcoreUsbCaptureSource(CaptureSource):
                 return
 
             self._connected = True
+            await self._cache_device_info_on_connect()
 
             for event_type in (
                 EventType.RX_LOG_DATA,
@@ -362,6 +369,44 @@ class MeshcoreUsbCaptureSource(CaptureSource):
         now = asyncio.get_event_loop().time()
         return (now - self._last_event_at) < _RECENT_EVENT_HEALTHY_WINDOW_SECONDS
 
+    async def _cache_device_info_on_connect(self) -> None:
+        """Query DEVICE_INFO once before auto-fetch starts (clean window)."""
+        if not self._meshcore:
+            return
+        try:
+            from meshcore import EventType
+            from src.transmit.meshcore_device_info import MeshcoreDeviceInfoQuery
+
+            result = await asyncio.wait_for(
+                self._meshcore.commands.send_device_query(),
+                timeout=_MESHCORE_COMMAND_TIMEOUT_SECONDS,
+            )
+            if result is None or result.type == EventType.ERROR:
+                return
+            payload = getattr(result, "payload", None)
+            if isinstance(payload, dict):
+                self._last_device_info = MeshcoreDeviceInfoQuery.normalize(payload)
+                logger.info(
+                    "MeshCore DEVICE_INFO cached: version=%s model=%s",
+                    self._last_device_info.get("version"),
+                    self._last_device_info.get("model"),
+                )
+        except Exception:
+            logger.debug("MeshCore DEVICE_INFO cache on connect failed", exc_info=True)
+
+    def _remember_device_info_event(self, result) -> None:
+        try:
+            from meshcore import EventType
+            from src.transmit.meshcore_device_info import MeshcoreDeviceInfoQuery
+
+            if result is None or result.type != EventType.DEVICE_INFO:
+                return
+            payload = getattr(result, "payload", None)
+            if isinstance(payload, dict):
+                self._last_device_info = MeshcoreDeviceInfoQuery.normalize(payload)
+        except Exception:
+            logger.debug("Could not cache MeshCore DEVICE_INFO", exc_info=True)
+
     async def _check_health(self) -> bool:
         """Send a device query and verify we get a response."""
         if not self._meshcore:
@@ -373,7 +418,10 @@ class MeshcoreUsbCaptureSource(CaptureSource):
                 self._meshcore.commands.send_device_query(),
                 timeout=_HEALTH_CHECK_TIMEOUT_SECONDS,
             )
-            return result.type != EventType.ERROR
+            if result.type != EventType.ERROR:
+                self._remember_device_info_event(result)
+                return True
+            return False
         except Exception:
             return False
 

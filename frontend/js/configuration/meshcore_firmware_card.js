@@ -28,13 +28,14 @@ class MeshcoreFirmwareConfigCard {
                     <header class="cfg-card__head">
                         <h3 class="cfg-card__title">MeshCore firmware</h3>
                         <p class="cfg-card__hint">
-                            Flash any connected USB-serial device with official MeshCore
-                            companion firmware straight from this dashboard -- no compiling
-                            needed, and no need to add it as a configured companion first.
-                            Leave "Erase everything" off to upgrade a board already running
-                            MeshCore without losing identity, contacts, and channels. Turn
-                            erase on when the board is blank or running a different stack.
+                            Flash official companion firmware from GitHub.
+                            Leave erase off for upgrades; turn it on for a blank board.
                         </p>
+                        <div class="cfg-firmware-installed" data-mc-firmware-installed aria-live="polite">
+                            <span class="cfg-firmware-installed__label">Installed</span>
+                            <span class="cfg-firmware-installed__version">Checking…</span>
+                            <span class="cfg-firmware-installed__meta"></span>
+                        </div>
                     </header>
                     <label class="cfg-field cfg-firmware-field">
                         <span class="cfg-field__label">Version</span>
@@ -47,8 +48,8 @@ class MeshcoreFirmwareConfigCard {
                     <label class="cfg-field cfg-firmware-field">
                         <span class="cfg-field__label">Flavor</span>
                         <select class="cfg-field__input" data-mc-firmware-flavor>
-                            <option value="usb">USB (connects to this dashboard)</option>
-                            <option value="ble">BLE (Bluetooth, for the MeshCore phone app)</option>
+                            <option value="usb">USB (dashboard)</option>
+                            <option value="ble">BLE (phone app)</option>
                         </select>
                     </label>
                     <label class="cfg-field cfg-firmware-field">
@@ -67,7 +68,7 @@ class MeshcoreFirmwareConfigCard {
                     </label>
                     <label class="cfg-field cfg-field--toggle cfg-firmware-board-field" data-mc-erase-all-wrap>
                         <input type="checkbox" data-mc-erase-all>
-                        <span class="cfg-field__label">Erase everything (required for a board not already running MeshCore)</span>
+                        <span class="cfg-field__label">Erase everything (wipes board settings)</span>
                     </label>
                     <div class="cfg-card__actions">
                         <button class="terminal-button terminal-button--primary"
@@ -106,10 +107,61 @@ class MeshcoreFirmwareConfigCard {
         this._loadMcFirmwareReleases();
         this._loadMcFirmwareTargets();
         this._refreshSerialPortsList();
+        this._loadInstalledFirmware();
     }
 
     render(config) {
         this._portUsage = this._buildPortUsageMap(config);
+    }
+
+    async _loadInstalledFirmware() {
+        const root = this._root?.querySelector('[data-mc-firmware-installed]');
+        if (!root) return;
+        const versionEl = root.querySelector('.cfg-firmware-installed__version');
+        const metaEl = root.querySelector('.cfg-firmware-installed__meta');
+        if (!versionEl || !metaEl) return;
+        versionEl.textContent = 'Checking…';
+        metaEl.textContent = '';
+        // ConfigurationPanel._api.get returns the JSON body, or null on error.
+        const data = await this._api.get('/api/config/meshcore/firmware/installed');
+        if (!data) {
+            versionEl.textContent = 'Unavailable';
+            metaEl.textContent = 'Could not query companion';
+            return;
+        }
+        if (!data.connected) {
+            versionEl.textContent = 'Not connected';
+            metaEl.textContent = '';
+            return;
+        }
+        const version = (data.version || '').trim();
+        const model = (data.model || '').trim();
+        const build = (data.build || '').trim();
+        const port = this._shortPortLabel(data.port);
+        if (!version && !model) {
+            versionEl.textContent = 'Connected';
+            metaEl.textContent = port
+                ? `${port} · version not reported`
+                : 'Version not reported';
+            return;
+        }
+        versionEl.textContent = version || model || 'Connected';
+        const meta = [];
+        if (version && model) meta.push(model);
+        if (build) meta.push(`built ${build}`);
+        if (port) meta.push(port);
+        metaEl.textContent = meta.join(' · ');
+    }
+
+    _shortPortLabel(port) {
+        if (!port) return '';
+        const raw = String(port);
+        const tty = raw.match(/tty(?:USB|ACM|AMA)\d+/i);
+        if (tty) return tty[0];
+        const base = raw.split('/').pop() || '';
+        if (base.startsWith('tty')) return base;
+        if (base.startsWith('platform-') || base.includes('pci-')) return 'USB';
+        return base;
     }
 
     /** Maps every currently-configured serial_port value (across MeshCore
@@ -419,7 +471,10 @@ class MeshcoreFirmwareConfigCard {
         }
 
         flashBtn.disabled = false;
-        if (success) await this._api.refresh();
+        if (success) {
+            await this._api.refresh();
+            await this._loadInstalledFirmware();
+        }
     }
 
     _esc(str) {

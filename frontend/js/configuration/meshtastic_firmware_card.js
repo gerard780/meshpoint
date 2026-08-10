@@ -31,13 +31,14 @@ class MeshtasticFirmwareConfigCard {
                     <header class="cfg-card__head">
                         <h3 class="cfg-card__title">Meshtastic firmware</h3>
                         <p class="cfg-card__hint">
-                            Flash any connected USB-serial device with official Meshtastic
-                            firmware straight from this dashboard -- no compiling needed, and
-                            no need to add it as a configured device first. Leave
-                            "Erase everything" off to upgrade a board already running
-                            Meshtastic without losing channels and settings. Turn erase on
-                            when the board is blank or running a different stack.
+                            Flash official Meshtastic firmware from GitHub.
+                            Leave erase off for upgrades; turn it on for a blank board.
                         </p>
+                        <div class="cfg-firmware-installed" data-mt-firmware-installed aria-live="polite">
+                            <span class="cfg-firmware-installed__label">Installed</span>
+                            <span class="cfg-firmware-installed__version">Checking…</span>
+                            <span class="cfg-firmware-installed__meta"></span>
+                        </div>
                     </header>
                     <label class="cfg-field cfg-firmware-field">
                         <span class="cfg-field__label">Version</span>
@@ -63,7 +64,7 @@ class MeshtasticFirmwareConfigCard {
                     </label>
                     <label class="cfg-field cfg-field--toggle cfg-firmware-board-field" data-mt-erase-all-wrap>
                         <input type="checkbox" data-mt-erase-all>
-                        <span class="cfg-field__label">Erase everything (required for a board not already running Meshtastic)</span>
+                        <span class="cfg-field__label">Erase everything (wipes board settings)</span>
                     </label>
                     <div class="cfg-card__actions">
                         <button class="terminal-button terminal-button--primary"
@@ -99,10 +100,73 @@ class MeshtasticFirmwareConfigCard {
         this._loadMtFirmwareReleases();
         this._loadMtFirmwareTargets();
         this._refreshSerialPortsList();
+        this._loadInstalledFirmware();
     }
 
     render(config) {
         this._portUsage = this._buildPortUsageMap(config);
+    }
+
+    async _loadInstalledFirmware() {
+        const root = this._root?.querySelector('[data-mt-firmware-installed]');
+        if (!root) return;
+        const versionEl = root.querySelector('.cfg-firmware-installed__version');
+        const metaEl = root.querySelector('.cfg-firmware-installed__meta');
+        if (!versionEl || !metaEl) return;
+        versionEl.textContent = 'Checking…';
+        metaEl.textContent = '';
+        // ConfigurationPanel._api.get returns the JSON body, or null on error.
+        const data = await this._api.get('/api/config/serial/firmware/installed');
+        if (!data) {
+            versionEl.textContent = 'Unavailable';
+            metaEl.textContent = 'Could not query serial sticks';
+            return;
+        }
+        const devices = data.devices || [];
+        const connected = devices.filter((d) => d.connected);
+        if (!connected.length) {
+            versionEl.textContent = 'Not connected';
+            metaEl.textContent = '';
+            return;
+        }
+        // One primary stick shown prominently; extras in meta.
+        const primary = connected[0];
+        const version = (primary.version || '').trim() || 'Version not reported';
+        let hw = (primary.hw_model || '').toString().trim();
+        if (hw && typeof HW_NAMES !== 'undefined') {
+            hw = HW_NAMES[hw] || HW_NAMES[String(hw)] || hw;
+        }
+        const port = primary.port_short
+            || this._shortPortLabel(primary.port)
+            || primary.name
+            || 'USB';
+        versionEl.textContent = version;
+        const meta = [];
+        if (hw) meta.push(hw);
+        if (port) meta.push(port);
+        if (connected.length > 1) {
+            meta.push(`+${connected.length - 1} more`);
+        }
+        metaEl.textContent = meta.join(' · ');
+    }
+
+    _shortPortLabel(port) {
+        if (!port) return '';
+        const raw = String(port);
+        const tty = raw.match(/tty(?:USB|ACM|AMA)\d+/i);
+        if (tty) return tty[0];
+        const base = raw.split('/').pop() || '';
+        if (base.startsWith('tty')) return base;
+        // Match against the USB enumeration list when we have it.
+        for (const p of this._enumeratedPorts || []) {
+            const aliases = [p.device, p.by_id, p.by_path, p.stable_path]
+                .filter(Boolean);
+            if (aliases.includes(raw)) {
+                return String(p.device || '').split('/').pop() || 'USB';
+            }
+        }
+        if (base.startsWith('platform-') || base.includes('pci-')) return 'USB';
+        return base;
     }
 
     /** Maps every currently-configured serial_port value (across Serial
@@ -395,7 +459,10 @@ class MeshtasticFirmwareConfigCard {
         }
 
         flashBtn.disabled = false;
-        if (success) await this._api.refresh();
+        if (success) {
+            await this._api.refresh();
+            await this._loadInstalledFirmware();
+        }
     }
 
     _esc(str) {

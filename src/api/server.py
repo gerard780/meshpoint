@@ -1401,6 +1401,7 @@ def _init_routes(
     meshcore_firmware_routes.init_routes(
         config=config,
         meshcore_sources=_find_meshcore_sources(coord),
+        tx_service=tx_service,
     )
     serial_config_routes.init_routes(
         config=config,

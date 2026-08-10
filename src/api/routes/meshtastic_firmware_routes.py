@@ -72,6 +72,18 @@ def _ndjson(payload: dict) -> bytes:
     return _streamer.ndjson(payload)
 
 
+@router.get("/installed")
+async def firmware_installed(
+    _claims: SessionClaims = Depends(require_admin),
+) -> dict:
+    """Firmware versions reported by configured Meshtastic USB serial sticks."""
+    from src.capture.serial_firmware_info import SerialFirmwareInfoReader
+
+    reader = SerialFirmwareInfoReader()
+    devices = [reader.read_from_source(src) for src in _serial_sources]
+    return {"devices": devices}
+
+
 def _resolve_release_sync(tag: str) -> dict:
     if tag:
         return _http.fetch_json_sync(_RELEASES_BY_TAG_URL.format(tag=tag))

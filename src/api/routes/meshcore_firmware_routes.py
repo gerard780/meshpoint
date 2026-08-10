@@ -36,6 +36,7 @@ router = APIRouter(prefix="/api/config/meshcore/firmware", tags=["config", "mesh
 
 _config: Optional[AppConfig] = None
 _meshcore_sources: list = []
+_tx_service = None
 
 _CACHE_DIR = Path(__file__).resolve().parents[3] / "data" / "meshcore-firmware"
 _RELEASES_LIST_URL = (
@@ -51,10 +52,17 @@ _streamer = EspToolNdjsonStreamer()
 _esptool = EspToolBinaryResolver()
 
 
-def init_routes(config: AppConfig, meshcore_sources=None) -> None:
-    global _config, _meshcore_sources
+def init_routes(config: AppConfig, meshcore_sources=None, tx_service=None) -> None:
+    global _config, _meshcore_sources, _tx_service
     _config = config
     _meshcore_sources = meshcore_sources or []
+    _tx_service = tx_service
+
+
+def _resolve_meshcore_tx():
+    if _tx_service is None:
+        return None
+    return getattr(_tx_service, "_meshcore_tx", None)
 
 
 def _resolve_meshcore_source(label: str):
@@ -68,6 +76,46 @@ def _resolve_meshcore_source(label: str):
 
 def _ndjson(payload: dict) -> bytes:
     return _streamer.ndjson(payload)
+
+
+@router.get("/installed")
+async def firmware_installed(
+    _claims: SessionClaims = Depends(require_admin),
+) -> dict:
+    """Firmware version reported by the connected MeshCore USB companion."""
+    mc_tx = _resolve_meshcore_tx()
+    source = next(
+        (s for s in _meshcore_sources if getattr(s, "name", "") == "meshcore_usb"),
+        _meshcore_sources[0] if _meshcore_sources else None,
+    )
+
+    port = None
+    if source is not None:
+        port = (
+            getattr(source, "_resolved_port", None)
+            or getattr(source, "serial_port", None)
+        )
+
+    connected = bool(mc_tx and mc_tx.connected)
+    payload = {
+        "connected": connected,
+        "port": port,
+        "version": "",
+        "model": "",
+        "build": "",
+        "name": getattr(source, "name", "meshcore_usb") if source else "meshcore_usb",
+    }
+    if not connected or mc_tx is None:
+        return payload
+
+    info = await mc_tx.get_device_info()
+    if info:
+        payload.update({
+            "version": info.get("version") or "",
+            "model": info.get("model") or "",
+            "build": info.get("build") or "",
+        })
+    return payload
 
 
 @router.get("/targets")

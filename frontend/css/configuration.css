@@ -36,6 +36,7 @@
 
 .cfg-card__hint {
     margin: 0;
+    max-width: 42rem;
     font-size: 13px;
     color: rgba(243, 244, 246, 0.65);
     line-height: 1.5;
@@ -558,8 +559,39 @@ select.cfg-field__input option:checked {
 
 /* Configuration → Firmware flash cards
  * Credit: javastraat/meshpoint 85fb576 */
-.cfg-firmware-board-field {
-    margin-bottom: 14px;
+.cfg-firmware-installed {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 8px 12px;
+    margin: 12px 0 0;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 1px solid rgba(34, 211, 238, 0.28);
+    background: rgba(34, 211, 238, 0.08);
+}
+
+.cfg-firmware-installed__label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-muted, #9ca3af);
+}
+
+.cfg-firmware-installed__version {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 1.3;
+    color: var(--accent-cyan, #22d3ee);
+}
+
+.cfg-firmware-installed__meta {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    line-height: 1.3;
+    color: var(--text-secondary, #d1d5db);
 }
 
 .cfg-firmware-field {
