@@ -42,6 +42,8 @@ import asyncio
 import json
 import logging
 import shutil
+import sys
+from pathlib import Path
 from typing import AsyncIterator, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -57,7 +59,30 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/rnode/firmware", tags=["config", "reticulum"])
 
-_RNODECONF_BIN = "rnodeconf"
+
+def _resolve_rnodeconf_bin() -> str:
+    """``rnodeconf`` is a console-script pip installs alongside ``rns``
+    in whichever Python environment ran ``pip install`` -- for
+    meshpoint that's its own venv (``requirements.txt``), not
+    necessarily on this *process's* ``$PATH``. Unlike an interactively
+    activated venv (which prepends its own ``bin/`` to ``$PATH``),
+    ``meshpoint.service`` invokes ``/opt/meshpoint/venv/bin/python``
+    directly and gets systemd's own minimal default `$PATH` otherwise
+    -- confirmed live: ``shutil.which("rnodeconf")`` came back empty
+    even though it's genuinely installed. ``sys.executable``'s own
+    directory is where pip actually put it (a sibling console-script
+    next to the interpreter itself), so resolve relative to that
+    first; fall back to a bare PATH lookup for any other environment
+    (e.g. a real activated-venv shell) where that's simply how it's
+    found.
+    """
+    candidate = Path(sys.executable).parent / "rnodeconf"
+    if candidate.exists():
+        return str(candidate)
+    return "rnodeconf"
+
+
+_RNODECONF_BIN = _resolve_rnodeconf_bin()
 
 # Each value is the ordered sequence of menu answers rnodeconf's
 # --autoinstall wizard expects on stdin, one line per prompt:
@@ -146,6 +171,9 @@ def _ndjson(payload: dict) -> bytes:
 
 
 def _rnodeconf_available() -> bool:
+    resolved = Path(_RNODECONF_BIN)
+    if resolved.is_absolute():
+        return resolved.exists()
     return shutil.which(_RNODECONF_BIN) is not None
 
 
