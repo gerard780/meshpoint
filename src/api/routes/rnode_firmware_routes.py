@@ -41,6 +41,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -177,6 +178,27 @@ def _rnodeconf_available() -> bool:
     return shutil.which(_RNODECONF_BIN) is not None
 
 
+# rnodeconf.py hardcodes its own config/firmware-cache directory as
+# os.path.expanduser("~/.config/rnodeconf") -- no env var or CLI flag
+# to redirect it (confirmed from source, not guessed). That resolves
+# via $HOME, and the meshpoint systemd user is --no-create-home, so
+# it tries to create /home/meshpoint and fails -- confirmed live
+# (PermissionError, same class of bug RNS.Reticulum() and PlatformIO/
+# arduino-cli already hit earlier this session for the same user).
+# Overriding just $HOME for this one subprocess, same fix shape as
+# meshpoint.service's own XDG_CACHE_HOME/PLATFORMIO_CORE_DIR
+# Environment= lines solve for those other tools.
+_RNODECONF_HOME_DIR = "data/rnodeconf_home"
+
+
+def _rnodeconf_env() -> dict:
+    home = Path(_RNODECONF_HOME_DIR).resolve()
+    home.mkdir(parents=True, exist_ok=True)
+    env = dict(os.environ)
+    env["HOME"] = str(home)
+    return env
+
+
 async def _stream_autoinstall(port: str, sequence: list[str]) -> AsyncIterator[bytes]:
     """Runs ``rnodeconf -a <port>``, pre-feeding the entire canned answer
     sequence to stdin immediately after spawn. Safe to do up front
@@ -193,6 +215,7 @@ async def _stream_autoinstall(port: str, sequence: list[str]) -> AsyncIterator[b
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            env=_rnodeconf_env(),
         )
     except (FileNotFoundError, OSError) as exc:
         yield _ndjson({
