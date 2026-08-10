@@ -164,27 +164,28 @@ class TestTxClientTimeoutTriggersReconnect(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result.timed_out)
 
     async def test_set_radio_success_triggers_reconnect(self):
-        from src.transmit.meshcore_radio_apply import MeshcoreRadioApply
+        from src.transmit.meshcore_exclusive_radio import (
+            MeshcoreExclusiveRadioApply,
+        )
 
         client = MeshCoreTxClient()
         source = MagicMock()
         source._connected = True
         source._meshcore = MagicMock()
-        source._trigger_reconnect = MagicMock()
         client.set_source(source)
 
         with patch.object(
-            MeshcoreRadioApply,
-            "apply",
+            MeshcoreExclusiveRadioApply,
+            "apply_via_source",
             new=AsyncMock(
                 return_value=SendResult(success=True, event_type="set_radio")
             ),
-        ):
+        ) as apply:
             result = await client.set_radio_params(910.525, 62.5, 7, 5)
 
         self.assertTrue(result.success)
-        source._trigger_reconnect.assert_called_once()
-        self.assertIn("rebooting", source._trigger_reconnect.call_args[0][0])
+        apply.assert_awaited_once()
+
 
 
 if __name__ == "__main__":

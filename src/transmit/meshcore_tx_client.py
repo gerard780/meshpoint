@@ -333,13 +333,24 @@ class MeshCoreTxClient:
         sf: int,
         cr: int,
     ) -> SendResult:
-        """Set companion radio params over the live USB connection, then reboot.
+        """Set companion radio params, then recover the capture source.
 
-        Cross-band changes often return no_event_received and leave the
-        companion on the old preset after reconnect. Coordinator verifies
-        after reconnect and retries once on the live link.
+        Prefer exclusive-port apply when bound to MeshCoreUsbCaptureSource
+        (cold path matches CLI and works for cross-band changes). Fall
+        back to live shared-handle apply only for standalone TX clients.
         Credit: javastraat/meshpoint 471d572
         """
+        if self._source is not None:
+            from src.transmit.meshcore_exclusive_radio import (
+                MeshcoreExclusiveRadioApply,
+            )
+
+            freq = round(float(freq), 3)
+            bw = round(float(bw), 1)
+            return await MeshcoreExclusiveRadioApply().apply_via_source(
+                self._source, freq, bw, int(sf), int(cr),
+            )
+
         if not self.connected:
             return SendResult(success=False, error="Not connected")
 

@@ -37,7 +37,6 @@ _MESHCORE_COMMAND_TIMEOUT_SECONDS = 12.0
 _HEALTH_CHECK_TIMEOUT_SECONDS = 15.0
 _RECONNECT_BASE_DELAY_SECONDS = 5
 _RECONNECT_MAX_DELAY_SECONDS = 60
-_DTR_RESET_PULSE_SECONDS = 0.1
 
 
 class MeshcoreUsbCaptureSource(CaptureSource):
@@ -256,8 +255,12 @@ class MeshcoreUsbCaptureSource(CaptureSource):
 
                 attempt += 1
                 if attempt >= 2 and self._resolved_port:
+                    from src.capture.meshcore_dtr import pulse_dtr_reset
+
                     await asyncio.to_thread(
-                        self._pulse_dtr_reset, self._resolved_port
+                        pulse_dtr_reset,
+                        self._resolved_port,
+                        self._baud_rate,
                     )
                     await asyncio.sleep(2.0)
 
@@ -294,34 +297,6 @@ class MeshcoreUsbCaptureSource(CaptureSource):
             self._reconnect_until_connected(),
             name="meshcore-command-timeout-reconnect",
         )
-
-    def _pulse_dtr_reset(self, port: str) -> None:
-        """Toggle DTR low to soft-reset an ESP32 companion. Best-effort.
-
-        Runs in a worker thread (called via asyncio.to_thread) because
-        pyserial's open and the DTR sleep are blocking. Safe to fail
-        silently: if the host's serial driver doesn't expose DTR or the
-        port is unavailable, we just skip and let the regular reconnect
-        attempt proceed.
-        """
-        try:
-            import serial  # transitive dep via meshcore lib
-        except ImportError:
-            return
-        try:
-            import time as _time
-            with serial.Serial(port, self._baud_rate, timeout=0.5) as ser:
-                ser.dtr = False
-                _time.sleep(_DTR_RESET_PULSE_SECONDS)
-                ser.dtr = True
-            logger.info(
-                "MeshCore USB pulsed DTR on %s to attempt soft reset",
-                port,
-            )
-        except Exception as exc:
-            logger.debug(
-                "MeshCore USB DTR pulse skipped on %s: %s", port, exc
-            )
 
     async def _health_check_loop(self) -> None:
         """Periodically verify the serial companion is still responding.

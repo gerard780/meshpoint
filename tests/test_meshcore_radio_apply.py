@@ -115,35 +115,28 @@ class TestMeshcoreRadioTimeoutRecovery(unittest.IsolatedAsyncioTestCase):
 
 
 class TestSetRadioParamsTimeoutRecovery(unittest.IsolatedAsyncioTestCase):
-    async def test_timeout_triggers_reconnect_then_verify(self):
+    async def test_bound_source_uses_exclusive_apply(self):
+        from src.transmit.meshcore_exclusive_radio import (
+            MeshcoreExclusiveRadioApply,
+        )
+
         client = MeshCoreTxClient()
         source = MagicMock()
         source._connected = True
         source._meshcore = MagicMock()
-        source._trigger_reconnect = MagicMock()
         client.set_source(source)
 
         with patch.object(
-            MeshcoreRadioApply,
-            "apply",
-            new=AsyncMock(
-                return_value=SendResult(
-                    success=False, error="set_radio timed out", timed_out=True
-                )
-            ),
-        ), patch.object(
-            MeshcoreRadioTimeoutRecovery,
-            "verify",
+            MeshcoreExclusiveRadioApply,
+            "apply_via_source",
             new=AsyncMock(
                 return_value=SendResult(success=True, event_type="set_radio")
             ),
-        ) as verify:
+        ) as apply:
             result = await client.set_radio_params(910.525, 62.5, 7, 5)
 
         self.assertTrue(result.success)
-        source._trigger_reconnect.assert_called_once()
-        self.assertIn("timed out", source._trigger_reconnect.call_args[0][0])
-        verify.assert_awaited_once()
+        apply.assert_awaited_once()
 
     async def test_mismatch_retries_once_on_live_link(self):
         from src.transmit.meshcore_radio_apply import MeshcoreRadioSetCoordinator
