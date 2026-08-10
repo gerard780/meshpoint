@@ -189,6 +189,48 @@ class SerialCaptureSource(CaptureSource):
         """True while the serial interface is open and capture is running."""
         return self._running and self._interface is not None
 
+    def _config_writer(self):
+        if not self.connected:
+            return None
+        from src.capture.serial_device_config import SerialDeviceConfigWriter
+
+        return SerialDeviceConfigWriter(
+            self._interface, self._radio_info, self.name
+        )
+
+    def set_region(self, region: str) -> dict:
+        writer = self._config_writer()
+        if writer is None:
+            return {"success": False, "error": "Not connected"}
+        return writer.set_region(region)
+
+    def set_modem_preset(self, preset: str) -> dict:
+        writer = self._config_writer()
+        if writer is None:
+            return {"success": False, "error": "Not connected"}
+        return writer.set_modem_preset(preset)
+
+    def set_broadcast_intervals(
+        self,
+        node_info_secs: Optional[int] = None,
+        telemetry_secs: Optional[int] = None,
+    ) -> dict:
+        writer = self._config_writer()
+        if writer is None:
+            return {"success": False, "error": "Not connected"}
+        return writer.set_broadcast_intervals(node_info_secs, telemetry_secs)
+
+    def set_bluetooth(
+        self,
+        enabled: bool,
+        mode: Optional[str] = None,
+        fixed_pin: Optional[int] = None,
+    ) -> dict:
+        writer = self._config_writer()
+        if writer is None:
+            return {"success": False, "error": "Not connected"}
+        return writer.set_bluetooth(enabled, mode, fixed_pin)
+
     @staticmethod
     def _read_channel_table(
         interface, modem_preset_name: Optional[str] = None

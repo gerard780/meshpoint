@@ -21,6 +21,7 @@ from pydantic import BaseModel
 
 from src.api.auth.dependencies import require_admin
 from src.api.auth.jwt_session import SessionClaims
+from src.cli.meshcore_radio_config import REGION_PRESETS
 from src.config import AppConfig, save_section_to_yaml
 
 logger = logging.getLogger(__name__)
@@ -58,6 +59,10 @@ def _resolve_meshcore_tx():
 
 class CompanionNameUpdate(BaseModel):
     name: str
+
+
+class CompanionRadioUpdate(BaseModel):
+    preset: str
 
 
 @router.put("/companion-name")
@@ -127,4 +132,57 @@ async def update_companion_name(
         "saved": True,
         "name": cleaned,
         "event_type": event_type,
+    }
+
+
+@router.put("/companion-radio")
+async def update_companion_radio(
+    req: CompanionRadioUpdate,
+    _claims: SessionClaims = Depends(require_admin),
+) -> dict:
+    """Apply a MeshCore community radio preset over the live USB link.
+
+    Resolves ``preset`` via ``REGION_PRESETS``, then
+    ``MeshCoreTxClient.set_radio_params`` (set_radio + reboot + reconnect).
+    Credit: javastraat/meshpoint 471d572
+    """
+    if _config is None:
+        raise HTTPException(503, "Config not loaded")
+
+    key = (req.preset or "").strip().upper()
+    preset = REGION_PRESETS.get(key)
+    if preset is None:
+        raise HTTPException(400, f"Unknown preset '{req.preset}'")
+
+    mc_tx = _resolve_meshcore_tx()
+    if mc_tx is None or not mc_tx.connected:
+        raise HTTPException(503, "MeshCore companion not connected")
+
+    result = await mc_tx.set_radio_params(
+        preset.frequency_mhz,
+        preset.bandwidth_khz,
+        preset.spreading_factor,
+        preset.coding_rate,
+    )
+    if not result.success:
+        logger.warning(
+            "Dashboard set_radio_params failed: %s", result.error
+        )
+        raise HTTPException(
+            400, result.error or "Companion rejected radio params"
+        )
+
+    logger.info(
+        "MeshCore radio preset %s applied via dashboard (%s)",
+        key,
+        preset.label,
+    )
+    return {
+        "saved": True,
+        "preset": key,
+        "label": preset.label,
+        "frequency_mhz": preset.frequency_mhz,
+        "bandwidth_khz": preset.bandwidth_khz,
+        "spreading_factor": preset.spreading_factor,
+        "coding_rate": preset.coding_rate,
     }

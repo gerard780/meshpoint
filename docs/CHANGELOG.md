@@ -12,6 +12,9 @@
 - **Stats Avg Signal Quality dBm.** The quality donut now draws its center reading on first paint and refresh.
 - **Farthest-node Null Island filter.** Positions at exactly (0, 0) and implausibly far haversine distances no longer win farthest-direct / farthest-mesh stats.
 - **No Dashboard flash on deep-link reload.** URL hash is resolved before app scripts load so `#/settings/updates` (and other routes) paint the correct section first.
+- **MeshCore command-timeout reconnect.** Timed-out companion commands (send, advert, rename) mark the USB source for immediate reconnect instead of leaving a wedged command channel looking "connected" until the health loop notices.
+- **MeshCore live radio presets.** Configuration → MeshCore can apply community frequency/BW/SF/CR presets over the open USB connection (companion reboots and reconnects). CLI `meshpoint meshcore-radio` and the setup wizard use the full 20-entry community preset list; short US/EU/ANZ aliases still work.
+- **Serial live modem controls.** Configuration → Serial can set a connected stick's Region, modem preset, NodeInfo/telemetry intervals, and Bluetooth over the open USB link (device NVS; no Meshpoint yaml rewrite).
 
 ### v0.7.8 (July 2026)
 

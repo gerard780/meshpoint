@@ -60,6 +60,10 @@ class MeshcoreUsbCaptureSource(CaptureSource):
         self._resolved_port: Optional[str] = None
         self._health_task: Optional[asyncio.Task] = None
         self._reconnect_task: Optional[asyncio.Task] = None
+        # Two triggers can race (health-check inline _reconnect vs
+        # command-timeout _trigger_reconnect). Guard serializes them.
+        # Credit: javastraat/meshpoint c1bc3b8
+        self._reconnect_in_progress: bool = False
         self._last_rf_signal: Optional[SignalMetrics] = None
         self._last_event_at: float = 0.0
         self._on_connected_callback = None
@@ -227,40 +231,69 @@ class MeshcoreUsbCaptureSource(CaptureSource):
     async def _reconnect(self) -> None:
         """Disconnect, wait with backoff, and reconnect.
 
-        On retries (not the first attempt) we pulse DTR low briefly
-        before opening the port. On most ESP32 dev boards (Heltec V3
-        included) DTR is wired to the chip's RESET pin, so a short
-        pulse triggers a hardware reset of the companion. This
-        recovers from a stuck USB-CDC state that otherwise requires
-        a manual unplug/replug. On boards where DTR is not wired
-        to RESET the pulse is a harmless no-op.
+        Retries pulse DTR for ESP32 soft-reset. Re-entrancy guarded so
+        health-check and command-timeout paths cannot race on the port.
+        Credit: javastraat/meshpoint c1bc3b8
         """
-        await self._disconnect()
-        delay = _RECONNECT_BASE_DELAY_SECONDS
-        attempt = 0
-
-        while self._running:
-            logger.info(
-                "MeshCore USB reconnecting in %ds...", delay
+        if self._reconnect_in_progress:
+            logger.debug(
+                "MeshCore USB reconnect already in progress, skipping"
             )
-            await asyncio.sleep(delay)
-            if not self._running:
-                return
+            return
+        self._reconnect_in_progress = True
+        try:
+            await self._disconnect()
+            delay = _RECONNECT_BASE_DELAY_SECONDS
+            attempt = 0
 
-            attempt += 1
-            if attempt >= 2 and self._resolved_port:
-                await asyncio.to_thread(
-                    self._pulse_dtr_reset, self._resolved_port
+            while self._running:
+                logger.info(
+                    "MeshCore USB reconnecting in %ds...", delay
                 )
-                # Give the chip a moment to come back from reset.
-                await asyncio.sleep(2.0)
+                await asyncio.sleep(delay)
+                if not self._running:
+                    return
 
-            await self._connect(self._resolved_port)
-            if self._connected:
-                logger.info("MeshCore USB reconnected successfully")
-                return
+                attempt += 1
+                if attempt >= 2 and self._resolved_port:
+                    await asyncio.to_thread(
+                        self._pulse_dtr_reset, self._resolved_port
+                    )
+                    await asyncio.sleep(2.0)
 
-            delay = min(delay * 2, _RECONNECT_MAX_DELAY_SECONDS)
+                await self._connect(self._resolved_port)
+                if self._connected:
+                    logger.info("MeshCore USB reconnected successfully")
+                    return
+
+                delay = min(delay * 2, _RECONNECT_MAX_DELAY_SECONDS)
+        finally:
+            self._reconnect_in_progress = False
+
+    def _trigger_reconnect(self, reason: str) -> None:
+        """Kick recovery now after a command-channel timeout.
+
+        Passive RX can mask a wedged command channel from the health loop;
+        timeouts must not leave the source marked connected for minutes.
+        Credit: javastraat/meshpoint b04e91c / c1bc3b8
+        """
+        if self._reconnect_in_progress:
+            logger.debug(
+                "MeshCore USB: %s -- reconnect already in progress, skipping",
+                reason,
+            )
+            return
+        logger.warning(
+            "MeshCore USB: %s -- reconnecting now", reason,
+        )
+        if self._health_task:
+            self._health_task.cancel()
+            self._health_task = None
+        self._connected = False
+        self._reconnect_task = asyncio.create_task(
+            self._reconnect_until_connected(),
+            name="meshcore-command-timeout-reconnect",
+        )
 
     def _pulse_dtr_reset(self, port: str) -> None:
         """Toggle DTR low to soft-reset an ESP32 companion. Best-effort.

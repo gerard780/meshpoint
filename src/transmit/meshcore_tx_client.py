@@ -12,6 +12,8 @@ import logging
 from dataclasses import dataclass
 from typing import Optional
 
+from src.transmit.meshcore_channel_sync import MeshcoreChannelSync
+
 logger = logging.getLogger(__name__)
 
 # Companion firmware caps the advert name at roughly 32 ASCII bytes; the
@@ -20,20 +22,22 @@ logger = logging.getLogger(__name__)
 # documented variant.
 MAX_COMPANION_NAME_BYTES = 32
 
-# Companion channel slots: 0 = Public (firmware default). User-configured keys
-# use slots 1..N so they match Messages UI channel indices and RX channel_idx.
-MESHCORE_PUBLIC_SLOT_INDEX = 0
-MESHCORE_MAX_DEVICE_SLOTS = 8
-MESHCORE_MAX_USER_CHANNELS = MESHCORE_MAX_DEVICE_SLOTS - 1
-
 
 @dataclass
 class SendResult:
-    """Outcome of a MeshCore send attempt."""
+    """Outcome of a MeshCore send attempt.
+
+    ``timed_out`` is distinct from a plain ``success=False``: a firmware
+    ERROR means the connection is healthy and rejected the request. A
+    timeout means no answer within the deadline (wedged command channel).
+    Callers / TxClient use this to trigger an immediate reconnect.
+    Credit: javastraat/meshpoint b04e91c
+    """
 
     success: bool
     event_type: str = ""
     error: str = ""
+    timed_out: bool = False
 
 
 @dataclass
@@ -108,6 +112,16 @@ class MeshCoreTxClient:
             except Exception:
                 logger.debug("Post-command callback failed", exc_info=True)
 
+    def _fail_timeout(self, reason: str) -> SendResult:
+        """Mark timeout and kick MeshCore USB reconnect if bound.
+
+        Credit: javastraat/meshpoint b04e91c
+        """
+        trigger = getattr(self._source, "_trigger_reconnect", None)
+        if callable(trigger):
+            trigger(reason)
+        return SendResult(success=False, error=reason, timed_out=True)
+
     async def create_connection(
         self,
         port: str,
@@ -165,8 +179,7 @@ class MeshCoreTxClient:
             await self._run_post_command()
             return SendResult(success=True, event_type=event_type)
         except asyncio.TimeoutError:
-            await self._run_post_command()
-            return SendResult(success=False, error="Send timed out")
+            return self._fail_timeout("Send timed out")
         except Exception as exc:
             logger.exception("MeshCore channel send failed")
             await self._run_post_command()
@@ -192,8 +205,7 @@ class MeshCoreTxClient:
             await self._run_post_command()
             return SendResult(success=True, event_type=event_type)
         except asyncio.TimeoutError:
-            await self._run_post_command()
-            return SendResult(success=False, error="Send timed out")
+            return self._fail_timeout("Send timed out")
         except Exception as exc:
             logger.exception("MeshCore DM send failed")
             await self._run_post_command()
@@ -217,8 +229,7 @@ class MeshCoreTxClient:
             await self._run_post_command()
             return SendResult(success=True, event_type=event_type)
         except asyncio.TimeoutError:
-            await self._run_post_command()
-            return SendResult(success=False, error="Advert timed out")
+            return self._fail_timeout("Advert timed out")
         except Exception as exc:
             logger.exception("MeshCore advert send failed")
             await self._run_post_command()
@@ -269,8 +280,7 @@ class MeshCoreTxClient:
                 timeout=10.0,
             )
         except asyncio.TimeoutError:
-            await self._run_post_command()
-            return SendResult(success=False, error="set_name timed out")
+            return self._fail_timeout("set_name timed out")
         except Exception as exc:
             logger.exception("MeshCore set_name failed")
             await self._run_post_command()
@@ -315,6 +325,36 @@ class MeshCoreTxClient:
         logger.info("MeshCore companion renamed to %r (%s)", cleaned, event_type)
         await self._run_post_command()
         return SendResult(success=True, event_type=event_type)
+
+    async def set_radio_params(
+        self,
+        freq: float,
+        bw: float,
+        sf: int,
+        cr: int,
+    ) -> SendResult:
+        """Set companion radio params over the live USB connection, then reboot.
+
+        On success or timeout, kick reconnect so the capture source
+        recovers the companion after reboot / wedge.
+        Credit: javastraat/meshpoint 471d572
+        """
+        if not self.connected:
+            return SendResult(success=False, error="Not connected")
+
+        from src.transmit.meshcore_radio_apply import MeshcoreRadioApply
+
+        result = await MeshcoreRadioApply().apply(self._mc, freq, bw, sf, cr)
+        if result.timed_out:
+            return self._fail_timeout(result.error or "set_radio timed out")
+        if result.success:
+            trigger = getattr(self._source, "_trigger_reconnect", None)
+            if callable(trigger):
+                trigger(
+                    f"radio set to {freq:.3f} MHz / BW{bw:.1f} "
+                    f"/ SF{sf} / CR{cr} -- rebooting"
+                )
+        return result
 
     @staticmethod
     def _normalize_contact_payload(payload) -> list[dict]:
@@ -361,97 +401,14 @@ class MeshCoreTxClient:
             return None
 
     async def sync_channels(self, channel_keys: dict) -> None:
-        """Sync configured channels to the companion device.
-
-        Slot 0 is reserved for Public. Each entry in channel_keys is written
-        to slots 1, 2, … so device channel_idx matches the Messages tab. Extra
-        user slots are cleared. channel_keys maps channel name → hex-encoded
-        16-byte secret (use 32 zero digits for hashtag / no-PSK channels).
-        """
+        """Sync configured channels to the companion device."""
         if not self.connected:
             logger.debug("sync_channels: not connected, skipping")
             return
-        try:
-            from meshcore import EventType
-        except ImportError:
-            logger.warning("sync_channels: meshcore library unavailable")
-            return
-
-        _MAX_SLOTS = MESHCORE_MAX_DEVICE_SLOTS
-
-        # Read current device slots.
-        device_slots: dict[int, tuple[str, bytes]] = {}
-        for i in range(_MAX_SLOTS):
-            try:
-                result = await asyncio.wait_for(
-                    self._mc.commands.get_channel(i), timeout=5.0
-                )
-            except asyncio.TimeoutError:
-                logger.warning("sync_channels: timeout reading slot %d, stopping probe", i)
-                break
-            except Exception:
-                logger.exception("sync_channels: error reading slot %d", i)
-                break
-            if result.type == EventType.ERROR:
-                break
-            p = result.payload
-            device_slots[i] = (
-                p.get("channel_name", ""),
-                p.get("channel_secret", b""),
-            )
-
-        desired = list(channel_keys.items())  # [(name, key_hex), …]
-        if len(desired) > MESHCORE_MAX_USER_CHANNELS:
-            logger.warning(
-                "sync_channels: more than %d user channels configured, ignoring extras",
-                MESHCORE_MAX_USER_CHANNELS,
-            )
-            desired = desired[:MESHCORE_MAX_USER_CHANNELS]
-
-        # Write desired channels to slots 1..N (slot 0 = Public, untouched).
-        for user_idx, (name, key_hex) in enumerate(desired):
-            slot = user_idx + 1
-            try:
-                secret = bytes.fromhex(key_hex)
-            except ValueError:
-                logger.warning("sync_channels: invalid hex key for '%s', skipping", name)
-                continue
-            if len(secret) != 16:
-                logger.warning(
-                    "sync_channels: key for '%s' must be 16 bytes, skipping", name
-                )
-                continue
-            dev_name, dev_secret = device_slots.get(slot, ("", b""))
-            if dev_name == name and dev_secret == secret:
-                logger.debug("sync_channels: slot %d already correct (%s)", slot, name)
-                continue
-            try:
-                await asyncio.wait_for(
-                    self._mc.commands.set_channel(slot, name, secret), timeout=5.0
-                )
-                logger.info("sync_channels: set slot %d → %s", slot, name)
-            except Exception:
-                logger.exception("sync_channels: failed to set slot %d (%s)", slot, name)
-
-        # Clear extra user slots (never clear Public slot 0).
-        first_clear = 1 + len(desired)
-        for idx in range(first_clear, _MAX_SLOTS):
-            dev = device_slots.get(idx)
-            if dev is None:
-                break
-            dev_name, _ = dev
-            if not dev_name:
-                continue
-            try:
-                await asyncio.wait_for(
-                    self._mc.commands.set_channel(idx, "", b"\x00" * 16), timeout=5.0
-                )
-                logger.info("sync_channels: cleared slot %d", idx)
-            except Exception:
-                logger.exception("sync_channels: failed to clear slot %d", idx)
-
-        await self._run_post_command()
-        logger.info("sync_channels: done (%d configured)", len(desired))
+        await MeshcoreChannelSync(
+            self._mc,
+            post_command=self._run_post_command,
+        ).sync(channel_keys)
 
     async def get_contacts(self) -> list[dict]:
         """Retrieve the companion's contact list.

@@ -54,6 +54,7 @@ from src.api.routes import (
     public_radar_routes,
     metrics_routes,
     rf_routes,
+    serial_config_routes,
     stats_routes,
     system_config_routes,
     system_metrics,
@@ -292,6 +293,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.include_router(gps_status.router, dependencies=protected)
     app.include_router(system_config_routes.router, dependencies=protected)
     app.include_router(meshcore_config_routes.router, dependencies=protected)
+    app.include_router(serial_config_routes.router, dependencies=protected)
     app.include_router(config_routes.router, dependencies=protected)
     app.include_router(stats_routes.router, dependencies=protected)
     app.include_router(rf_routes.router, dependencies=protected)
@@ -1375,6 +1377,10 @@ def _init_routes(
     gps_status.init_routes(location_source=coord.location_source)
     system_config_routes.init_routes(config=config)
     meshcore_config_routes.init_routes(config=config, tx_service=tx_service)
+    serial_config_routes.init_routes(
+        config=config,
+        serial_sources=_find_serial_sources(coord),
+    )
 
 
 def _init_dangerous_registry(coord: PipelineCoordinator) -> None:

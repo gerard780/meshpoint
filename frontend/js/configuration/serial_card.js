@@ -1,9 +1,7 @@
 /**
  * Configuration → Serial (Meshtastic USB) card.
- *
- * Edits capture.serial (multi-stick list). Empty serial_port means
- * meshtastic-python auto-detect. Credit: javastraat/meshpoint
- * ``9af5625`` + ``d6adb1e`` / ``a0b2679`` port picker.
+ * Device list + live Modem/Other controls when connected.
+ * Credit: javastraat/meshpoint ``9af5625`` + live ``ec0c410``.
  */
 
 class SerialConfigCard {
@@ -11,6 +9,9 @@ class SerialConfigCard {
         this._api = api;
         this._root = null;
         this._portsByStable = new Map();
+        this._liveSerial = [];
+        this._radioControls = window.SerialRadioControls
+            ? new window.SerialRadioControls(api) : null;
     }
 
     _MAX_DEVICES = 4;
@@ -68,6 +69,7 @@ class SerialConfigCard {
         const cap = config.capture || {};
         const devices = Array.isArray(cap.serial) ? cap.serial : [];
         const sources = cap.sources || [];
+        this._liveSerial = Array.isArray(config.serial) ? config.serial : [];
 
         const enableEl = this._root.querySelector('[data-serial-enable]');
         if (enableEl) enableEl.checked = sources.includes('serial');
@@ -82,6 +84,11 @@ class SerialConfigCard {
             }];
         list.forEach((d) => this._addDeviceRow(d));
         this._syncAddBtn();
+    }
+
+    _liveFor(label) {
+        const name = label ? `serial_${label}` : 'serial';
+        return this._liveSerial.find((s) => s.name === name) || null;
     }
 
     async _rescanUsb(button) {
@@ -121,6 +128,7 @@ class SerialConfigCard {
         const label = this._esc(data.label || '');
         const port = this._esc(data.serial_port || '');
         const baud = data.serial_baud != null ? data.serial_baud : 115200;
+        const live = this._liveFor(data.label || '');
 
         const div = document.createElement('div');
         div.className = 'cfg-companion';
@@ -150,6 +158,8 @@ class SerialConfigCard {
                 <input class="cfg-field__input" type="number"
                        value="${baud}" data-device-baud>
             </label>
+            ${this._liveReadoutHtml(live)}
+            <div data-serial-live-host></div>
         `;
 
         div.querySelector('.cfg-companion__remove').addEventListener('click', () => {
@@ -164,7 +174,40 @@ class SerialConfigCard {
         this._updateResolvedPort(portInput);
 
         this._devicesEl.appendChild(div);
+        if (this._radioControls) {
+            this._radioControls.mount(
+                div.querySelector('[data-serial-live-host]'),
+                data.label || '',
+                live,
+            );
+        }
         this._syncAddBtn();
+    }
+
+    _liveReadoutHtml(live) {
+        if (!live || !live.connected) {
+            return `<p class="cfg-field__hint">Not connected (save + restart to capture).</p>`;
+        }
+        const region = this._esc(live.region || '?');
+        const preset = this._esc(live.modem_preset || '?');
+        const freq = live.frequency_mhz != null
+            ? `${Number(live.frequency_mhz).toFixed(3)} MHz` : '—';
+        return `
+            <div class="cfg-mc-readouts">
+                <div class="cfg-mc-readout">
+                    <span class="cfg-mc-readout__label">Region</span>
+                    <span class="cfg-mc-readout__value">${region}</span>
+                </div>
+                <div class="cfg-mc-readout">
+                    <span class="cfg-mc-readout__label">Preset</span>
+                    <span class="cfg-mc-readout__value">${preset}</span>
+                </div>
+                <div class="cfg-mc-readout">
+                    <span class="cfg-mc-readout__label">Frequency</span>
+                    <span class="cfg-mc-readout__value">${freq}</span>
+                </div>
+            </div>
+        `;
     }
 
     _updateResolvedPort(input) {
