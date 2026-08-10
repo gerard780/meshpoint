@@ -1014,6 +1014,8 @@ def _setup_message_interception(
 
     mc_name_cache: dict[str, str] = {}
     mc_pubkey_canon: dict[str, str] = {}
+    _mc_refresh_state = {"last": 0.0}
+    _MC_REFRESH_MIN_INTERVAL_S = 60.0
 
     from src.api.channel_hash_resolver import ChannelHashResolver
 
@@ -1038,6 +1040,12 @@ def _setup_message_interception(
         if not meshcore_tx or not meshcore_tx.connected:
             logger.debug("MC contact refresh skipped: not connected")
             return
+        import time as _time
+
+        now = _time.monotonic()
+        if now - _mc_refresh_state["last"] < _MC_REFRESH_MIN_INTERVAL_S:
+            return
+        _mc_refresh_state["last"] = now
         try:
             contacts = await meshcore_tx.get_contacts()
             for c in contacts:

@@ -237,6 +237,12 @@ async def get_channels():
 
 @router.get("/contacts")
 async def get_contacts():
+    """Return messaging contacts from the local node roster only.
+
+    Does not call live MeshCore ``get_contacts``: that command shares
+    the companion serial bus with channel TX and was wedging sends
+    whenever the contact picker or enrichment path refreshed.
+    """
     contacts = []
 
     _synthetic = {"rf_log", "raw", "mc:channel", "unknown", ""}
@@ -252,21 +258,6 @@ async def get_contacts():
                 "name": n.get("long_name") or n.get("short_name") or nid,
                 "protocol": n.get("protocol", "meshtastic"),
                 "last_heard": n.get("last_heard", ""),
-            })
-
-    if _meshcore_tx and _meshcore_tx.connected:
-        mc_contacts = await _meshcore_tx.get_contacts()
-        for contact in mc_contacts:
-            pk = contact.get("public_key", "")
-            canonical = pk[:12].lower() if len(pk) >= 12 else pk.lower()
-            name = contact.get("name", "")
-            if not name or name.lower() == canonical:
-                name = await _resolve_display_name(canonical, "meshcore") or canonical
-            contacts.append({
-                "node_id": canonical,
-                "name": name,
-                "protocol": "meshcore",
-                "last_heard": "",
             })
 
     return contacts

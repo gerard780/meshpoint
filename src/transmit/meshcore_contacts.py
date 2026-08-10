@@ -45,6 +45,15 @@ class MeshcoreContactCache:
         self._rows = list(rows)
         self._fetched_at = time.monotonic()
 
+    def note_soft_fail(self) -> None:
+        """Refresh TTL after a timeout/error so callers back off.
+
+        Without this, an empty cache causes every Messages/enrichment
+        caller to burn another 5s live ``get_contacts`` and wedge the
+        companion command channel.
+        """
+        self._fetched_at = time.monotonic()
+
     def invalidate(self) -> None:
         self._fetched_at = 0.0
 

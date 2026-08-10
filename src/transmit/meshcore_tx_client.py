@@ -125,7 +125,9 @@ class MeshCoreTxClient:
 
         Credit: javastraat/meshpoint b04e91c
         """
-        self._contact_cache.invalidate()
+        # Cooldown, do not wipe: keep stale names and stop contact
+        # fetchers from immediately re-hammering a wedged companion.
+        self._contact_cache.note_soft_fail()
         trigger = getattr(self._source, "_trigger_reconnect", None)
         if callable(trigger):
             trigger(reason)
@@ -138,14 +140,23 @@ class MeshCoreTxClient:
         success_log: str,
         timeout_label: str,
     ) -> SendResult:
-        """Run one companion command under the serial lock."""
+        """Run one companion command under the serial lock.
+
+        Pauses auto message fetching for the command window so the
+        library's background poll cannot steal OK/ERROR events
+        (same pattern as set_radio).
+        """
         if not self.connected:
             return SendResult(success=False, error="Not connected")
         try:
             async with self._cmd_lock:
                 if not self.connected or self._mc is None:
                     return SendResult(success=False, error="Not connected")
-                result = await asyncio.wait_for(factory(), timeout=10.0)
+                await self._pause_auto_fetch()
+                try:
+                    result = await asyncio.wait_for(factory(), timeout=10.0)
+                finally:
+                    await self._resume_auto_fetch()
         except asyncio.TimeoutError:
             return self._fail_timeout(timeout_label)
         except Exception as exc:
@@ -190,6 +201,42 @@ class MeshCoreTxClient:
         logger.info("%s: %s", success_log, event_type)
         await self._run_post_command()
         return SendResult(success=True, event_type=event_type)
+
+    async def _pause_auto_fetch(self) -> None:
+        mc = self._mc
+        if mc is None:
+            return
+        stop = getattr(mc, "stop_auto_message_fetching", None)
+        if not callable(stop):
+            return
+        try:
+            await stop()
+        except Exception:
+            logger.debug("Could not pause MeshCore auto-fetch", exc_info=True)
+
+    async def _resume_auto_fetch(self) -> None:
+        # Prefer the capture-source restart (rebinds subscriptions) when
+        # bound; otherwise poke the library directly.
+        restart = getattr(self._source, "restart_auto_fetching", None)
+        if callable(restart):
+            try:
+                await restart()
+                return
+            except Exception:
+                logger.debug(
+                    "Could not restart MeshCore auto-fetch via source",
+                    exc_info=True,
+                )
+        mc = self._mc
+        if mc is None:
+            return
+        start = getattr(mc, "start_auto_message_fetching", None)
+        if not callable(start):
+            return
+        try:
+            await start()
+        except Exception:
+            logger.debug("Could not resume MeshCore auto-fetch", exc_info=True)
 
     async def create_connection(
         self,
@@ -373,10 +420,18 @@ class MeshCoreTxClient:
         if not self.connected:
             logger.debug("sync_channels: not connected, skipping")
             return
-        await MeshcoreChannelSync(
-            self._mc,
-            post_command=self._run_post_command,
-        ).sync(channel_keys)
+        async with self._cmd_lock:
+            if not self.connected or self._mc is None:
+                return
+            await self._pause_auto_fetch()
+            try:
+                await MeshcoreChannelSync(
+                    self._mc,
+                    post_command=None,
+                ).sync(channel_keys)
+            finally:
+                await self._resume_auto_fetch()
+            await self._run_post_command()
 
     async def get_contacts(self, *, force: bool = False) -> list[dict]:
         """Retrieve the companion's contact list.
@@ -407,9 +462,11 @@ class MeshCoreTxClient:
                 )
         except asyncio.TimeoutError:
             logger.warning("get_contacts timed out waiting for companion")
+            self._contact_cache.note_soft_fail()
             return self._contact_cache.get_stale()
         except Exception:
             logger.exception("Failed to retrieve MeshCore contacts")
+            self._contact_cache.note_soft_fail()
             return self._contact_cache.get_stale()
 
         contacts = MeshcoreContactParser.from_command_result(result)
@@ -417,6 +474,9 @@ class MeshCoreTxClient:
             result
         )
         if soft_fail:
+            # Stamp TTL even on failure so queued callers do not each
+            # burn another live 5s get_contacts on a wedged companion.
+            self._contact_cache.note_soft_fail()
             stale = self._contact_cache.get_stale()
             if stale:
                 logger.info(
@@ -424,7 +484,8 @@ class MeshCoreTxClient:
                     len(stale),
                 )
                 return stale
-        else:
-            self._contact_cache.store(contacts)
+            logger.info("get_contacts: soft fail, empty roster (cooling down)")
+            return []
+        self._contact_cache.store(contacts)
         logger.info("get_contacts: %d contacts parsed", len(contacts))
         return contacts

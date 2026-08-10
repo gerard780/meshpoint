@@ -89,6 +89,13 @@ class TestMeshcoreContactCache(unittest.TestCase):
         self.assertIsNone(cache.get_fresh())
         self.assertEqual(len(cache.get_stale()), 1)
 
+    def test_soft_fail_starts_cooldown_with_empty_roster(self):
+        cache = MeshcoreContactCache(ttl_seconds=60.0)
+        self.assertIsNone(cache.get_fresh())
+        cache.note_soft_fail()
+        # Empty list (not None) so callers skip another live fetch.
+        self.assertEqual(cache.get_fresh(), [])
+
 
 if __name__ == "__main__":
     unittest.main()
