@@ -75,6 +75,7 @@ from src.api.routes import (
     rfenv_companion_firmware_routes,
     reticulum_companion_firmware_routes,
     reticulum_routes,
+    rnode_firmware_routes,
     meshtastic_firmware_routes,
     meshcore_firmware_routes,
     spectrum_routes,
@@ -536,6 +537,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.include_router(pager_firmware_routes.router, dependencies=protected)
     app.include_router(rfenv_companion_firmware_routes.router, dependencies=protected)
     app.include_router(reticulum_companion_firmware_routes.router, dependencies=protected)
+    app.include_router(rnode_firmware_routes.router, dependencies=protected)
     app.include_router(meshtastic_firmware_routes.router, dependencies=protected)
     app.include_router(meshcore_firmware_routes.router, dependencies=protected)
     app.include_router(config_routes.router, dependencies=protected)

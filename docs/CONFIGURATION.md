@@ -175,6 +175,35 @@ WiFi SSID/password and the Reticulum backbone host/port (default `node.reticulum
 
 Requires the PlatformIO toolchain, installed via `scripts/install.sh`'s separate opt-in prompt (`--skip-platformio` to skip non-interactively) — a second, independent toolchain from arduino-cli's, since this is the only companion firmware in this repo that needs it. Installed self-contained under `/opt/platformio` (its own venv; `PLATFORMIO_CORE_DIR` is set in `meshpoint.service`, same `--no-create-home` `meshpoint` service-user reasoning as arduino-cli's own `XDG_CACHE_HOME`/`/opt/arduino-cli`). Unlike arduino-cli's board core, PlatformIO downloads its ESP32 platform/toolchain lazily on first `pio run`, not during `install.sh` — so that step itself is quick, and the real multi-hundred-MB download happens the first time the card is actually used.
 
+### Reticulum (native LXMF messaging)
+
+Separate from the standalone companion above — this is meshpoint's own [Reticulum](https://reticulum.network/)/[LXMF](https://github.com/markqvist/LXMF) client, built into the dashboard as the **Reticulum** sidebar page (Peers, Messages, Send). Off by default:
+
+```yaml
+reticulum:
+  enabled: false                              # opt-in
+  display_name: "Meshpoint"
+  reticulum_config_dir: "data/reticulum/rns_config"
+  identity_path: "data/reticulum/identity"
+  lxmf_storage_dir: "data/reticulum/lxmf"
+  rnode_serial_port: ""                       # stable /dev/serial/by-id/... path, blank = no RNode
+  rnode_frequency_hz: 869463000
+  rnode_bandwidth_hz: 125000
+  rnode_tx_power: 20
+  rnode_spreading_factor: 8
+  rnode_coding_rate: 5
+  backbone_host: "node.reticulumnet.nl"
+  backbone_port: 4242
+```
+
+**Why `enabled` defaults to `false`**: meshpoint's own `RNS.Reticulum()` call attaches to a locally-running `rnsd` shared instance as a client rather than opening a radio interface itself — but if `rnsd` isn't already running when meshpoint starts, `RNS.Reticulum()` falls back to opening whatever interfaces are configured in `reticulum_config_dir` directly, which would then fight `rnsd` for them once it starts. Only turn this on once `rnsd` (see below) is reliably running before meshpoint does.
+
+**`rnsd` itself** runs as its own opt-in systemd service (`scripts/rnsd.service`, installed via `install.sh`'s own prompt, or manually: `sudo systemctl enable --now rnsd`) — deliberately **not** a dependency of `meshpoint.service` (ordering only, `After=rnsd.service`, no `Wants=`/`Requires=`), so Reticulum being off has zero effect on meshpoint's core service. Its own interfaces config gets regenerated from the `reticulum.rnode_*`/`backbone_*` keys above on every `rnsd` start (`scripts/write_rnsd_config.py`, run as `rnsd.service`'s own `ExecStartPre`) — written into `reticulum_config_dir`, the **same directory** meshpoint's own client uses. That's not just tidiness: the shared-instance RPC channel authenticates per-configdir, so meshpoint and `rnsd` sharing one directory is what makes the client/master split actually work reliably.
+
+`rnode_serial_port` needs a physical RNode already flashed and plugged in — see the RNode firmware card below if you need to flash one. Leaving it blank still gives you a working Reticulum node over the `backbone_host`/`backbone_port` TCP link alone, no LoRa hardware required.
+
+**Configuration → Firmware** also has a card for flashing real [RNode firmware](https://github.com/markqvist/RNode_Firmware) onto a board to use as `rnode_serial_port` above — 13 supported boards (Heltec LoRa32 v2/v3/v4, Heltec T114, LilyGO LoRa32 v1.0/v2.0/v2.1, LilyGO LoRa T3S3, LilyGO T-Beam, LilyGO T-Beam Supreme, LilyGO T-Deck, LilyGO T-Echo, RAK4631), each with its own band/model variants. Wraps `rnodeconf` (bundled with the `rns` pip package, already a meshpoint dependency — no separate install) server-side rather than the browser-side Web Serial flasher some other Reticulum tools use, since the board is physically on the Pi, not necessarily the machine your browser is on. One command (`rnodeconf --autoinstall`) flashes the firmware, provisions the EEPROM, and sets the firmware hash together — firmware itself is fetched live from the internet by `rnodeconf`, not vendored in this repo, so the Pi needs internet access at flash time.
+
 ### Standard Meshtastic Presets
 
 To match a Meshtastic preset, set `spreading_factor` and `bandwidth_khz` together:

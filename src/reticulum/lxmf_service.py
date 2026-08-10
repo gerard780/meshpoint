@@ -27,6 +27,10 @@ import logging
 from pathlib import Path
 from typing import Optional
 
+from src.api.websocket_manager import WebSocketManager
+from src.storage.message_repository import MessageRepository
+from src.storage.reticulum_peer_repository import ReticulumPeerRepository
+
 logger = logging.getLogger(__name__)
 
 try:
@@ -35,10 +39,6 @@ try:
 except ImportError:  # not installed -- e.g. Mac dev environment
     RNS = None
     LXMF = None
-
-from src.api.websocket_manager import WebSocketManager
-from src.storage.message_repository import MessageRepository
-from src.storage.reticulum_peer_repository import ReticulumPeerRepository
 
 _ANNOUNCE_ASPECTS = ("lxmf.delivery", "lxmf.propagation", "nomadnetwork.node")
 
