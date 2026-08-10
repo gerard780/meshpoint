@@ -54,7 +54,11 @@ class _AnnounceHandler:
     def __init__(self, aspect_filter):
         self.aspect_filter = aspect_filter
 
-    def received_announce(self, destination_hash, _announced_identity, app_data):
+    # RNS calls this with keyword args (destination_hash=, announced_identity=,
+    # app_data=) -- the parameter name is part of the actual call contract,
+    # not just cosmetic, so it can't be underscore-prefixed to silence the
+    # unused-arg lint hint the way a positional-only callback could.
+    def received_announce(self, destination_hash, announced_identity, app_data):
         dest_hex = RNS.hexrep(destination_hash, delimit=False)
         display_name = ""
         if app_data:
