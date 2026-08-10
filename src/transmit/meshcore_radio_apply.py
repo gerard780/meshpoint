@@ -77,6 +77,15 @@ class MeshcoreRadioApply:
 
         if hasattr(result, "type") and result.type == EventType.ERROR:
             detail = self._error_detail(result)
+            # meshcore_py returns these when the companion never ACKs
+            # (common on cross-band set_radio that silent-reboots).
+            # Treat as timeout so TxClient can reconnect + verify.
+            if detail in ("no_event_received", "timeout"):
+                return SendResult(
+                    success=False,
+                    error=f"set_radio timed out ({detail})",
+                    timed_out=True,
+                )
             error = (
                 f"Companion rejected radio params: {detail}"
                 if detail

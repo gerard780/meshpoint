@@ -37,6 +37,26 @@ class TestMeshcoreRadioApply(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.timed_out)
         mc.stop_auto_message_fetching.assert_awaited()
 
+    async def test_no_event_received_is_timed_out_not_reject(self):
+        """meshcore_py ERROR reason=no_event_received is a timeout, not reject."""
+        from meshcore import EventType
+        from meshcore.events import Event
+
+        mc = MagicMock()
+        mc.stop_auto_message_fetching = AsyncMock()
+        mc.commands.set_radio = AsyncMock(
+            return_value=Event(
+                EventType.ERROR, {"reason": "no_event_received"}
+            )
+        )
+
+        result = await MeshcoreRadioApply().apply(mc, 910.525, 62.5, 7, 5)
+
+        self.assertFalse(result.success)
+        self.assertTrue(result.timed_out)
+        self.assertIn("no_event_received", result.error)
+        mc.commands.reboot.assert_not_called()
+
 
 class TestMeshcoreRadioTimeoutRecovery(unittest.IsolatedAsyncioTestCase):
     async def test_verify_success_when_params_match(self):
