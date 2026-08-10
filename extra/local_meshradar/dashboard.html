@@ -776,7 +776,12 @@ const ROLE_ICONS = {
     LOST_AND_FOUND: '&#10067;',
 };
 function roleIcon(role) {
-    if (!role) return '';
+    // role 0 (CLIENT) is a valid, common role -- must check `!= null`,
+    // not truthiness, or the most common role of all silently gets no
+    // icon anywhere this is used (confirmed live: a CLIENT node's drawer
+    // showed no role icon and, before roleName()/hardwareName() existed,
+    // its "Role" row vanished entirely for the same reason).
+    if (role == null || role === '') return '';
     const name = roleName(role);
     const icon = ROLE_ICONS[name];
     return icon ? `<span class="role-badge" title="${esc(name)}">${icon}</span>` : '';
@@ -1328,7 +1333,7 @@ function renderNodeList() {
         const telemetry = members.map((m) => parseJsonSafe(m.latest_telemetry_json)).find(Boolean);
 
         const extraBadges = [];
-        if (hardwareModel) extraBadges.push(`<span class="badge">${esc(hardwareName(hardwareModel))}</span>`);
+        if (hardwareModel != null) extraBadges.push(`<span class="badge">${esc(hardwareName(hardwareModel))}</span>`);
         if (hasPosition && altitude != null) extraBadges.push(`<span class="badge">&#9650; ${Math.round(altitude)}m</span>`);
         if (telemetry?.voltage != null) extraBadges.push(`<span class="badge">&#9889;${round1(telemetry.voltage)}V</span>`);
         if (telemetry?.battery_level != null) extraBadges.push(`<span class="badge">&#128267;${Math.round(telemetry.battery_level)}%</span>`);
@@ -1652,8 +1657,8 @@ function openNodeDrawer(n) {
         </div>
         ${ndSection('Node Info', [
             { label: 'Protocol', value: esc(n.protocol) },
-            { label: 'Role', value: n.role ? esc(roleName(n.role)) : null },
-            { label: 'Hardware', value: n.hardware_model ? esc(hardwareName(n.hardware_model)) : null },
+            { label: 'Role', value: n.role != null ? esc(roleName(n.role)) : null },
+            { label: 'Hardware', value: n.hardware_model != null ? esc(hardwareName(n.hardware_model)) : null },
             { label: 'Firmware', value: n.firmware_version ? esc(n.firmware_version) : null },
             { label: 'Heard via', value: heardViaValue },
             { label: 'Packets', value: n.packet_count },
