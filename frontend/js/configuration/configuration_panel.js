@@ -212,6 +212,7 @@ class ConfigurationPanel {
             post: (url, body) => self._request('POST', url, body),
             refresh: () => self._loadConfig().then(() => self._renderAll()),
             toast: (msg) => self._toast(msg),
+            lastError: () => self._lastRequestError || '',
             signalRestart: (msg) => self._toast(
                 msg + ' Restart the service from Settings → System to apply.',
             ),
@@ -227,19 +228,36 @@ class ConfigurationPanel {
         const init = { method, headers: { 'Content-Type': 'application/json' }, credentials: 'same-origin' };
         if (body !== undefined && body !== null) init.body = JSON.stringify(body);
         const isGet = method === 'GET';
+        this._lastRequestError = '';
         try {
             const res = await fetch(url, init);
             if (!res.ok) {
                 // Credit: javastraat/meshpoint 676f7e3 — toast GET failures too
                 // (e.g. empty Firmware dropdowns on GitHub rate-limit).
                 const err = await res.json().catch(() => ({}));
-                this._toast(`${isGet ? 'Error' : 'Save failed'}: ${err.detail || res.status}`);
+                const detail = this._formatErrorDetail(err.detail, res.status);
+                this._lastRequestError = detail;
+                this._toast(`${isGet ? 'Error' : 'Save failed'}: ${detail}`);
                 return null;
             }
             return await res.json();
         } catch (e) {
+            this._lastRequestError = e.message || 'request failed';
             this._toast(`${isGet ? 'Error' : 'Save failed'}: ${e.message}`);
             return null;
+        }
+    }
+
+    _formatErrorDetail(detail, status) {
+        if (detail == null || detail === '') return String(status);
+        if (typeof detail === 'string') return detail;
+        if (Array.isArray(detail)) {
+            return detail.map((d) => (d && d.msg) || JSON.stringify(d)).join('; ');
+        }
+        try {
+            return JSON.stringify(detail);
+        } catch (_e) {
+            return String(detail);
         }
     }
 

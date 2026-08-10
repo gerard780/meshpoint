@@ -1,0 +1,130 @@
+"""Tests for MeshCore set_radio apply + timeout recovery."""
+
+from __future__ import annotations
+
+import asyncio
+import unittest
+from unittest.mock import AsyncMock, MagicMock, patch
+
+from src.transmit.meshcore_radio_apply import (
+    MeshcoreRadioApply,
+    MeshcoreRadioTimeoutRecovery,
+)
+from src.transmit.meshcore_tx_client import (
+    MeshCoreTxClient,
+    RadioStatus,
+    SendResult,
+)
+
+
+class TestMeshcoreRadioApply(unittest.IsolatedAsyncioTestCase):
+    async def test_timeout_returns_timed_out(self):
+        mc = MagicMock()
+        mc.stop_auto_message_fetching = AsyncMock()
+
+        async def hang(_freq, _bw, _sf, _cr):
+            await asyncio.sleep(60)
+
+        mc.commands.set_radio = hang
+
+        with patch(
+            "src.transmit.meshcore_radio_apply._SET_RADIO_TIMEOUT_SECONDS",
+            0.05,
+        ):
+            result = await MeshcoreRadioApply().apply(mc, 910.525, 62.5, 7, 5)
+
+        self.assertFalse(result.success)
+        self.assertTrue(result.timed_out)
+        mc.stop_auto_message_fetching.assert_awaited()
+
+
+class TestMeshcoreRadioTimeoutRecovery(unittest.IsolatedAsyncioTestCase):
+    async def test_verify_success_when_params_match(self):
+        info = RadioStatus(
+            frequency_mhz=910.525,
+            bandwidth_khz=62.5,
+            spreading_factor=7,
+            coding_rate=5,
+        )
+        result = await MeshcoreRadioTimeoutRecovery().verify(
+            wait_connected=AsyncMock(return_value=True),
+            get_radio_info=AsyncMock(return_value=info),
+            freq=910.525,
+            bw=62.5,
+            sf=7,
+            cr=5,
+        )
+        self.assertTrue(result.success)
+
+    async def test_verify_fails_when_params_differ(self):
+        info = RadioStatus(
+            frequency_mhz=869.618,
+            bandwidth_khz=62.5,
+            spreading_factor=8,
+            coding_rate=8,
+        )
+        result = await MeshcoreRadioTimeoutRecovery().verify(
+            wait_connected=AsyncMock(return_value=True),
+            get_radio_info=AsyncMock(return_value=info),
+            freq=910.525,
+            bw=62.5,
+            sf=7,
+            cr=5,
+        )
+        self.assertFalse(result.success)
+        self.assertTrue(result.timed_out)
+        self.assertIn("869.618", result.error)
+
+    def test_params_match_tolerance(self):
+        info = RadioStatus(
+            frequency_mhz=910.525,
+            bandwidth_khz=62.5,
+            spreading_factor=7,
+            coding_rate=5,
+        )
+        self.assertTrue(
+            MeshcoreRadioTimeoutRecovery.params_match(
+                info, 910.525, 62.5, 7, 5
+            )
+        )
+        self.assertFalse(
+            MeshcoreRadioTimeoutRecovery.params_match(
+                info, 869.618, 62.5, 8, 8
+            )
+        )
+
+
+class TestSetRadioParamsTimeoutRecovery(unittest.IsolatedAsyncioTestCase):
+    async def test_timeout_triggers_reconnect_then_verify(self):
+        client = MeshCoreTxClient()
+        source = MagicMock()
+        source._connected = True
+        source._meshcore = MagicMock()
+        source._trigger_reconnect = MagicMock()
+        client.set_source(source)
+
+        with patch.object(
+            MeshcoreRadioApply,
+            "apply",
+            new=AsyncMock(
+                return_value=SendResult(
+                    success=False, error="set_radio timed out", timed_out=True
+                )
+            ),
+        ), patch.object(
+            MeshcoreRadioTimeoutRecovery,
+            "verify",
+            new=AsyncMock(
+                return_value=SendResult(success=True, event_type="set_radio")
+            ),
+        ) as verify:
+            result = await client.set_radio_params(910.525, 62.5, 7, 5)
+
+        self.assertTrue(result.success)
+        source._trigger_reconnect.assert_called_once()
+        self.assertIn("timed out", source._trigger_reconnect.call_args[0][0])
+        verify.assert_awaited_once()
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -101,7 +101,8 @@ class MeshcoreRadioSettings {
 
         if (button) button.disabled = true;
         status.dataset.kind = 'pending';
-        status.textContent = 'Setting radio…';
+        status.textContent =
+            'Setting radio… (cross-band changes can take up to a minute)';
 
         const result = await this._api.put(
             '/api/config/meshcore/companion-radio',
@@ -115,8 +116,12 @@ class MeshcoreRadioSettings {
             this._api.toast('MeshCore radio updated, companion rebooting');
             await this._api.refresh();
         } else {
+            // _api.put toasts Save failed: <detail>; keep it on the card too.
+            const detail = (this._api.lastError && this._api.lastError()) || '';
             status.dataset.kind = 'error';
-            status.textContent = 'Set radio failed.';
+            status.textContent = detail
+                ? `Set radio failed: ${detail}`
+                : 'Set radio failed.';
         }
         if (button) button.disabled = false;
     }

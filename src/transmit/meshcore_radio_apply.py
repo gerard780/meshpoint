@@ -3,6 +3,11 @@
 Mirrors ``meshpoint meshcore-radio`` CLI ``set_radio`` + ``reboot``,
 but reuses the open USB handle so reconnect recovers via the capture
 source instead of a cold CLI handshake.
+
+Cross-band changes (e.g. EU → USA/Canada) sometimes reboot the
+companion without an OK event. ``MeshcoreRadioTimeoutRecovery`` treats
+that timeout as a possible silent reboot and verifies radio params
+after reconnect.
 Credit: javastraat/meshpoint 471d572
 """
 
@@ -10,11 +15,19 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
+from typing import Any, Awaitable, Callable, Optional
 
-from src.transmit.meshcore_tx_client import SendResult
+from src.transmit.meshcore_tx_client import RadioStatus, SendResult
 
 logger = logging.getLogger(__name__)
+
+# Band changes can take longer than short commands (set_name / advert).
+_SET_RADIO_TIMEOUT_SECONDS = 20.0
+_REBOOT_TIMEOUT_SECONDS = 10.0
+# First reconnect attempt + DTR retry path observed ~30s on RAK V2.
+_RECONNECT_VERIFY_SECONDS = 75.0
+_FREQ_MATCH_TOLERANCE_MHZ = 0.002
+_BW_MATCH_TOLERANCE_KHZ = 0.1
 
 
 class MeshcoreRadioApply:
@@ -31,6 +44,11 @@ class MeshcoreRadioApply:
         if mc is None:
             return SendResult(success=False, error="Not connected")
 
+        freq = round(float(freq), 3)
+        bw = round(float(bw), 1)
+        sf = int(sf)
+        cr = int(cr)
+
         validation_error = self._validate(freq, bw, sf, cr)
         if validation_error:
             return SendResult(success=False, error=validation_error)
@@ -42,10 +60,12 @@ class MeshcoreRadioApply:
                 success=False, error="meshcore library unavailable"
             )
 
+        await self._pause_auto_fetch(mc)
+
         try:
             result = await asyncio.wait_for(
                 mc.commands.set_radio(freq, bw, sf, cr),
-                timeout=10.0,
+                timeout=_SET_RADIO_TIMEOUT_SECONDS,
             )
         except asyncio.TimeoutError:
             return SendResult(
@@ -65,7 +85,10 @@ class MeshcoreRadioApply:
             return SendResult(success=False, error=error)
 
         try:
-            await asyncio.wait_for(mc.commands.reboot(), timeout=10.0)
+            await asyncio.wait_for(
+                mc.commands.reboot(),
+                timeout=_REBOOT_TIMEOUT_SECONDS,
+            )
         except Exception:
             logger.debug(
                 "MeshCore reboot after set_radio failed or timed out; "
@@ -74,6 +97,20 @@ class MeshcoreRadioApply:
             )
 
         return SendResult(success=True, event_type="set_radio")
+
+    @staticmethod
+    async def _pause_auto_fetch(mc: Any) -> None:
+        """Stop background message polling so set_radio owns the command channel."""
+        stop = getattr(mc, "stop_auto_message_fetching", None)
+        if not callable(stop):
+            return
+        try:
+            await stop()
+        except Exception:
+            logger.debug(
+                "Could not pause MeshCore auto-fetch before set_radio",
+                exc_info=True,
+            )
 
     @staticmethod
     def _validate(freq: float, bw: float, sf: int, cr: int) -> str:
@@ -99,3 +136,77 @@ class MeshcoreRadioApply:
         if payload is not None:
             return str(payload)
         return ""
+
+
+class MeshcoreRadioTimeoutRecovery:
+    """After set_radio timeout: wait for reconnect and confirm radio params."""
+
+    async def verify(
+        self,
+        *,
+        wait_connected: Callable[[float], Awaitable[bool]],
+        get_radio_info: Callable[[], Awaitable[Optional[RadioStatus]]],
+        freq: float,
+        bw: float,
+        sf: int,
+        cr: int,
+    ) -> SendResult:
+        logger.warning(
+            "set_radio timed out; waiting for companion reconnect to verify "
+            "(silent reboot is common on cross-band changes)"
+        )
+        ok = await wait_connected(_RECONNECT_VERIFY_SECONDS)
+        if not ok:
+            return SendResult(
+                success=False,
+                error=(
+                    "set_radio timed out and companion did not reconnect "
+                    "in time; wait for MeshCore to reconnect and retry"
+                ),
+                timed_out=True,
+            )
+
+        info = await get_radio_info()
+        if info is None:
+            return SendResult(
+                success=False,
+                error=(
+                    "set_radio timed out; companion reconnected but radio "
+                    "info is unavailable; check preset and retry"
+                ),
+                timed_out=True,
+            )
+
+        if self.params_match(info, freq, bw, sf, cr):
+            logger.info(
+                "set_radio timeout recovered: companion radio matches "
+                "%.3f MHz / BW%.1f / SF%d / CR%d",
+                freq, bw, sf, cr,
+            )
+            return SendResult(success=True, event_type="set_radio")
+
+        return SendResult(
+            success=False,
+            error=(
+                "set_radio timed out; companion reconnected but radio "
+                f"is {info.frequency_mhz:.3f} MHz / BW{info.bandwidth_khz:.1f} "
+                f"/ SF{info.spreading_factor} / CR{info.coding_rate} "
+                f"(wanted {freq:.3f} / BW{bw:.1f} / SF{sf} / CR{cr})"
+            ),
+            timed_out=True,
+        )
+
+    @staticmethod
+    def params_match(
+        info: RadioStatus,
+        freq: float,
+        bw: float,
+        sf: int,
+        cr: int,
+    ) -> bool:
+        return (
+            abs(info.frequency_mhz - freq) <= _FREQ_MATCH_TOLERANCE_MHZ
+            and abs(info.bandwidth_khz - bw) <= _BW_MATCH_TOLERANCE_KHZ
+            and int(info.spreading_factor) == int(sf)
+            and int(info.coding_rate) == int(cr)
+        )

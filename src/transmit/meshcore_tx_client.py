@@ -335,18 +335,34 @@ class MeshCoreTxClient:
     ) -> SendResult:
         """Set companion radio params over the live USB connection, then reboot.
 
-        On success or timeout, kick reconnect so the capture source
-        recovers the companion after reboot / wedge.
+        On success, kick reconnect so the capture source recovers after
+        reboot. On timeout, also reconnect then verify radio params:
+        cross-band set_radio often reboots without an OK event.
         Credit: javastraat/meshpoint 471d572
         """
         if not self.connected:
             return SendResult(success=False, error="Not connected")
 
-        from src.transmit.meshcore_radio_apply import MeshcoreRadioApply
+        from src.transmit.meshcore_radio_apply import (
+            MeshcoreRadioApply,
+            MeshcoreRadioTimeoutRecovery,
+        )
 
+        freq = round(float(freq), 3)
+        bw = round(float(bw), 1)
         result = await MeshcoreRadioApply().apply(self._mc, freq, bw, sf, cr)
         if result.timed_out:
-            return self._fail_timeout(result.error or "set_radio timed out")
+            trigger = getattr(self._source, "_trigger_reconnect", None)
+            if callable(trigger):
+                trigger(result.error or "set_radio timed out")
+            return await MeshcoreRadioTimeoutRecovery().verify(
+                wait_connected=self._wait_until_connected,
+                get_radio_info=self.get_radio_info,
+                freq=freq,
+                bw=bw,
+                sf=int(sf),
+                cr=int(cr),
+            )
         if result.success:
             trigger = getattr(self._source, "_trigger_reconnect", None)
             if callable(trigger):
@@ -355,6 +371,15 @@ class MeshCoreTxClient:
                     f"/ SF{sf} / CR{cr} -- rebooting"
                 )
         return result
+
+    async def _wait_until_connected(self, timeout_seconds: float) -> bool:
+        """Poll live source connect state after a reconnect kick."""
+        deadline = asyncio.get_event_loop().time() + timeout_seconds
+        while asyncio.get_event_loop().time() < deadline:
+            if self.connected:
+                return True
+            await asyncio.sleep(0.5)
+        return self.connected
 
     @staticmethod
     def _normalize_contact_payload(payload) -> list[dict]:
