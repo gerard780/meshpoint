@@ -1,26 +1,32 @@
 /**
  * Reticulum/LXMF monitoring panel.
  *
- * Structurally mirrors MeshCorePanel (Peers/Messages tabs, same
- * lorawan.css classes, same 15s poll). Two tabs to start, read-only --
- * a Peers roster (from received announces) and a flat Messages
- * conversation summary (reuses the existing cross-protocol
- * GET /api/messages/conversations, filtered client-side to
- * protocol==='reticulum' rather than adding a new backend endpoint).
- * No compose/send UI yet and no per-conversation thread view --
- * that's the "chat" step, deliberately deferred.
+ * Structurally mirrors MeshCorePanel/DapnetPanel (tabs, same
+ * lorawan.css classes, same 15s poll). Peers (roster) + Messages (flat
+ * conversation summary, reuses the existing cross-protocol
+ * GET /api/messages/conversations filtered client-side to
+ * protocol==='reticulum') + an admin-only Send tab -- a plain compose
+ * form (destination picker + text), same shape as DapnetPanel's own
+ * Send tab. Deliberately still not a per-conversation thread view --
+ * sending is here to prove the round trip end-to-end, not yet a full
+ * chat UI.
  */
 
 const RT_TAB_STORE_KEY = 'meshpoint.rtTab';
 
 class ReticulumPanel {
-    constructor() {
+    constructor(identity) {
         this._refreshTimer = null;
         this._mounted = false;
         this._peers = [];
+        // Fails open like every other panel's own guard (no identity/role
+        // info at all means show it) -- the real security boundary is
+        // server-side (POST /api/reticulum/send already requires admin).
+        this._isAdmin = identity?.role !== 'viewer';
         let stored = null;
         try { stored = localStorage.getItem(RT_TAB_STORE_KEY); } catch (_) {}
-        this._tab = stored === 'messages' ? 'messages' : 'peers';
+        this._tab = (stored === 'messages' || (stored === 'send' && this._isAdmin))
+            ? stored : 'peers';
         this._onWsPeer = this._onWsPeer.bind(this);
         this._onWsMessage = this._onWsMessage.bind(this);
     }
@@ -85,6 +91,8 @@ class ReticulumPanel {
                                     data-rt-tab="peers">Peers</button>
                             <button class="lw-tab" type="button" role="tab"
                                     data-rt-tab="messages">Messages</button>
+                            <button class="lw-tab" type="button" role="tab"
+                                    data-rt-tab="send" ${this._isAdmin ? '' : 'hidden'}>Send</button>
                         </div>
                     </div>
                     <div data-rt-view="peers">
@@ -137,6 +145,26 @@ class ReticulumPanel {
                             </p>
                         </div>
                     </div>
+                    <div data-rt-view="send" hidden>
+                        <div class="panel__body">
+                            <form class="cfg-form" id="rt-send-form" style="max-width:480px">
+                                <label class="cfg-field">
+                                    <span class="cfg-field__label">Peer</span>
+                                    <select class="cfg-field__input" id="rt-send-peer" required></select>
+                                </label>
+                                <label class="cfg-field">
+                                    <span class="cfg-field__label">Message</span>
+                                    <input class="cfg-field__input" type="text"
+                                           id="rt-send-text" placeholder="Message text" required>
+                                </label>
+                                <div class="cfg-card__actions">
+                                    <button class="terminal-button terminal-button--primary"
+                                            type="submit" id="rt-send-btn">Send message</button>
+                                </div>
+                                <p class="cfg-status" id="rt-send-status" aria-live="polite"></p>
+                            </form>
+                        </div>
+                    </div>
                 </div>
             </section>
         `;
@@ -146,6 +174,8 @@ class ReticulumPanel {
         root.querySelectorAll('[data-rt-tab]').forEach((btn) => {
             btn.addEventListener('click', () => this._setTab(btn.dataset.rtTab));
         });
+        document.getElementById('rt-send-form')
+            ?.addEventListener('submit', (e) => this._handleSend(e));
         this._applyTab();
     }
 
@@ -192,7 +222,27 @@ class ReticulumPanel {
             this._peers = peers;
             this._setText('rt-stat-peers', peers.length);
             this._renderPeers();
+            this._renderSendPeers();
         } catch (_) {}
+    }
+
+    _renderSendPeers() {
+        // Only lxmf.delivery destinations are real message recipients --
+        // lxmf.propagation/nomadnetwork.node peers aren't people to
+        // message, they're infrastructure, matching the backend's own
+        // send_message() semantics (an LXMF delivery destination).
+        const select = document.getElementById('rt-send-peer');
+        if (!select) return;
+        const deliveryPeers = this._peers.filter((p) => p.aspect === 'lxmf.delivery');
+        const previous = select.value;
+        select.innerHTML = deliveryPeers.map((p) => `
+            <option value="${this._esc(p.destination_hash)}">
+                ${this._esc(p.display_name || p.destination_hash)}
+            </option>
+        `).join('');
+        if (previous && deliveryPeers.some((p) => p.destination_hash === previous)) {
+            select.value = previous;
+        }
     }
 
     _renderPeers() {
@@ -249,6 +299,44 @@ class ReticulumPanel {
                 <td class="lw-num">${c.unread_count ? c.unread_count : ''}</td>
             </tr>
         `).join('');
+    }
+
+    async _handleSend(event) {
+        event.preventDefault();
+        const status = document.getElementById('rt-send-status');
+        const btn = document.getElementById('rt-send-btn');
+        const peerEl = document.getElementById('rt-send-peer');
+        const textEl = document.getElementById('rt-send-text');
+        const destination_hash = peerEl?.value || '';
+        const text = (textEl?.value || '').trim();
+        if (!destination_hash || !text) return;
+
+        btn.disabled = true;
+        status.dataset.kind = 'pending';
+        status.textContent = 'Sending…';
+        try {
+            const r = await fetch('/api/reticulum/send', {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ destination_hash, text }),
+            });
+            const result = await r.json().catch(() => ({}));
+            if (r.ok) {
+                status.dataset.kind = 'success';
+                status.textContent = 'Sent.';
+                textEl.value = '';
+                this._loadMessages();
+            } else {
+                status.dataset.kind = 'error';
+                status.textContent = result.detail || 'Send failed.';
+            }
+        } catch (_) {
+            status.dataset.kind = 'error';
+            status.textContent = 'Send failed.';
+        } finally {
+            btn.disabled = false;
+        }
     }
 
     _fmtTime(ts) {

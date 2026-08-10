@@ -156,7 +156,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     _bootTopologyPanel(router);
     _bootMeshtasticPanel(router);
     _bootMeshCorePanel(router);
-    _bootReticulumPanel(router);
+    _bootReticulumPanel(router, identity);
 
     const nodeMap = new NodeMap('map');
     const packetFeed = new SimplePacketFeed('packet-tbody');
@@ -374,9 +374,9 @@ function _bootMeshCorePanel(router) {
     });
 }
 
-function _bootReticulumPanel(router) {
+function _bootReticulumPanel(router, identity) {
     if (!window.ReticulumPanel) return;
-    const panel = new window.ReticulumPanel();
+    const panel = new window.ReticulumPanel(identity);
     router.onRouteChange((route) => {
         if (route === 'reticulum') panel.show();
         else panel.hide();
