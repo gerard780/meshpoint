@@ -303,8 +303,12 @@ class NodeCards {
         if (voltage != null) {
             parts.push(`<span class="nc-chip nc-chip--telem">&#9889; ${voltage.toFixed(2)}V</span>`);
         }
-        if (battery != null && battery > 0) {
-            parts.push(`<span class="nc-chip nc-chip--telem">${this._batteryIcon(battery)} ${battery}%</span>`);
+        // Credit: javastraat/meshpoint 29368c0 + 5118d16
+        if (battery === 101) {
+            parts.push(`<span class="nc-chip nc-chip--telem">&#128268; Powered</span>`);
+        } else if (battery != null && battery > 0) {
+            const bt = this._batteryTier(battery);
+            parts.push(`<span class="nc-chip nc-chip--${bt.cls}">${bt.icon} ${battery}%</span>`);
         }
         if (alt != null) {
             const altLabel = window.MeshpointDisplayUnits
@@ -340,7 +344,7 @@ class NodeCards {
     _buildMeta(n) {
         const parts = [];
         if (n.hardware_model) {
-            parts.push(`<span class="nc-chip nc-chip--meta">${this._esc(n.hardware_model)}</span>`);
+            parts.push(`<span class="nc-chip nc-chip--meta">${this._esc(this._hardwareName(n.hardware_model))}</span>`);
         }
         if (n.role != null) {
             parts.push(`<span class="nc-chip nc-chip--meta">${this._roleName(n.role)}</span>`);
@@ -382,10 +386,20 @@ class NodeCards {
         return { label: 'Poor', cls: 'poor' };
     }
 
-    _batteryIcon(pct) {
-        if (pct > 75) return '&#128267;';
-        if (pct > 25) return '&#128268;';
-        return '&#128269;';
+    // Credit: javastraat/meshpoint 5118d16
+    _batteryTier(pct) {
+        if (pct > 50) return { icon: '\u{1F50B}', cls: 'excellent' };
+        if (pct > 25) return { icon: '\u{1F50B}', cls: 'fair' };
+        return { icon: '\u{1FAAB}', cls: 'poor' };
+    }
+
+    // Credit: javastraat/meshpoint 39910a0
+    _hardwareName(model) {
+        const num = Number(model);
+        if (!isNaN(num) && typeof HW_NAMES !== 'undefined') {
+            return HW_NAMES[num] || String(model);
+        }
+        return String(model);
     }
 
     _roleName(role) {

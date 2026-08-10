@@ -204,7 +204,8 @@ class NodeMetricsChart {
 
         this._addSeries(out, 'Battery', '#22c55e', 'y', telem, (t) => {
             const v = t.battery_level;
-            return v != null && v > 0 ? v : null;
+            // Credit: javastraat/meshpoint 29368c0 — 101 = externally powered.
+            return v != null && v > 0 && v <= 100 ? v : null;
         }, false);
         this._addSeries(out, 'Voltage', '#eab308', 'y1', telem, (t) => t.voltage, false);
         this._addSeries(out, 'ChUtil', '#a855f7', 'y', telem, (t) => t.channel_utilization, false);

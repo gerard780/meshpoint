@@ -2,6 +2,14 @@
 
 ### Unreleased
 
+#### Dashboard
+
+- **Externally powered battery display.** Meshtastic battery level `101` shows as Powered instead of a bogus percentage on node cards, drawer, packet feed, detail modal, and metrics chart. Battery chips use green/amber/red severity tiers.
+- **Hardware model names on node cards.** Shared HardwareModel lookup translates enum codes to readable names on cards and the node drawer (same map as Stats).
+- **Configuration GET errors toast.** Failed Configuration reads (empty dropdowns, rate limits) show a toast instead of failing silently.
+- **Messages TX banners.** Banners for TX-not-configured and missing Node ID link to Configuration → Transmit.
+- **SQLite Messages hygiene.** Index on `packets(packet_id, protocol)` plus WAL journaling so Messages reads are less likely to stall behind capture writes.
+
 ### v0.7.8 (July 2026)
 
 Serial multi-stick, Updates UX, native MQTT MapReport, and operator polish on `main` (merge `feat/v0.7.8`). Edge-only, pure Python, no concentrator recompile. **Upgrade:** Settings → Updates → **Stable**, or the full SSH block in `docs/COMMON-ERRORS.md` (`git fetch`, `checkout main`, `pull`, `scripts/install.sh`, `restart`). Witness-tested on RAK V2. Settings → Updates RC picker now points at **v0.7.9** on `feat/v0.7.9`.

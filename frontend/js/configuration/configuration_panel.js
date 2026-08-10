@@ -230,15 +230,15 @@ class ConfigurationPanel {
         try {
             const res = await fetch(url, init);
             if (!res.ok) {
-                if (!isGet) {
-                    const err = await res.json().catch(() => ({}));
-                    this._toast(`Error: ${err.detail || res.status}`);
-                }
+                // Credit: javastraat/meshpoint 676f7e3 — toast GET failures too
+                // (e.g. empty Firmware dropdowns on GitHub rate-limit).
+                const err = await res.json().catch(() => ({}));
+                this._toast(`${isGet ? 'Error' : 'Save failed'}: ${err.detail || res.status}`);
                 return null;
             }
             return await res.json();
         } catch (e) {
-            if (!isGet) this._toast(`Save failed: ${e.message}`);
+            this._toast(`${isGet ? 'Error' : 'Save failed'}: ${e.message}`);
             return null;
         }
     }
