@@ -84,10 +84,14 @@ Two pages:
     `frontend/js/packet_detail_modal.js`) — RF/Mesh/Payload/Capture
     layers, same shape as the real packet detail view.
   - **Live updates**: the dashboard opens its own WebSocket connection
-    (`ws://.../live`) and refreshes the instant the server sees new data,
-    instead of polling — mirrors `frontend/js/websocket_client.js`'s
-    reconnect-with-backoff pattern. A 30s poll still runs underneath as a
-    safety net in case the live socket is ever silently down.
+    (`ws://.../live`) — mirrors `frontend/js/websocket_client.js`'s
+    reconnect-with-backoff pattern. The server pushes the actual row(s)
+    each ingest message just wrote (same shape `/api/devices`/`/api/nodes`/
+    `/api/packets` already return), not just a "something changed, go
+    refetch" ping — the browser splices it straight into its own
+    in-memory state and re-renders, no REST round trip per update. A 30s
+    poll still runs underneath as a safety net in case the live socket is
+    ever silently down (or a push is missed while reconnecting).
   - Also reachable at `/dashboard` (kept as an alias).
 - `http://<this-machine>:8080/viewer` — the original plain-tables page
   (Devices / Nodes / Recent packets, no map), still there as the simplest

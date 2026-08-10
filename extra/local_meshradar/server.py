@@ -38,6 +38,7 @@ from datetime import datetime, timezone
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import Optional
 from urllib.parse import parse_qs, quote, urlparse
 
 import websockets
@@ -194,12 +195,12 @@ def _connect(db_path: str) -> sqlite3.Connection:
 
 # ── message handlers ───────────────────────────────────────────────
 
-def handle_register(db_path: str, message: dict) -> None:
+def handle_register(db_path: str, message: dict) -> Optional[dict]:
     device = message.get("device") or {}
     device_id = device.get("device_id")
     if not device_id:
         logger.warning("register message missing device_id, ignoring")
-        return
+        return None
 
     # Stamped by ws_handler from websocket.remote_address just before this
     # runs -- the register message itself never carries an IP, the TCP
@@ -238,19 +239,29 @@ def handle_register(db_path: str, message: dict) -> None:
             ),
         )
         conn.commit()
+        # Re-select the canonical merged row (ON CONFLICT DO UPDATE means
+        # the values just bound above aren't necessarily what's now on
+        # disk -- e.g. a second register with a blank device_name would
+        # leave the prior name in place) so the live broadcast below
+        # matches /api/devices exactly, byte for byte.
+        row = conn.execute(
+            "SELECT * FROM devices WHERE device_id = ?", (device_id,)
+        ).fetchone()
     finally:
         conn.close()
     logger.info("register: device_id=%s name=%s", device_id, device.get("device_name"))
+    return dict(row) if row else None
 
 
-def handle_packet(db_path: str, message: dict) -> None:
+def handle_packet(db_path: str, message: dict) -> Optional[dict]:
     device_id = message.get("device_id")
     data = message.get("data") or {}
     signal = data.get("signal") or {}
+    source_id = data.get("source_id")
 
     conn = _connect(db_path)
     try:
-        conn.execute(
+        cursor = conn.execute(
             """
             INSERT INTO packets (
                 device_id, packet_id, source_id, destination_id, protocol,
@@ -262,7 +273,7 @@ def handle_packet(db_path: str, message: dict) -> None:
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                device_id, data.get("packet_id"), data.get("source_id"),
+                device_id, data.get("packet_id"), source_id,
                 data.get("destination_id"), data.get("protocol"),
                 data.get("packet_type"), data.get("hop_limit"),
                 data.get("hop_start"), data.get("hop_count"),
@@ -278,14 +289,43 @@ def handle_packet(db_path: str, message: dict) -> None:
                 _now(),
             ),
         )
+        # Capture the packet's own rowid before _touch_node_from_packet
+        # runs its own INSERT below -- last_insert_rowid() is connection-
+        # global, so grabbing it any later would risk returning the node
+        # row's id instead of this packet's.
+        packet_row_id = cursor.lastrowid
         _touch_node_from_packet(
-            conn, device_id, data.get("source_id"), data.get("protocol"),
+            conn, device_id, source_id, data.get("protocol"),
             data.get("packet_type"), data.get("decoded_payload"),
             data.get("timestamp"), signal,
         )
         conn.commit()
+
+        # Re-select both rows post-commit so the live broadcast carries
+        # the exact same shape /api/packets and /api/nodes already
+        # return -- lets the browser splice this straight into its
+        # existing in-memory arrays and reuse the same render functions
+        # loadAll() already calls, no separate incremental-update code
+        # path to keep in sync.
+        packet_row = conn.execute(
+            "SELECT * FROM packets WHERE id = ?", (packet_row_id,)
+        ).fetchone()
+        node_row = None
+        if source_id:
+            node_id = source_id[1:] if source_id.startswith("!") else source_id
+            node_row = conn.execute(
+                "SELECT * FROM nodes WHERE device_id = ? AND node_id = ?",
+                (device_id, node_id),
+            ).fetchone()
     finally:
         conn.close()
+
+    if packet_row is None:
+        return None
+    return {
+        "packet": dict(packet_row),
+        "node": dict(node_row) if node_row else None,
+    }
 
 
 def _touch_node_from_packet(
@@ -425,9 +465,10 @@ def _upsert_node(conn: sqlite3.Connection, device_id: str, node: dict, updated_a
     )
 
 
-def handle_heartbeat(db_path: str, message: dict) -> None:
+def handle_heartbeat(db_path: str, message: dict) -> Optional[dict]:
     device_id = message.get("device_id")
     stats = message.get("stats") or {}
+    incoming_nodes = message.get("nodes") or []
     now = _now()
 
     conn = _connect(db_path)
@@ -440,15 +481,35 @@ def handle_heartbeat(db_path: str, message: dict) -> None:
             (device_id, message.get("timestamp"), message.get("packets_since_last"),
              json.dumps(stats), now),
         )
-        for node in message.get("nodes") or []:
+        node_ids: list[str] = []
+        for node in incoming_nodes:
             _upsert_node(conn, device_id, node, now)
+            raw_id = node.get("node_id")
+            if raw_id:
+                node_ids.append(raw_id[1:] if raw_id.startswith("!") else raw_id)
         conn.commit()
+
+        # Re-select the canonical merged rows (same reasoning as
+        # handle_register/handle_packet above) so the live broadcast
+        # matches /api/nodes exactly.
+        node_rows = []
+        if node_ids:
+            placeholders = ",".join("?" * len(node_ids))
+            node_rows = conn.execute(
+                f"SELECT * FROM nodes WHERE device_id = ? AND node_id IN ({placeholders})",
+                (device_id, *node_ids),
+            ).fetchall()
     finally:
         conn.close()
     logger.info(
         "heartbeat: device_id=%s packets_since_last=%s nodes=%d",
-        device_id, message.get("packets_since_last"), len(message.get("nodes") or []),
+        device_id, message.get("packets_since_last"), len(incoming_nodes),
     )
+    return {
+        "device_id": device_id,
+        "stats": stats,
+        "nodes": [dict(row) for row in node_rows],
+    }
 
 
 _HANDLERS = {
@@ -458,16 +519,25 @@ _HANDLERS = {
 }
 
 # Browser tabs on the dashboard connect to ws://.../live (no X-Device-Id)
-# purely to be told "something changed, go refetch" -- see _broadcast_update.
-# Kept separate from the Meshpoint-ingest connections above; a dead browser
-# tab is pruned on next broadcast rather than actively watched for.
+# to receive the actual data each ingest message just wrote -- see
+# _broadcast_update. Kept separate from the Meshpoint-ingest connections
+# above; a dead browser tab is pruned on next broadcast rather than
+# actively watched for.
 _browser_subscribers: set = set()
 
 
-async def _broadcast_update(kind: str) -> None:
-    if not _browser_subscribers:
+async def _broadcast_update(kind: str, data: Optional[dict]) -> None:
+    """Pushes the row(s) a handler just wrote straight to every connected
+    browser tab, carrying the same shape /api/devices, /api/packets, and
+    /api/nodes already return -- the dashboard splices this directly into
+    its in-memory arrays and re-runs its existing render functions, no
+    follow-up REST fetch needed. ``data`` is None when the handler had
+    nothing worth broadcasting (e.g. a malformed register with no
+    device_id) -- skipped rather than pushing an empty payload the
+    frontend would have nothing to do with."""
+    if not _browser_subscribers or data is None:
         return
-    message = json.dumps({"type": "update", "kind": kind})
+    message = json.dumps({"type": kind, "data": data})
     dead = set()
     for ws in _browser_subscribers:
         try:
@@ -513,8 +583,8 @@ async def ws_handler(websocket, db_path: str) -> None:
             try:
                 # Handlers are synchronous sqlite3 calls -- offload so one
                 # slow write can't stall the event loop for other connections.
-                await asyncio.to_thread(handler, db_path, message)
-                await _broadcast_update(msg_type)
+                result = await asyncio.to_thread(handler, db_path, message)
+                await _broadcast_update(msg_type, result)
             except Exception:
                 logger.exception("failed to handle %s message from %s", msg_type, device_id)
     except websockets.exceptions.ConnectionClosed:

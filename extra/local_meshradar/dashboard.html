@@ -1748,18 +1748,98 @@ function openDeviceModal(d) {
     document.getElementById('pdm-overlay').classList.add('pdm-overlay--open');
 }
 
-// ── live updates (mirrors frontend/js/websocket_client.js's reconnect
-// pattern, simplified: we don't do incremental DOM patches per event like
-// the main app does, we just treat any push as "something changed, go
-// refetch" and debounce so a burst of packets triggers one refresh) ──
+// ── live updates ──────────────────────────────────────────────────
+//
+// Server pushes the actual row(s) each ingest message just wrote
+// (server.py's _broadcast_update), in the same shape /api/devices,
+// /api/nodes, and /api/packets already return -- so these handlers
+// splice straight into the same in-memory arrays loadAll() populates
+// and re-run the exact same render functions, no REST round trip and
+// no debounce needed. loadAll() itself stays as the 30s safety-net
+// poll below (and the initial load), so a missed/malformed push still
+// self-heals within 30s.
 
 let liveSocket = null;
 let liveReconnectDelay = 2000;
-let refreshTimer = null;
 
-function scheduleRefresh() {
-    if (refreshTimer) return;
-    refreshTimer = setTimeout(() => { refreshTimer = null; loadAll(); }, 800);
+function _upsertByKey(list, row, keyOf) {
+    const key = keyOf(row);
+    const idx = list.findIndex((item) => keyOf(item) === key);
+    if (idx >= 0) list.splice(idx, 1);
+    list.unshift(row);
+}
+
+function _nodeKey(n) { return `${n.device_id}:${n.node_id}`; }
+
+function _renderDevicePills() {
+    const devices = Object.values(deviceById);
+    document.getElementById('device-pills').innerHTML = devices.map((d) => `
+        <span class="device-pill" title="${esc(d.device_id)}" data-device-id="${esc(d.device_id)}">
+            <span class="device-pill__dot"></span>${esc(d.device_name || d.device_id)}
+        </span>`).join('');
+    document.querySelectorAll('.device-pill').forEach((pill) => {
+        pill.addEventListener('click', () => {
+            const d = deviceById[pill.dataset.deviceId];
+            if (d) openDeviceModal(d);
+        });
+    });
+}
+
+function _refreshDerivedAndRender() {
+    renderMap(Object.values(deviceById), lastNodesRendered);
+    hopByNode = latestHopCountBySource(lastPacketsRendered);
+    lastActivityByNode = latestActivityByNode(lastNodesRendered, lastPacketsRendered);
+    lastActivityByDeviceNode = latestActivityByDeviceNode(lastNodesRendered, lastPacketsRendered);
+    nodeNameById = nodeNameLookup(lastNodesRendered);
+    renderNodeList();
+    renderPacketFeed();
+}
+
+function _bumpStat(id, by) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const current = parseInt(el.textContent, 10);
+    if (!Number.isNaN(current)) el.textContent = current + by;
+}
+
+function applyLiveRegister(device) {
+    if (!device || !device.device_id) return;
+    const isNew = !deviceById[device.device_id];
+    deviceNameById[device.device_id] = device.device_name;
+    deviceById[device.device_id] = device;
+    lastDevicesRendered = Object.values(deviceById);
+    deviceActivityById = latestActivityByDevice(lastPacketsRendered);
+    _renderDevicePills();
+    if (isNew) _bumpStat('stat-devices', 1);
+    renderMap(lastDevicesRendered, lastNodesRendered);
+}
+
+function applyLivePacket(payload) {
+    const packet = payload && payload.packet;
+    if (!packet) return;
+    // Matches the /api/packets?limit=100 cap loadAll() already fetches --
+    // keeps this array's size consistent regardless of which path last
+    // populated it.
+    lastPacketsRendered = [packet, ...lastPacketsRendered].slice(0, 100);
+    if (payload.node) _upsertByKey(lastNodesRendered, payload.node, _nodeKey);
+    deviceActivityById = latestActivityByDevice(lastPacketsRendered);
+    // Single-element array: triggerLiveEffects only cares about
+    // p.id > lastSeenPacketId, so there's no need to hand it the other
+    // 99 already-seen packets just to have it skip them again.
+    triggerLiveEffects([packet], lastNodesRendered);
+    _refreshDerivedAndRender();
+    _bumpStat('stat-packets', 1);
+    _bumpStat('stat-packets-hour', 1);
+    // stat-nodes (COUNT DISTINCT node_id) isn't safely incrementable
+    // client-side -- a node touched here may already exist under a
+    // different device_id. Left for the 30s safety poll to correct.
+}
+
+function applyLiveHeartbeat(payload) {
+    const nodes = payload && Array.isArray(payload.nodes) ? payload.nodes : [];
+    if (nodes.length === 0) return;
+    for (const node of nodes) _upsertByKey(lastNodesRendered, node, _nodeKey);
+    _refreshDerivedAndRender();
 }
 
 function connectLive() {
@@ -1770,7 +1850,9 @@ function connectLive() {
     liveSocket.onmessage = (event) => {
         try {
             const msg = JSON.parse(event.data);
-            if (msg.type === 'update') scheduleRefresh();
+            if (msg.type === 'register') applyLiveRegister(msg.data);
+            else if (msg.type === 'packet') applyLivePacket(msg.data);
+            else if (msg.type === 'heartbeat') applyLiveHeartbeat(msg.data);
         } catch (_) { /* ignore malformed pushes */ }
     };
     liveSocket.onclose = () => {
