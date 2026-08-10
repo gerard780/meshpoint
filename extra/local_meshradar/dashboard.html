@@ -894,7 +894,7 @@ if (document.fullscreenEnabled) map.addControl(new FullscreenControl());
 // node would zoom out to whatever random node is farthest away instead
 // of showing the units that actually deliver the data. Falls back to an
 // Amsterdam-centered view if no device has a position yet.
-const FALLBACK_HOME_VIEW = { center: [52.3676, 4.9041], zoom: 12 };
+const FALLBACK_HOME_VIEW = { center: [52.3676, 4.9041], zoom: 10 };
 const HomeControl = L.Control.extend({
     options: { position: 'topright' },
     onAdd() {
@@ -904,9 +904,9 @@ const HomeControl = L.Control.extend({
         L.DomEvent.disableClickPropagation(btn);
         L.DomEvent.on(btn, 'click', () => {
             if (lastDeviceBounds.length > 1) {
-                map.flyToBounds(lastDeviceBounds, { padding: [60, 60], maxZoom: 15 });
+                map.flyToBounds(lastDeviceBounds, { padding: [60, 60], maxZoom: 13 });
             } else if (lastDeviceBounds.length === 1) {
-                map.flyTo(lastDeviceBounds[0], 14);
+                map.flyTo(lastDeviceBounds[0], 12);
             } else {
                 map.flyTo(FALLBACK_HOME_VIEW.center, FALLBACK_HOME_VIEW.zoom);
             }
