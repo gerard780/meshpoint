@@ -170,6 +170,44 @@ class TestMessageNameResolver(unittest.TestCase):
         name = _run(self.resolver.resolve("a1b2c3d4", "meshtastic", ""))
         self.assertEqual(name, "TestNode")
 
+    def test_meshcore_resolve_uses_sqlite_node_name(self):
+        _run(self.node_repo.upsert(
+            Node(
+                node_id="aabbccddeeff",
+                long_name="MeshBuddy",
+                protocol="meshcore",
+            )
+        ))
+        name = _run(self.resolver.resolve("aabbccddeeff", "meshcore", ""))
+        self.assertEqual(name, "MeshBuddy")
 
-if __name__ == "__main__":
-    unittest.main()
+    def test_meshcore_resolve_skips_live_companion_bus(self):
+        """Regression: name resolve must not call get_contacts.
+
+        Live companion fetches on every Messages-tab conversation
+        resolve raced channel sends into Send timed out reconnects.
+        """
+        calls = {"n": 0}
+
+        class _BusyTx:
+            connected = True
+
+            async def get_contacts(self):
+                calls["n"] += 1
+                return [{"public_key": "deadbeefcafe", "name": "Nope"}]
+
+        resolver = MessageNameResolver(
+            self.node_repo,
+            meshcore_tx=_BusyTx(),
+            packet_repo=self.packet_repo,
+        )
+        _run(self.node_repo.upsert(
+            Node(
+                node_id="deadbeefcafe",
+                long_name="FromSqlite",
+                protocol="meshcore",
+            )
+        ))
+        name = _run(resolver.resolve("deadbeefcafe", "meshcore", ""))
+        self.assertEqual(name, "FromSqlite")
+        self.assertEqual(calls["n"], 0)

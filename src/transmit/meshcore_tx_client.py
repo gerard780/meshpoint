@@ -13,7 +13,10 @@ from dataclasses import dataclass
 from typing import Optional
 
 from src.transmit.meshcore_channel_sync import MeshcoreChannelSync
-from src.transmit.meshcore_contacts import MeshcoreContactParser
+from src.transmit.meshcore_contacts import (
+    MeshcoreContactCache,
+    MeshcoreContactParser,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +71,10 @@ class MeshCoreTxClient:
         self._owned_connected = False
         self._source = None
         self._post_command_callback = None
+        # Serialize companion commands: concurrent get_contacts + send
+        # on the shared meshcore handle races into send timeouts.
+        self._cmd_lock = asyncio.Lock()
+        self._contact_cache = MeshcoreContactCache()
 
     @property
     def _mc(self):
@@ -118,10 +125,71 @@ class MeshCoreTxClient:
 
         Credit: javastraat/meshpoint b04e91c
         """
+        self._contact_cache.invalidate()
         trigger = getattr(self._source, "_trigger_reconnect", None)
         if callable(trigger):
             trigger(reason)
         return SendResult(success=False, error=reason, timed_out=True)
+
+    async def _run_tx_command(
+        self,
+        factory,
+        *,
+        success_log: str,
+        timeout_label: str,
+    ) -> SendResult:
+        """Run one companion command under the serial lock."""
+        if not self.connected:
+            return SendResult(success=False, error="Not connected")
+        try:
+            async with self._cmd_lock:
+                if not self.connected or self._mc is None:
+                    return SendResult(success=False, error="Not connected")
+                result = await asyncio.wait_for(factory(), timeout=10.0)
+        except asyncio.TimeoutError:
+            return self._fail_timeout(timeout_label)
+        except Exception as exc:
+            logger.exception("%s failed", timeout_label)
+            await self._run_post_command()
+            return SendResult(success=False, error=str(exc))
+
+        if result is None:
+            return self._fail_timeout(timeout_label)
+
+        try:
+            from meshcore import EventType
+        except Exception:
+            EventType = None  # type: ignore[misc, assignment]
+
+        if (
+            EventType is not None
+            and hasattr(result, "type")
+            and result.type == EventType.ERROR
+        ):
+            payload = getattr(result, "payload", None) or {}
+            reason = ""
+            if isinstance(payload, dict):
+                reason = str(
+                    payload.get("reason") or payload.get("error") or ""
+                )
+            soft = reason in ("no_event_received", "timeout", "")
+            if soft:
+                return self._fail_timeout(timeout_label)
+            await self._run_post_command()
+            return SendResult(
+                success=False,
+                event_type="ERROR",
+                error=reason or "companion error",
+            )
+
+        event_type = (
+            result.type.value
+            if hasattr(result.type, "value")
+            else str(result.type)
+        )
+        logger.info("%s: %s", success_log, event_type)
+        await self._run_post_command()
+        return SendResult(success=True, event_type=event_type)
 
     async def create_connection(
         self,
@@ -162,170 +230,48 @@ class MeshCoreTxClient:
         self, channel: int, text: str
     ) -> SendResult:
         """Send a broadcast message on a MeshCore channel."""
-        if not self.connected:
-            return SendResult(success=False, error="Not connected")
-        try:
-            result = await asyncio.wait_for(
-                self._mc.commands.send_chan_msg(channel, text),
-                timeout=10.0,
-            )
-            event_type = (
-                result.type.value
-                if hasattr(result.type, "value")
-                else str(result.type)
-            )
-            logger.info(
-                "MeshCore channel %d message sent: %s", channel, event_type
-            )
-            await self._run_post_command()
-            return SendResult(success=True, event_type=event_type)
-        except asyncio.TimeoutError:
-            return self._fail_timeout("Send timed out")
-        except Exception as exc:
-            logger.exception("MeshCore channel send failed")
-            await self._run_post_command()
-            return SendResult(success=False, error=str(exc))
+        return await self._run_tx_command(
+            lambda: self._mc.commands.send_chan_msg(channel, text),
+            success_log=f"MeshCore channel {channel} message sent",
+            timeout_label="Send timed out",
+        )
 
     async def send_direct_message(
         self, destination, text: str
     ) -> SendResult:
         """Send a direct message to a MeshCore contact."""
-        if not self.connected:
-            return SendResult(success=False, error="Not connected")
-        try:
-            result = await asyncio.wait_for(
-                self._mc.commands.send_msg(destination, text),
-                timeout=10.0,
-            )
-            event_type = (
-                result.type.value
-                if hasattr(result.type, "value")
-                else str(result.type)
-            )
-            logger.info("MeshCore DM sent: %s", event_type)
-            await self._run_post_command()
-            return SendResult(success=True, event_type=event_type)
-        except asyncio.TimeoutError:
-            return self._fail_timeout("Send timed out")
-        except Exception as exc:
-            logger.exception("MeshCore DM send failed")
-            await self._run_post_command()
-            return SendResult(success=False, error=str(exc))
+        return await self._run_tx_command(
+            lambda: self._mc.commands.send_msg(destination, text),
+            success_log="MeshCore DM sent",
+            timeout_label="Send timed out",
+        )
 
     async def send_advert(self, flood: bool = False) -> SendResult:
         """Broadcast a node advertisement."""
-        if not self.connected:
-            return SendResult(success=False, error="Not connected")
-        try:
-            result = await asyncio.wait_for(
-                self._mc.commands.send_advert(flood=flood),
-                timeout=10.0,
-            )
-            event_type = (
-                result.type.value
-                if hasattr(result.type, "value")
-                else str(result.type)
-            )
-            logger.info("MeshCore advert sent: %s", event_type)
-            await self._run_post_command()
-            return SendResult(success=True, event_type=event_type)
-        except asyncio.TimeoutError:
-            return self._fail_timeout("Advert timed out")
-        except Exception as exc:
-            logger.exception("MeshCore advert send failed")
-            await self._run_post_command()
-            return SendResult(success=False, error=str(exc))
+        return await self._run_tx_command(
+            lambda: self._mc.commands.send_advert(flood=flood),
+            success_log="MeshCore advert sent",
+            timeout_label="Advert timed out",
+        )
 
     async def set_companion_name(self, name: str) -> SendResult:
         """Rename the USB companion via CMD_SET_ADVERT_NAME (0x08).
 
         On OK we mutate the cached ``self_info["name"]`` so the
-        Configuration card, top-bar chip, and packet attribution all
-        reflect the rename without waiting for the next reconnect.
-        ``set_name`` itself only returns OK/ERROR; it does not emit a
-        fresh SELF_INFO, and meshcore 2.3.x exposes no public method to
-        re-poll the device (``self_info`` is seeded once during the
-        ``connect`` handshake's appstart and never auto-refreshed).
-        Updating the dict locally is safe because the firmware just
-        acknowledged the new name via ``command_ok``; the next
-        reconnect will reseed ``self_info`` from the device anyway.
-
-        Validation lives here so route handlers, future CLI callers,
-        and the ``meshcore.companion_name`` yaml-on-connect path all
-        use the same ceiling.
+        dashboard reflects the rename without waiting for reconnect.
         """
-        if not self.connected:
-            return SendResult(success=False, error="Not connected")
-
-        cleaned = (name or "").strip()
-        if not cleaned:
-            return SendResult(success=False, error="Name must not be empty")
-        encoded_len = len(cleaned.encode("utf-8"))
-        if encoded_len > MAX_COMPANION_NAME_BYTES:
-            return SendResult(
-                success=False,
-                error=(
-                    f"Name is {encoded_len} bytes (UTF-8); "
-                    f"companion accepts at most {MAX_COMPANION_NAME_BYTES}."
-                ),
-            )
-
-        try:
-            from meshcore import EventType
-        except Exception:
-            return SendResult(success=False, error="meshcore library unavailable")
-
-        try:
-            result = await asyncio.wait_for(
-                self._mc.commands.set_name(cleaned),
-                timeout=10.0,
-            )
-        except asyncio.TimeoutError:
-            return self._fail_timeout("set_name timed out")
-        except Exception as exc:
-            logger.exception("MeshCore set_name failed")
-            await self._run_post_command()
-            return SendResult(success=False, error=str(exc))
-
-        if result.type == EventType.ERROR:
-            payload = getattr(result, "payload", None)
-            detail = ""
-            if isinstance(payload, dict):
-                detail = str(payload.get("reason") or payload.get("error") or payload)
-            elif payload is not None:
-                detail = str(payload)
-            error = f"Companion rejected name: {detail}" if detail else "Companion rejected name"
-            await self._run_post_command()
-            return SendResult(success=False, error=error)
-
-        # OK path: refresh self_info so callers see the new name immediately.
-        # The meshcore library does not expose a method to re-poll the
-        # device's identity (self_info is seeded once during connect's
-        # appstart handshake and never automatically refreshed). Since
-        # the firmware just acknowledged the rename via command_ok, we
-        # know the new name is what the device holds: mutate the cached
-        # dict directly so /api/config -> get_radio_info() returns the
-        # new value on the next dashboard refresh. The next reconnect
-        # will reseed self_info from the device anyway.
-        try:
-            cache = getattr(self._mc, "self_info", None)
-            if isinstance(cache, dict):
-                cache["name"] = cleaned
-        except Exception:
-            logger.debug(
-                "set_companion_name: could not update self_info cache; "
-                "dashboard will lag by one reconnect cycle",
-                exc_info=True,
-            )
-
-        event_type = (
-            result.type.value
-            if hasattr(result.type, "value")
-            else str(result.type)
+        from src.transmit.meshcore_companion_rename import (
+            MeshcoreCompanionRename,
         )
-        logger.info("MeshCore companion renamed to %r (%s)", cleaned, event_type)
-        await self._run_post_command()
-        return SendResult(success=True, event_type=event_type)
+
+        return await MeshcoreCompanionRename().run(
+            mc=self._mc,
+            name=name,
+            cmd_lock=self._cmd_lock,
+            connected=self.connected,
+            fail_timeout=self._fail_timeout,
+            post_command=self._run_post_command,
+        )
 
     async def set_radio_params(
         self,
@@ -432,26 +378,53 @@ class MeshCoreTxClient:
             post_command=self._run_post_command,
         ).sync(channel_keys)
 
-    async def get_contacts(self) -> list[dict]:
+    async def get_contacts(self, *, force: bool = False) -> list[dict]:
         """Retrieve the companion's contact list.
 
-        ``meshcore`` may return ``None`` on timeout; that is treated as
-        empty rather than raising on ``.payload``.
+        Uses a short TTL cache so Messages UI / contact picker can call
+        this without saturating the serial command channel. Live fetches
+        take the same lock as sends so they cannot race a channel TX.
         """
+        if not force:
+            cached = self._contact_cache.get_fresh()
+            if cached is not None:
+                return cached
+
         if not self.connected:
-            return []
+            return self._contact_cache.get_stale()
+
         try:
-            result = await asyncio.wait_for(
-                self._mc.commands.get_contacts(),
-                timeout=10.0,
-            )
+            async with self._cmd_lock:
+                if not force:
+                    cached = self._contact_cache.get_fresh()
+                    if cached is not None:
+                        return cached
+                if not self.connected or self._mc is None:
+                    return self._contact_cache.get_stale()
+                result = await asyncio.wait_for(
+                    self._mc.commands.get_contacts(),
+                    timeout=10.0,
+                )
         except asyncio.TimeoutError:
             logger.warning("get_contacts timed out waiting for companion")
-            return []
+            return self._contact_cache.get_stale()
         except Exception:
             logger.exception("Failed to retrieve MeshCore contacts")
-            return []
+            return self._contact_cache.get_stale()
 
         contacts = MeshcoreContactParser.from_command_result(result)
+        soft_fail = result is None or MeshcoreContactParser._is_error_event(
+            result
+        )
+        if soft_fail:
+            stale = self._contact_cache.get_stale()
+            if stale:
+                logger.info(
+                    "get_contacts: soft fail, using stale cache (%d)",
+                    len(stale),
+                )
+                return stale
+        else:
+            self._contact_cache.store(contacts)
         logger.info("get_contacts: %d contacts parsed", len(contacts))
         return contacts

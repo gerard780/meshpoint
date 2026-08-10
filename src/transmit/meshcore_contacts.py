@@ -9,9 +9,44 @@ This module owns that defensive parse so MeshCoreTxClient stays thin.
 from __future__ import annotations
 
 import logging
-from typing import Any
+import time
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
+
+# Hot paths (Messages tab name resolve, contact picker) must not hammer
+# the companion serial bus. Prefer this TTL cache over a live fetch.
+DEFAULT_CONTACTS_CACHE_TTL_SECONDS = 60.0
+
+
+class MeshcoreContactCache:
+    """TTL cache for companion contact rows."""
+
+    def __init__(
+        self,
+        ttl_seconds: float = DEFAULT_CONTACTS_CACHE_TTL_SECONDS,
+    ) -> None:
+        self._ttl = ttl_seconds
+        self._rows: list[dict] = []
+        self._fetched_at: float = 0.0
+
+    def get_fresh(self) -> Optional[list[dict]]:
+        if not self._fetched_at:
+            return None
+        if (time.monotonic() - self._fetched_at) >= self._ttl:
+            return None
+        return list(self._rows)
+
+    def get_stale(self) -> list[dict]:
+        """Last known roster, even if TTL expired (empty if never fetched)."""
+        return list(self._rows)
+
+    def store(self, rows: list[dict]) -> None:
+        self._rows = list(rows)
+        self._fetched_at = time.monotonic()
+
+    def invalidate(self) -> None:
+        self._fetched_at = 0.0
 
 
 class MeshcoreContactParser:

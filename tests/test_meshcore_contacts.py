@@ -6,7 +6,10 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from src.transmit.meshcore_contacts import MeshcoreContactParser
+from src.transmit.meshcore_contacts import (
+    MeshcoreContactCache,
+    MeshcoreContactParser,
+)
 
 
 class TestMeshcoreContactParser(unittest.TestCase):
@@ -72,6 +75,19 @@ class TestMeshcoreContactParser(unittest.TestCase):
             MeshcoreContactParser.normalize_payload(None),
             [],
         )
+
+
+class TestMeshcoreContactCache(unittest.TestCase):
+
+    def test_fresh_then_stale(self):
+        cache = MeshcoreContactCache(ttl_seconds=60.0)
+        self.assertIsNone(cache.get_fresh())
+        cache.store([{"name": "A", "public_key": "aa"}])
+        fresh = cache.get_fresh()
+        self.assertEqual(len(fresh), 1)
+        cache.invalidate()
+        self.assertIsNone(cache.get_fresh())
+        self.assertEqual(len(cache.get_stale()), 1)
 
 
 if __name__ == "__main__":

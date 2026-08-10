@@ -70,20 +70,31 @@ class MessageNameResolver:
         return ""
 
     async def _lookup_meshcore(self, node_id: str) -> str:
-        if not self._meshcore_tx or not self._meshcore_tx.connected:
+        """Resolve MeshCore display names from SQLite only.
+
+        Do not call live ``get_contacts`` here. Opening the Messages
+        tab resolves every conversation; each companion fetch holds the
+        serial command channel for up to ~5s and races channel sends
+        into ``Send timed out`` reconnect loops. Contact enrichment
+        already writes ``long_name`` onto ``nodes`` rows.
+        """
+        if not self._node_repo or node_id.startswith("broadcast:"):
             return ""
         try:
-            mc_contacts = await self._meshcore_tx.get_contacts()
-            nid_lower = node_id.lower()
-            for contact in mc_contacts:
-                pk = contact.get("public_key", "").lower()
-                name = contact.get("name", "")
-                if not name or self._is_hex_only(name):
+            for candidate in (node_id, node_id.upper(), node_id.lower()):
+                node = await self._node_repo.get_by_id(candidate)
+                if not node:
                     continue
-                if pk.startswith(nid_lower) or nid_lower.startswith(pk[:8]):
+                n = node if isinstance(node, dict) else node.to_dict()
+                if n.get("protocol") and n.get("protocol") != "meshcore":
+                    continue
+                name = n.get("long_name") or n.get("short_name") or ""
+                if name and not self._is_hex_only(name):
                     return name
         except Exception:
-            logger.debug("MeshCore name lookup failed for %s", node_id, exc_info=True)
+            logger.debug(
+                "MeshCore name lookup failed for %s", node_id, exc_info=True
+            )
         return ""
 
     @staticmethod
