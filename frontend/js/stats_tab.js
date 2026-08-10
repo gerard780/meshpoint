@@ -13,22 +13,10 @@ const ROLE_NAMES = {
 // HW_NAMES lives in meshtastic_hw_names.js (shared with node cards/drawer).
 // Credit: javastraat/meshpoint 39910a0
 
-const CHART_COLORS = [
-    '#06b6d4', '#a855f7', '#f59e0b', '#3b82f6', '#10b981',
-    '#ef4444', '#ec4899', '#8b5cf6', '#14b8a6', '#f97316',
-    '#eab308', '#6366f1', '#84cc16', '#e11d48',
-];
-
-/** Return obj when it has at least one key; otherwise null (falsy for ||). */
-function nonemptyMap(obj) {
-    if (!obj || typeof obj !== 'object') return null;
-    return Object.keys(obj).length > 0 ? obj : null;
-}
-
 class StatsTab {
     constructor(containerId) {
         this._container = document.getElementById(containerId);
-        this._charts = {};
+        this._charts = new window.StatsChartHost();
         this._refreshInterval = null;
         this._rendered = false;
         this._statusStrip = null;
@@ -267,11 +255,11 @@ class StatsTab {
         // window and resets every ~5 min; empty {} is truthy so it used
         // to block the traffic fallback and leave Protocol Split / Packet
         // Types empty (or showing only a handful of recent packets).
-        const protocols = nonemptyMap(traffic.protocol_distribution)
-            || nonemptyMap(live.protocols)
+        const protocols = window.nonemptyStatsMap(traffic.protocol_distribution)
+            || window.nonemptyStatsMap(live.protocols)
             || {};
-        const packetTypes = nonemptyMap(traffic.type_distribution)
-            || nonemptyMap(live.packet_types)
+        const packetTypes = window.nonemptyStatsMap(traffic.type_distribution)
+            || window.nonemptyStatsMap(live.packet_types)
             || {};
         this._updateProtocol(protocols);
         this._updateTypes(packetTypes);
@@ -348,20 +336,20 @@ class StatsTab {
         const labels = Object.keys(protocols);
         const values = Object.values(protocols);
         const total = values.reduce((a, b) => a + b, 0);
-        this._renderDoughnut('sc-protocol', labels, values, CHART_COLORS, total);
+        this._charts.renderDoughnut('sc-protocol', labels, values, window.STATS_CHART_COLORS, total);
     }
 
     _updateTypes(types) {
         const sorted = Object.entries(types).sort((a, b) => b[1] - a[1]);
         const labels = sorted.map(e => e[0]);
         const values = sorted.map(e => e[1]);
-        this._renderHorizontalBar('sc-types', labels, values);
+        this._charts.renderHorizontalBar('sc-types', labels, values);
     }
 
     _updateRssiHist(dist) {
         const buckets = dist.buckets || [];
         const counts = dist.counts || [];
-        this._renderChart('sc-rssi', 'bar', {
+        this._charts.renderChart('sc-rssi', 'bar', {
             labels: buckets,
             datasets: [{
                 data: counts,
@@ -378,7 +366,7 @@ class StatsTab {
         const quality = Math.max(0, Math.min(100, ((avgRssi + 130) / 90) * 100));
         const remaining = 100 - quality;
         const color = quality >= 70 ? '#22c55e' : quality >= 40 ? '#f59e0b' : '#ef4444';
-        this._renderChart('sc-quality', 'doughnut', {
+        this._charts.renderChart('sc-quality', 'doughnut', {
             labels: ['Signal', ''],
             datasets: [{
                 data: [quality, remaining],
@@ -398,7 +386,7 @@ class StatsTab {
         const direct = dr.direct || 0;
         const relayed = dr.relayed || 0;
         const total = direct + relayed;
-        this._renderDoughnut('sc-direct-relayed',
+        this._charts.renderDoughnut('sc-direct-relayed',
             ['Direct', 'Relayed'],
             [direct, relayed],
             ['#06b6d4', '#a855f7'],
@@ -410,7 +398,7 @@ class StatsTab {
         const active = network.active_24h || 0;
         const total = network.total_nodes || 0;
         const inactive = Math.max(0, total - active);
-        this._renderDoughnut('sc-active-nodes',
+        this._charts.renderDoughnut('sc-active-nodes',
             [`${active} active`, `${inactive} inactive`],
             [active, inactive],
             ['#22c55e', 'rgba(30, 41, 59, 0.5)'],
@@ -430,7 +418,7 @@ class StatsTab {
         const labels = entries.map(([k]) => ROLE_NAMES[k] || k);
         const values = entries.map(([, v]) => v);
         const total = values.reduce((a, b) => a + b, 0);
-        this._renderDoughnut('sc-roles', labels, values, CHART_COLORS, total);
+        this._charts.renderDoughnut('sc-roles', labels, values, window.STATS_CHART_COLORS, total);
         this._reconcileNetworkSection();
     }
 
@@ -446,7 +434,7 @@ class StatsTab {
         const labels = entries.map(([k]) => HW_NAMES[k] || k);
         const values = entries.map(([, v]) => v);
         const total = values.reduce((a, b) => a + b, 0);
-        this._renderDoughnut('sc-hw', labels, values, CHART_COLORS, total);
+        this._charts.renderDoughnut('sc-hw', labels, values, window.STATS_CHART_COLORS, total);
         this._reconcileNetworkSection();
     }
 
@@ -476,7 +464,7 @@ class StatsTab {
     _updateTimeline(timeline) {
         const labels = timeline.labels || [];
         const counts = timeline.counts || [];
-        this._renderChart('sc-timeline', 'bar', {
+        this._charts.renderChart('sc-timeline', 'bar', {
             labels,
             datasets: [{
                 data: counts,
@@ -490,7 +478,7 @@ class StatsTab {
     _updateRelay(relay) {
         const relayed = relay.relayed || 0;
         const rejected = relay.rejected || 0;
-        this._renderDoughnut('sc-relay',
+        this._charts.renderDoughnut('sc-relay',
             ['Relayed', 'Rejected'],
             [relayed, rejected],
             ['#22c55e', '#ef4444'],
@@ -502,105 +490,9 @@ class StatsTab {
         const labels = Object.keys(reasons);
         const values = Object.values(reasons);
         if (labels.length === 0) return;
-        this._renderHorizontalBar('sc-reject', labels, values, '#ef4444');
+        this._charts.renderHorizontalBar('sc-reject', labels, values, '#ef4444');
     }
 
-    _renderDoughnut(canvasId, labels, values, colors, centerText) {
-        const centerPlugin = centerText != null ? {
-            id: `center-${canvasId}`,
-            afterDraw(chart) {
-                const text = chart.options.meshpointCenterText;
-                if (text == null) return;
-                const { ctx, chartArea } = chart;
-                if (!chartArea) return;
-                const cx = (chartArea.left + chartArea.right) / 2;
-                const cy = (chartArea.top + chartArea.bottom) / 2;
-                ctx.save();
-                ctx.font = 'bold 16px "JetBrains Mono", monospace';
-                ctx.fillStyle = '#f1f5f9';
-                ctx.textAlign = 'center';
-                ctx.textBaseline = 'middle';
-                ctx.fillText(String(text), cx, cy);
-                ctx.restore();
-            },
-        } : null;
-
-        const plugins = [centerPlugin].filter(Boolean);
-
-        this._renderChart(canvasId, 'doughnut', {
-            labels,
-            datasets: [{
-                data: values,
-                backgroundColor: colors.slice(0, labels.length),
-                borderWidth: 0,
-            }],
-        }, {
-            cutout: '65%',
-            meshpointCenterText: centerText,
-            plugins: {
-                legend: {
-                    position: 'bottom',
-                    labels: {
-                        color: '#94a3b8',
-                        font: { size: 11 },
-                        padding: 8,
-                        usePointStyle: true,
-                        pointStyleWidth: 8,
-                    },
-                },
-            },
-        }, null, plugins);
-    }
-
-    _renderHorizontalBar(canvasId, labels, values, color) {
-        const barColor = color || '#06b6d4';
-        this._renderChart(canvasId, 'bar', {
-            labels,
-            datasets: [{
-                data: values,
-                backgroundColor: barColor + '99',
-                borderColor: barColor,
-                borderWidth: 1,
-            }],
-        }, {
-            indexAxis: 'y',
-            plugins: { legend: { display: false } },
-            scales: {
-                x: { ticks: { color: '#64748b' }, grid: { color: 'rgba(30,41,59,0.5)' } },
-                y: { ticks: { color: '#94a3b8', font: { size: 11 } }, grid: { display: false } },
-            },
-        });
-    }
-
-    _renderChart(canvasId, type, data, extraOpts, centerLabel, extraPlugins) {
-        const canvas = document.getElementById(canvasId);
-        if (!canvas) return;
-
-        if (this._charts[canvasId]) {
-            const chart = this._charts[canvasId];
-            chart.data.labels = data.labels;
-            chart.data.datasets = data.datasets;
-            if (extraOpts && Object.prototype.hasOwnProperty.call(extraOpts, 'meshpointCenterText')) {
-                chart.options.meshpointCenterText = extraOpts.meshpointCenterText;
-            }
-            chart.update('none');
-            return;
-        }
-
-        const baseOpts = {
-            responsive: true,
-            maintainAspectRatio: false,
-            scales: type === 'bar' && !(extraOpts && extraOpts.indexAxis) ? {
-                x: { ticks: { color: '#64748b', font: { size: 10 } }, grid: { color: 'rgba(30,41,59,0.5)' } },
-                y: { ticks: { color: '#64748b' }, grid: { color: 'rgba(30,41,59,0.5)' } },
-            } : undefined,
-        };
-
-        const opts = { ...baseOpts, ...(extraOpts || {}) };
-        const plugins = extraPlugins || [];
-
-        this._charts[canvasId] = new Chart(canvas, { type, data, options: opts, plugins });
-    }
 }
 
 window.statsTab = new StatsTab('stats-panel');

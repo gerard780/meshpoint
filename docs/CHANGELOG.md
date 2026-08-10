@@ -9,6 +9,9 @@
 - **Configuration GET errors toast.** Failed Configuration reads (empty dropdowns, rate limits) show a toast instead of failing silently.
 - **Messages TX banners.** Banners for TX-not-configured and missing Node ID link to Configuration → Transmit.
 - **SQLite Messages hygiene.** Index on `packets(packet_id, protocol)` plus WAL journaling so Messages reads are less likely to stall behind capture writes.
+- **Stats Avg Signal Quality dBm.** The quality donut now draws its center reading on first paint and refresh.
+- **Farthest-node Null Island filter.** Positions at exactly (0, 0) and implausibly far haversine distances no longer win farthest-direct / farthest-mesh stats.
+- **No Dashboard flash on deep-link reload.** URL hash is resolved before app scripts load so `#/settings/updates` (and other routes) paint the correct section first.
 
 ### v0.7.8 (July 2026)
 

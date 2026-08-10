@@ -161,6 +161,30 @@ class TestFarthestDirect(unittest.TestCase):
         report = self.reporter.build_report()
         self.assertEqual(report["farthest_direct"]["node_id"], "far")
 
+    def test_ignores_null_island(self):
+        # Credit: javastraat/meshpoint d26c81f
+        self.reporter.record_farthest_direct(
+            source_id="no-fix",
+            rssi=-90.0,
+            device_lat=52.37, device_lon=4.90,
+            node_lat=0.0, node_lon=0.0,
+            hop_start=3, hop_limit=3,
+        )
+        report = self.reporter.build_report()
+        self.assertNotIn("farthest_direct", report)
+
+    def test_ignores_implausibly_far_node(self):
+        # Credit: javastraat/meshpoint d26c81f
+        self.reporter.record_farthest_direct(
+            source_id="impossible",
+            rssi=-90.0,
+            device_lat=52.37, device_lon=4.90,
+            node_lat=-52.37, node_lon=-175.10,
+            hop_start=3, hop_limit=3,
+        )
+        report = self.reporter.build_report()
+        self.assertNotIn("farthest_direct", report)
+
 
 class TestNodeRoster(unittest.TestCase):
     def setUp(self):

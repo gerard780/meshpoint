@@ -91,8 +91,11 @@ class StatsReporter:
         if hops_consumed != 0:
             return
 
+        if not _is_real_position(node_lat, node_lon):
+            return
+
         dist = _haversine_mi(device_lat, device_lon, node_lat, node_lon)
-        if dist < 0.1:
+        if dist < 0.1 or dist > MAX_PLAUSIBLE_DISTANCE_MI:
             return
 
         if dist > self._farthest_direct_miles:
@@ -198,3 +201,12 @@ def _haversine_mi(
         * math.sin(dlon / 2) ** 2
     )
     return r * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
+# Credit: javastraat/meshpoint d26c81f
+MAX_PLAUSIBLE_DISTANCE_MI = 3600 / 1.60934
+
+
+def _is_real_position(lat: float, lon: float) -> bool:
+    """False for exactly (0, 0) — Meshtastic/MeshCore no-fix sentinel."""
+    return not (lat == 0 and lon == 0)

@@ -721,6 +721,28 @@
         <div id="node-drawer" class="nd-drawer"></div>
     </div>
 
+    <script>
+        // Credit: javastraat/meshpoint 0fe35f9
+        // Dashboard is the only [data-section] visible by default. Other
+        // routes stay display:none until sidebar_controller runs after all
+        // scripts load. Resolve the URL hash here so a reload on e.g.
+        // #/settings/updates does not flash Dashboard first.
+        (function () {
+            try {
+                var route = (location.hash || '').replace(/^#\/?/, '').trim() || 'dashboard';
+                var sections = document.querySelectorAll('[data-section]');
+                var matched = false;
+                sections.forEach(function (el) {
+                    if (el.dataset.section === route) matched = true;
+                });
+                if (!matched) return;
+                sections.forEach(function (el) {
+                    el.style.display = el.dataset.section === route ? '' : 'none';
+                });
+            } catch (e) {}
+        })();
+    </script>
+
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
     <script src="js/websocket_client.js"></script>
@@ -731,6 +753,7 @@
     <script src="js/meshtastic_hw_names.js"></script>
     <script src="js/node_cards.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+    <script src="js/stats_chart_host.js"></script>
     <script src="js/node_metrics_chart.js"></script>
     <script src="js/node_drawer.js"></script>
     <script src="js/packet_detail_modal.js"></script>
