@@ -1333,6 +1333,7 @@ function renderNodeList() {
         const telemetry = members.map((m) => parseJsonSafe(m.latest_telemetry_json)).find(Boolean);
 
         const extraBadges = [];
+        if (role != null) extraBadges.push(`<span class="badge">${esc(roleName(role))}</span>`);
         if (hardwareModel != null) extraBadges.push(`<span class="badge">${esc(hardwareName(hardwareModel))}</span>`);
         if (hasPosition && altitude != null) extraBadges.push(`<span class="badge">&#9650; ${Math.round(altitude)}m</span>`);
         if (telemetry?.voltage != null) extraBadges.push(`<span class="badge">&#9889;${round1(telemetry.voltage)}V</span>`);
