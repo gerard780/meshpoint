@@ -19,6 +19,7 @@ class ReticulumPanel {
         this._refreshTimer = null;
         this._mounted = false;
         this._peers = [];
+        this._sendPeerSearchQuery = '';
         // Fails open like every other panel's own guard (no identity/role
         // info at all means show it) -- the real security boundary is
         // server-side (POST /api/reticulum/send already requires admin).
@@ -150,6 +151,13 @@ class ReticulumPanel {
                             <form class="cfg-form" id="rt-send-form" style="max-width:480px">
                                 <label class="cfg-field">
                                     <span class="cfg-field__label">Peer</span>
+                                    <div class="lw-search-wrap">
+                                        <input type="text" id="rt-send-peer-search" class="lw-search"
+                                               placeholder="Search by name or ID..."
+                                               autocomplete="off" spellcheck="false" />
+                                        <button id="rt-send-peer-search-clear" class="lw-search-clear"
+                                                type="button" title="Clear search" hidden>&times;</button>
+                                    </div>
                                     <select class="cfg-field__input" id="rt-send-peer" required></select>
                                 </label>
                                 <label class="cfg-field">
@@ -176,6 +184,25 @@ class ReticulumPanel {
         });
         document.getElementById('rt-send-form')
             ?.addEventListener('submit', (e) => this._handleSend(e));
+
+        const sendPeerSearchEl = document.getElementById('rt-send-peer-search');
+        const sendPeerSearchClearEl = document.getElementById('rt-send-peer-search-clear');
+        if (sendPeerSearchEl) {
+            sendPeerSearchEl.addEventListener('input', (e) => {
+                this._sendPeerSearchQuery = e.target.value.toLowerCase();
+                if (sendPeerSearchClearEl) sendPeerSearchClearEl.hidden = !e.target.value;
+                this._renderSendPeers();
+            });
+        }
+        if (sendPeerSearchClearEl && sendPeerSearchEl) {
+            sendPeerSearchClearEl.addEventListener('click', () => {
+                sendPeerSearchEl.value = '';
+                this._sendPeerSearchQuery = '';
+                sendPeerSearchClearEl.hidden = true;
+                sendPeerSearchEl.focus();
+                this._renderSendPeers();
+            });
+        }
         this._applyTab();
     }
 
@@ -233,13 +260,22 @@ class ReticulumPanel {
         // send_message() semantics (an LXMF delivery destination).
         const select = document.getElementById('rt-send-peer');
         if (!select) return;
-        const deliveryPeers = this._peers.filter((p) => p.aspect === 'lxmf.delivery');
+        let deliveryPeers = this._peers.filter((p) => p.aspect === 'lxmf.delivery');
+        if (this._sendPeerSearchQuery) {
+            const q = this._sendPeerSearchQuery;
+            deliveryPeers = deliveryPeers.filter((p) =>
+                (p.display_name || '').toLowerCase().includes(q)
+                || p.destination_hash.toLowerCase().includes(q)
+            );
+        }
         const previous = select.value;
-        select.innerHTML = deliveryPeers.map((p) => `
-            <option value="${this._esc(p.destination_hash)}">
-                ${this._esc(p.display_name || p.destination_hash)}
-            </option>
-        `).join('');
+        select.innerHTML = deliveryPeers.length
+            ? deliveryPeers.map((p) => `
+                <option value="${this._esc(p.destination_hash)}">
+                    ${this._esc(p.display_name || p.destination_hash)}
+                </option>
+            `).join('')
+            : '<option value="" disabled selected>No matching peers</option>';
         if (previous && deliveryPeers.some((p) => p.destination_hash === previous)) {
             select.value = previous;
         }
