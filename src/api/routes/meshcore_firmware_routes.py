@@ -186,6 +186,7 @@ def _ensure_board_firmware_cached_sync(
     try:
         _http.download_to_sync(asset["browser_download_url"], tmp_path)
         tmp_path.rename(dest)
+        dest.chmod(0o644)
     except BaseException:
         tmp_path.unlink(missing_ok=True)
         raise
@@ -193,19 +194,33 @@ def _ensure_board_firmware_cached_sync(
     return {"tag": resolved_tag, "flavor": flavor, "merged_bin": dest}
 
 
+def _port_aliases(port: str) -> set[str]:
+    """All known path aliases for a connected USB-serial device."""
+    from src.hal.usb_classifier import list_serial_ports_with_stable_paths
+
+    aliases = {port}
+    for dev in list_serial_ports_with_stable_paths():
+        values = {dev.device, dev.stable_path, dev.by_id, dev.by_path}
+        if port in values:
+            aliases.update(v for v in values if v)
+    return aliases
+
+
 def _match_meshcore_source(port: str):
     """Resolve a live capture source for ``port`` (single MeshcoreUsbConfig)."""
     if _config is None:
         return "", None
+    aliases = _port_aliases(port)
     mc = _config.capture.meshcore_usb
-    if mc.serial_port == port:
+    if mc.serial_port and mc.serial_port in aliases:
         return "", _resolve_meshcore_source("")
     for src in _meshcore_sources:
         candidates = {
             getattr(src, "_resolved_port", None),
             getattr(src, "_configured_port", None),
+            getattr(src, "serial_port", None),
         }
-        if port in candidates:
+        if aliases & {c for c in candidates if c}:
             return "", src
     return "", None
 

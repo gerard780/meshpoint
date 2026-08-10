@@ -263,7 +263,7 @@ class MeshcoreFirmwareConfigCard {
         const select = this._root.querySelector('[data-mc-firmware-device]');
         if (!select) return;
 
-        const ports = this._enumeratedPorts || [];
+        const ports = (this._enumeratedPorts || []).filter((p) => p.vid);
         const usage = this._portUsage || {};
 
         if (ports.length === 0) {
@@ -271,9 +271,11 @@ class MeshcoreFirmwareConfigCard {
         } else {
             const previous = select.value;
             select.innerHTML = ports.map((p) => (
-                `<option value="${this._esc(p.stable_path)}">${this._esc(this._portOptionLabel(p, usage))}</option>`
+                `<option value="${this._esc(p.stable_path || p.device)}">${this._esc(this._portOptionLabel(p, usage))}</option>`
             )).join('');
-            if (previous && ports.some((p) => p.stable_path === previous)) select.value = previous;
+            if (previous && ports.some((p) => (p.stable_path || p.device) === previous)) {
+                select.value = previous;
+            }
         }
         this._updateFlashButtonState();
     }

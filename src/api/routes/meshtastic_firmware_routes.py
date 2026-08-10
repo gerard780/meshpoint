@@ -187,6 +187,8 @@ def _ensure_board_firmware_cached_sync(board: str, tag: str = "") -> dict:
                 mt = json.loads(zf.read(mt_name))
                 mt_json_path.write_bytes(zf.read(mt_name))
                 factory_path.write_bytes(zf.read(factory_name))
+                mt_json_path.chmod(0o644)
+                factory_path.chmod(0o644)
 
                 spiffs_file = next(
                     (
@@ -197,7 +199,9 @@ def _ensure_board_firmware_cached_sync(board: str, tag: str = "") -> dict:
                     None,
                 )
                 if spiffs_file and spiffs_file in names:
-                    (cache_dir / spiffs_file).write_bytes(zf.read(spiffs_file))
+                    spiffs_path = cache_dir / spiffs_file
+                    spiffs_path.write_bytes(zf.read(spiffs_file))
+                    spiffs_path.chmod(0o644)
 
     spiffs_file = next(
         (f["name"] for f in mt.get("files", []) if f.get("part_name") == "spiffs"),
@@ -218,18 +222,30 @@ def _ensure_board_firmware_cached_sync(board: str, tag: str = "") -> dict:
     }
 
 
+def _port_aliases(port: str) -> set[str]:
+    from src.hal.usb_classifier import list_serial_ports_with_stable_paths
+
+    aliases = {port}
+    for dev in list_serial_ports_with_stable_paths():
+        values = {dev.device, dev.stable_path, dev.by_id, dev.by_path}
+        if port in values:
+            aliases.update(v for v in values if v)
+    return aliases
+
+
 def _match_serial_source(port: str):
     """Resolve label + live capture source for ``port``."""
     label = ""
     source = None
     if _config is None:
         return label, source
+    aliases = _port_aliases(port)
     for d in _config.capture.serial:
-        if d.serial_port == port:
+        if d.serial_port and d.serial_port in aliases:
             label = d.label or ""
             source = _resolve_serial_source(label)
             return label, source
-    if _config.capture.serial_port == port:
+    if _config.capture.serial_port and _config.capture.serial_port in aliases:
         source = _resolve_serial_source("")
     return label, source
 
