@@ -17,8 +17,9 @@ contract is auditable.
 from __future__ import annotations
 
 import logging
+from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
 
 from src.api.audit import AuditLogWriter
@@ -158,13 +159,28 @@ async def setup_password(
 
 @router.post("/login")
 async def login(
-    payload: LoginRequest, request: Request, response: Response
+    payload: LoginRequest,
+    request: Request,
+    response: Response,
+    x_meshpoint_client: Optional[str] = Header(default=None),
 ) -> dict:
     result = _service().login(payload.username, payload.password)
     if isinstance(result, LoginSuccess):
         _set_session_cookie(request, response, result.token)
         logger.info("user logged in (role=%s)", result.role)
-        return {"role": result.role}
+        body: dict = {"role": result.role}
+        # The raw token only ever goes in the response body for a caller
+        # that explicitly identifies itself as a non-browser client (the
+        # Flutter app sends "app") -- the cookie stays HttpOnly either
+        # way, and putting the token in a JSON body a page's own JS can
+        # read would quietly undercut that HttpOnly XSS protection for
+        # every ordinary browser login otherwise. Non-browser clients
+        # have no cookie jar to rely on, so they need the token directly
+        # to send as `Authorization: Bearer <token>` (see
+        # src/api/auth/dependencies.py's own dual-mode contract).
+        if x_meshpoint_client:
+            body["token"] = result.token
+        return body
     raise _reject_login(result)
 
 
