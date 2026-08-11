@@ -2,6 +2,10 @@
 
 ### Unreleased
 
+#### Auth
+
+- **Bearer token on login for non-browser clients.** `POST /api/auth/login` still sets the HttpOnly session cookie for browsers. Callers that send `X-Meshpoint-Client` (companion apps) also receive the JWT in the JSON body as `token`, matching the existing `Authorization: Bearer` path.
+
 #### Capture and serial
 
 - **Busy Meshtastic serial no longer kills the service.** If a configured USB
