@@ -13,9 +13,15 @@ flutter_native_splash:
 
   android_12:
     color: "#0a0e17"
-    image: assets/icon/icon.png
+    # Android 12+'s splash-screen API renders this inside its own fixed
+    # icon window (sized like an adaptive icon, visual content expected
+    # within the inner ~66% safe zone) -- the plain icon.png fills its
+    # canvas edge-to-edge with no margin, so the OS zoomed into it and
+    # cropped the wordmark. This padded variant leaves real transparent
+    # margin so the OS's own scaling lands on a correctly-framed badge.
+    image: assets/icon/icon_splash_android12.png
     color_dark: "#0a0e17"
-    image_dark: assets/icon/icon.png
+    image_dark: assets/icon/icon_splash_android12.png
 
   web: false
   android: true

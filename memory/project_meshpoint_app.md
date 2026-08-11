@@ -634,3 +634,61 @@ Keychain access earlier this session (`PlatformException -34018`, see
 above) when the signing identity shifted between builds. Worth doing
 deliberately as its own change if the user wants it, not as a drive-by
 alongside a copyright string edit.
+
+### Android build config: compileSdk/NDK/minSdk bumped
+
+`flutter build apk` failed outright (manifest merge error, not just a
+warning): `flutter_secure_storage`'s own manifest declares `minSdk 23`,
+but this Flutter install's bundled `flutter.minSdkVersion` default is
+21. Also warned about `compileSdk`/NDK version mismatches from
+`flutter_secure_storage`/`flutter_native_splash`/`path_provider_android`
+all wanting higher than this install's bundled defaults
+(`flutter.compileSdkVersion`/`flutter.ndkVersion`). Fixed in
+`android/app/build.gradle.kts`: `compileSdk` pinned to `36`, `ndkVersion`
+pinned to `"27.0.12077973"` (both backward compatible, per Flutter's own
+suggested fix), `minSdk` raised from the tool's default `21` to `23`
+(matching the plugin's real requirement, not overridden away with
+`tools:overrideLibrary` which the plugin's own error text warns "may
+lead to runtime failures"). Verified with a real `flutter build apk`
+(release) -- went from a hard failure to `✓ Built
+build/app/outputs/flutter-apk/app-release.apk (52.3MB)`.
+
+### Android 12+ splash icon was zoomed in / cropped
+
+User real-device report (installed the just-built APK, saw it live):
+"in the splash screen the icon is zoomed in weird" -- then clarified
+"logo i mean". Root cause, confirmed by actually opening the generated
+resource file (`android/app/src/main/res/drawable-xxxhdpi/android12splash.png`)
+and seeing it was the plain, unmodified `assets/icon/icon.png`: Android
+12+'s `SplashScreen` API (`windowSplashScreenAnimatedIcon` in
+`android/app/src/main/res/values-v31/styles.xml`) renders the icon
+inside its own fixed icon window sized like an adaptive-icon foreground
+(visual content expected within roughly the inner 66% safe zone, margin
+around it). `icon.png` bakes its own rounded-square background + the
+"Meshpoint" wordmark in edge-to-edge with zero margin, so the OS's own
+scaling zoomed into the center of that with no safe zone to respect,
+cropping the wordmark -- a well-documented `flutter_native_splash` +
+Android 12 gotcha, not a bug in this app's own code, and not something
+`dart run flutter_native_splash:create` warns about since it's happy to
+resize whatever source image you hand it.
+
+Fix: generated a padded variant specifically for the `android_12` splash
+source -- `assets/icon/icon_splash_android12.png`, built with a small
+Python/PIL script (transparent 512x512 canvas, source icon scaled to
+62% and centered, real transparent margin around it) so the OS's own
+zoom lands on a correctly-framed badge instead of cropping in on an
+unpadded one. The plain full-bleed `icon.png` is untouched and still
+used everywhere else (launcher icon, pre-Android-12 splash, desktop
+`splash_screen.dart`) -- this padding is specifically an Android-12-splash-API
+workaround, not a general icon fix. Wired into
+`flutter_native_splash.yaml`'s `android_12.image`/`image_dark`, then
+regenerated for real (`dart run flutter_native_splash:create`) --
+confirmed by reopening the newly-generated
+`drawable-xxxhdpi/android12splash.png` and seeing the padded badge, not
+just trusting the config edit. `flutter analyze` clean, `flutter build
+apk --debug` still succeeds.
+
+Not yet re-verified on the user's actual Android device (that's the
+next real check -- this was verified as far as "the generated resource
+file is now correctly padded," not yet "the user has seen it render
+correctly on hardware").
