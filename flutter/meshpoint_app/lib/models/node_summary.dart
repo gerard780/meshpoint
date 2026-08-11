@@ -159,4 +159,38 @@ class NodeSummary {
     if (src == 'concentrator') return '868 MHz';
     return null;
   }
+
+  /// Applies a live `/ws` packet's signal/timing to this node without
+  /// waiting for the next full `/api/nodes` reconciliation -- mirrors
+  /// `NodeCards.updateFromPacket()` in `frontend/js/node_cards.js`,
+  /// which patches `last_heard`/`latest_rssi`/`latest_snr` in place off
+  /// every packet rather than only on its own 15s refresh timer.
+  NodeSummary withLivePacket({required DateTime heardAt, double? rssi, double? snr}) {
+    return NodeSummary(
+      nodeId: nodeId,
+      displayName: displayName,
+      shortName: shortName,
+      hardwareModel: hardwareModel,
+      firmwareVersion: firmwareVersion,
+      protocol: protocol,
+      role: role,
+      firstSeen: firstSeen,
+      lastHeard: heardAt,
+      packetCount: packetCount + 1,
+      hasPosition: hasPosition,
+      latitude: latitude,
+      longitude: longitude,
+      altitude: altitude,
+      rssi: rssi ?? this.rssi,
+      snr: snr ?? this.snr,
+      hops: hops,
+      captureSource: captureSource,
+      battery: battery,
+      voltage: voltage,
+      temperature: temperature,
+      humidity: humidity,
+      channelUtil: channelUtil,
+      airUtil: airUtil,
+    );
+  }
 }

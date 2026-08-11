@@ -692,3 +692,59 @@ Not yet re-verified on the user's actual Android device (that's the
 next real check -- this was verified as far as "the generated resource
 file is now correctly padded," not yet "the user has seen it render
 correctly on hardware").
+
+### Nodes tab wasn't actually live -- only updated on screen re-entry
+
+User report (testing on Mac): "the data pulled or streamed over
+websocket, i dont get live updates i have togo out of the screen and
+back and i see updates." Real bug, confirmed by reading
+`server_dashboard_screen.dart`'s existing code: `_connectLive()`'s `/ws`
+stream listener only ever appended to `_livePackets` (the Live tab) --
+it never touched `_nodes` (the Nodes tab) at all. `_loadNodes()` was a
+one-shot `initState()` call plus manual pull-to-refresh; the only reason
+leaving and re-entering the screen "fixed" it is that recreates
+`ServerDashboardScreenState` and reruns `initState()`.
+
+Checked how the web dashboard actually avoids this
+(`frontend/js/app.js`): it does two things together, not one instead of
+the other -- `nodeCards.updateFromPacket(packet)` patches
+`last_heard`/`latest_rssi`/`latest_snr` into the in-memory node list
+immediately on every websocket message, *and* a `setInterval(..., 15_000)`
+calls `_refreshData()` (a full `/api/nodes` re-fetch) for everything a
+single packet can't carry (new nodes joining, battery/voltage/hardware
+telemetry). Ported both:
+
+- `NodeSummary.withLivePacket({heardAt, rssi, snr})` (new method,
+  `lib/models/node_summary.dart`) -- returns a copy with lastHeard/
+  rssi/snr patched and packetCount bumped, everything else preserved.
+  `rssi`/`snr` fall back to the existing value when the packet doesn't
+  carry a signal block (e.g. MQTT-relayed), rather than blanking a
+  still-good reading.
+- `_ServerDashboardScreenState._applyLivePacketToNodes()` (new,
+  `server_dashboard_screen.dart`) -- on every `/ws` packet, finds the
+  matching node by `sourceId` and replaces it in `_nodes` via
+  `withLivePacket`, moved to the front to match `_loadNodes()`'s
+  most-recently-heard-first sort. Unknown source IDs are left alone for
+  the reconciliation timer to pick up as a real new node (inserting a
+  half-populated placeholder from a bare packet was deliberately not
+  done -- `PacketEvent` doesn't carry display name/hardware/role, so a
+  synthesized entry would look broken until the next reconciliation
+  overwrote it anyway).
+- `Timer.periodic(Duration(seconds: 15), ...)` calling `_loadNodes(showLoading: false)`,
+  started in `initState()`, cancelled in `dispose()`. `_loadNodes()`
+  gained a `showLoading` param so this background tick doesn't flash the
+  `LinearProgressIndicator` every 15s, and a failed background tick no
+  longer clobbers an already-good node list with an error screen (only
+  the user-initiated initial load / pull-to-refresh surface `_nodesError`).
+
+Real tests added, not just trusted the logic: `test/node_summary_test.dart`
+(new) proves `withLivePacket` patches the right fields, bumps
+packetCount, preserves everything else, and correctly keeps prior
+rssi/snr when the packet carries none. Didn't attempt to test
+`_applyLivePacketToNodes` itself at the widget level -- `WebSocketService`
+isn't currently injectable into `ServerDashboardScreen` (it's constructed
+inline, `_ws = WebSocketService()`), so exercising the full live-socket
+path would need a DI refactor beyond this bug's scope; flagged here as a
+real gap, not silently skipped. `flutter analyze` clean, `flutter test`
+passes (6 assertions total now), `flutter build macos --debug` still
+succeeds.

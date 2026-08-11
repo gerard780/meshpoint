@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -41,6 +43,12 @@ class _ServerDashboardScreenState extends State<ServerDashboardScreen>
   final List<PacketEvent> _livePackets = [];
   static const _maxLivePackets = 100;
 
+  // Reconciliation fallback for everything a single packet doesn't carry
+  // (new nodes joining, battery/voltage/hardware telemetry) -- mirrors
+  // `app.js`'s own 15s `_refreshData()` interval that runs alongside its
+  // per-packet `updateFromPacket()` patching, not instead of it.
+  Timer? _nodesRefreshTimer;
+
   @override
   void initState() {
     super.initState();
@@ -49,11 +57,16 @@ class _ServerDashboardScreenState extends State<ServerDashboardScreen>
     _loadStatus();
     _loadNodes();
     _connectLive();
+    _nodesRefreshTimer = Timer.periodic(
+      const Duration(seconds: 15),
+      (_) => _loadNodes(showLoading: false),
+    );
   }
 
   @override
   void dispose() {
     _tabController.dispose();
+    _nodesRefreshTimer?.cancel();
     _ws.disconnect();
     super.dispose();
   }
@@ -76,8 +89,11 @@ class _ServerDashboardScreenState extends State<ServerDashboardScreen>
     if (mounted) context.read<ServerStore>().save();
   }
 
-  Future<void> _loadNodes() async {
-    setState(() => _loadingNodes = true);
+  /// [showLoading] is false for the background 15s reconciliation timer
+  /// -- that one runs silently (no spinner flash every 15s); the initial
+  /// load and pull-to-refresh still show it.
+  Future<void> _loadNodes({bool showLoading = true}) async {
+    if (showLoading) setState(() => _loadingNodes = true);
     try {
       final nodes = await _api.getNodes();
       nodes.sort((a, b) {
@@ -93,9 +109,13 @@ class _ServerDashboardScreenState extends State<ServerDashboardScreen>
       });
     } catch (e) {
       if (!mounted) return;
-      setState(() => _nodesError = e.toString());
+      if (showLoading) setState(() => _nodesError = e.toString());
+      // A silent background refresh failing (e.g. one dropped Wi-Fi
+      // beat) shouldn't blow away an already-populated, still-good node
+      // list with an error screen -- only surface it when the user
+      // asked for this load directly (initial load / pull-to-refresh).
     } finally {
-      if (mounted) setState(() => _loadingNodes = false);
+      if (showLoading && mounted) setState(() => _loadingNodes = false);
     }
   }
 
@@ -109,10 +129,29 @@ class _ServerDashboardScreenState extends State<ServerDashboardScreen>
           if (_livePackets.length > _maxLivePackets) {
             _livePackets.removeLast();
           }
+          _applyLivePacketToNodes(packet);
         });
       },
       onError: (_) {},
     );
+  }
+
+  /// Patches the matching node's signal/last-heard in place from a live
+  /// packet -- mirrors `NodeCards.updateFromPacket()` in
+  /// `frontend/js/node_cards.js`. Must be called from inside a
+  /// `setState()` (it doesn't call one itself) since it's always run
+  /// alongside the `_livePackets` update above in the same frame.
+  void _applyLivePacketToNodes(PacketEvent packet) {
+    final idx = _nodes.indexWhere((n) => n.nodeId == packet.sourceId);
+    if (idx < 0) return; // Unknown node -- the 15s reconciliation timer will pick it up.
+    final updated = _nodes[idx].withLivePacket(
+      heardAt: packet.timestamp,
+      rssi: packet.rssi,
+      snr: packet.snr,
+    );
+    _nodes
+      ..removeAt(idx)
+      ..insert(0, updated); // Most-recently-heard-first, matching _loadNodes()'s sort.
   }
 
   @override
