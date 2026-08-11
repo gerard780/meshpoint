@@ -7,7 +7,7 @@
  * spare board is a different action than configuring an already-
  * assigned device. Drives src/api/routes/meshtastic_firmware_routes.py.
  *
- * Same shape as MeshCore's card (Version + searchable Board + Device to
+ * Same shape as MeshCore's card (Version + Board dropdown + Device to
  * flash, both lists refreshable without reloading the page) with one
  * real difference: no Flavor field. MeshCore ships separate BLE-only vs
  * USB-only builds per board; Meshtastic's per-board firmware already
@@ -50,9 +50,9 @@ class MeshtasticFirmwareConfigCard {
                     </label>
                     <label class="cfg-field cfg-firmware-field">
                         <span class="cfg-field__label">Board</span>
-                        <input class="cfg-field__input" type="text" list="mt-firmware-boards-list"
-                               data-mt-firmware-board placeholder="Search boards…" autocomplete="off">
-                        <datalist id="mt-firmware-boards-list"></datalist>
+                        <select class="cfg-field__input" data-mt-firmware-board>
+                            <option value="">Loading boards…</option>
+                        </select>
                     </label>
                     <label class="cfg-field cfg-firmware-field">
                         <span class="cfg-field__label">Device to flash</span>
@@ -91,7 +91,7 @@ class MeshtasticFirmwareConfigCard {
         this._root.querySelector('[data-mt-firmware-tag]')
             .addEventListener('change', () => this._loadMtFirmwareTargets());
         this._root.querySelector('[data-mt-firmware-board]')
-            .addEventListener('input', () => this._updateFlashButtonState());
+            .addEventListener('change', () => this._updateFlashButtonState());
         this._root.querySelector('[data-mt-rescan-releases]')
             .addEventListener('click', (e) => this._rescanReleases(e.currentTarget));
         this._root.querySelector('[data-mt-rescan-usb]')
@@ -230,19 +230,14 @@ class MeshtasticFirmwareConfigCard {
         return parts.filter(Boolean).join(' — ');
     }
 
-    /** Board choices for the searchable Board field, derived live from
-     * whichever release is currently selected (see
-     * meshtastic_firmware_routes.py's module docstring -- ~130 real
-     * targets from that release's own manifest, not a hardcoded list).
-     * Re-fetches on every Version change, not just once at mount, since
-     * each release's manifest lists its own board catalog. Renders as a
-     * <datalist> (search-as-you-type) rather than a plain <select>,
-     * matching this app's existing USB-port-picker pattern. */
+    /** Board choices for the Board dropdown from the selected release's
+     * manifest. Plain ``<select>`` so mobile and desktop pick the exact
+     * target id without free-text typos. */
     async _loadMtFirmwareTargets() {
-        const input = this._root.querySelector('[data-mt-firmware-board]');
-        const list = this._root.querySelector('#mt-firmware-boards-list');
-        if (!input || !list) return;
+        const select = this._root.querySelector('[data-mt-firmware-board]');
+        if (!select) return;
 
+        const previous = select.value;
         const tag = this._root.querySelector('[data-mt-firmware-tag]')?.value || '';
         const params = new URLSearchParams();
         if (tag) params.set('tag', tag);
@@ -251,16 +246,18 @@ class MeshtasticFirmwareConfigCard {
         const boards = (result && Array.isArray(result.boards)) ? result.boards : [];
         this._boards = boards;
 
-        list.innerHTML = boards.map((b) => (
-            `<option value="${this._esc(b.board)}" label="${this._esc(b.label)}"></option>`
-        )).join('');
-
-        // The previously-picked board might not exist in a different
-        // release's manifest -- clear it rather than silently keep a
-        // choice that would just fail to find a matching target at
-        // flash time.
-        if (input.value && !boards.some((b) => b.board === input.value)) {
-            input.value = '';
+        if (boards.length === 0) {
+            select.innerHTML = '<option value="">No boards for this version</option>';
+        } else {
+            select.innerHTML = [
+                '<option value="">Select a board…</option>',
+                ...boards.map((b) => (
+                    `<option value="${this._esc(b.board)}">${this._esc(b.label)}</option>`
+                )),
+            ].join('');
+            if (previous && boards.some((b) => b.board === previous)) {
+                select.value = previous;
+            }
         }
         this._updateFlashButtonState();
     }
@@ -388,14 +385,10 @@ class MeshtasticFirmwareConfigCard {
         if (!board || !port) return;
 
         const status = this._root.querySelector('[data-mt-firmware-status]');
-        // Free-text field (search-as-you-type against the datalist) --
-        // unlike a <select>, nothing stops a value that doesn't match any
-        // real board from being submitted, so check before wasting a
-        // round trip on a request that could only ever fail server-side.
         if (!(this._boards || []).some((b) => b.board === board)) {
             if (status) {
                 status.dataset.kind = 'error';
-                status.textContent = `"${board}" isn't in the current board list -- pick one from the suggestions.`;
+                status.textContent = 'Pick a board from the list.';
             }
             return;
         }

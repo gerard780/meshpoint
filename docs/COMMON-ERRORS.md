@@ -257,20 +257,30 @@ banner, so this only bites users running install.sh on v0.7.0 once.
 
 ### Configuration → Firmware: `esptool` not found / flash fails immediately
 
-**Cause:** The dashboard flash path shells out to `esptool`. Fresh installs
-and upgrades that skip `scripts/install.sh` may not have it in the Meshpoint
-venv.
+**Cause:** The dashboard flash path shells out to `esptool` from the Meshpoint
+venv. RC pulls that only ran `git pull` / Apply without refreshing
+`requirements.txt` (or skipped `install.sh`) may not have it. Do **not**
+install the Debian/trixie system `esptool` package: it can miss ESP32-S3.
 
-**Fix:** Re-run the installer (installs `esptool` into the venv when missing),
-or install it manually:
+**Fix:** Pull current `feat/v0.7.9` / `main`, then install into the venv and
+restart:
 
 ```bash
-sudo /opt/meshpoint/venv/bin/pip install --upgrade esptool
+sudo /opt/meshpoint/venv/bin/pip install -r /opt/meshpoint/requirements.txt
 sudo systemctl restart meshpoint
 ```
 
-Then open **Configuration → Firmware**, pick board/port, and flash again.
-Leave **Erase everything** unchecked for in-place upgrades of the same stack.
+Or re-run `sudo /opt/meshpoint/scripts/install.sh` (always ensures
+`esptool>=4.7.0,<5` in the venv).
+
+Then open **Configuration → Firmware**, pick board/port from the dropdowns,
+and flash again. Leave **Erase everything** unchecked for in-place upgrades
+of the same stack.
+
+If the UI said "reconnected" but **Installed** still shows the old companion
+version, the flash failed (often missing esptool or the old `write-flash`
+verb on esptool 4.7). Current firmware uses `write_flash` and only reports
+reconnect after a successful esptool exit.
 
 ### `error: externally-managed-environment`
 

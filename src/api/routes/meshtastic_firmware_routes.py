@@ -1,7 +1,7 @@
 """Download and flash official Meshtastic firmware via esptool.
 
 Fetches meshtastic/firmware GitHub releases, caches per-board
-``.factory.bin`` + littlefs, streams esptool write-flash as NDJSON.
+``.factory.bin`` + littlefs, streams esptool write_flash as NDJSON.
 Credit: javastraat/meshpoint (firmware flash port).
 """
 
@@ -24,6 +24,7 @@ from src.api.audit.dependencies import get_audit_writer
 from src.api.auth.dependencies import require_admin
 from src.api.auth.jwt_session import SessionClaims
 from src.api.firmware import (
+    WRITE_FLASH_SUBCOMMAND,
     EspToolBinaryResolver,
     EspToolNdjsonStreamer,
     GithubHttpClient,
@@ -356,16 +357,42 @@ async def flash_meshtastic_stream(
                 })
                 await source.stop()
 
+            missing = _esptool.missing_install_hint()
+            if missing:
+                yield _ndjson({
+                    "type": "line", "stream": "stderr", "text": missing,
+                })
+                yield _ndjson({
+                    "type": "result",
+                    "result": {
+                        "returncode": -1, "success": False, "error": missing,
+                    },
+                })
+                if released:
+                    await source.start()
+                    yield _ndjson({
+                        "type": "line",
+                        "stream": "stdout",
+                        "text": (
+                            f"Flash aborted; {source.name} restored on {port}."
+                        ),
+                    })
+                ctx.set_result("error")
+                return
+
             write_flash_args = ["0x0", str(fw["factory_bin"])]
             if req.erase_all and fw["littlefs_bin"] and fw["littlefs_offset"] is not None:
                 write_flash_args += [
                     hex(fw["littlefs_offset"]), str(fw["littlefs_bin"]),
                 ]
 
-            # Credit: javastraat/meshpoint 85fb576 — erase toggle on flash stream
+            # Credit: javastraat/meshpoint 85fb576 — erase toggle.
+            # write_flash is esptool 4.x; write-flash is 5+ only.
             cmd = [
-                _esptool.resolve(), "--chip", fw["mcu"], "--port", port, "--baud", "921600",
-                "write-flash", *(["--erase-all"] if req.erase_all else []),
+                *_esptool.resolve_argv(),
+                "--chip", fw["mcu"], "--port", port, "--baud", "921600",
+                WRITE_FLASH_SUBCOMMAND,
+                *(["--erase-all"] if req.erase_all else []),
                 *write_flash_args,
             ]
             success = False
@@ -376,25 +403,49 @@ async def flash_meshtastic_stream(
                     success = bool((event.get("result") or {}).get("success"))
 
             if released:
-                yield _ndjson({
-                    "type": "line",
-                    "stream": "stdout",
-                    "text": "Waiting for the board to finish rebooting…",
-                })
-                await asyncio.sleep(3.0)
-                await source.start()
-                yield _ndjson({
-                    "type": "line",
-                    "stream": "stdout",
-                    "text": (
-                        f"{source.name} reconnected on {port}."
-                        if source.connected
-                        else (
-                            f"{source.name} did NOT reconnect -- "
-                            "a service restart may be needed."
-                        )
-                    ),
-                })
+                if not success:
+                    yield _ndjson({
+                        "type": "line",
+                        "stream": "stderr",
+                        "text": (
+                            "Flash failed (esptool exited non-zero). "
+                            "Board firmware was not updated. Restoring "
+                            "USB capture on the previous build…"
+                        ),
+                    })
+                    await source.start()
+                    yield _ndjson({
+                        "type": "line",
+                        "stream": "stdout",
+                        "text": (
+                            f"{source.name} restored on {port}."
+                            if source.connected
+                            else (
+                                f"{source.name} did NOT come back -- "
+                                "a service restart may be needed."
+                            )
+                        ),
+                    })
+                else:
+                    yield _ndjson({
+                        "type": "line",
+                        "stream": "stdout",
+                        "text": "Waiting for the board to finish rebooting…",
+                    })
+                    await asyncio.sleep(3.0)
+                    await source.start()
+                    yield _ndjson({
+                        "type": "line",
+                        "stream": "stdout",
+                        "text": (
+                            f"{source.name} reconnected on {port}."
+                            if source.connected
+                            else (
+                                f"{source.name} did NOT reconnect -- "
+                                "a service restart may be needed."
+                            )
+                        ),
+                    })
 
             ctx.set_result("success" if success else "error")
 

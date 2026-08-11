@@ -1,7 +1,7 @@
 """Download and flash official MeshCore companion firmware via esptool.
 
 Fetches companion- tagged releases from meshcore-dev/MeshCore, caches
-``*-merged.bin`` assets, and streams esptool write-flash as NDJSON.
+``*-merged.bin`` assets, and streams esptool write_flash as NDJSON.
 Credit: javastraat/meshpoint (firmware flash port).
 """
 
@@ -24,6 +24,7 @@ from src.api.audit.dependencies import get_audit_writer
 from src.api.auth.dependencies import require_admin
 from src.api.auth.jwt_session import SessionClaims
 from src.api.firmware import (
+    WRITE_FLASH_SUBCOMMAND,
     EspToolBinaryResolver,
     EspToolNdjsonStreamer,
     GithubHttpClient,
@@ -374,10 +375,37 @@ async def flash_meshcore_stream(
                 })
                 await source.stop()
 
-            # Credit: javastraat/meshpoint 85fb576 — erase toggle on flash stream
+            missing = _esptool.missing_install_hint()
+            if missing:
+                yield _ndjson({
+                    "type": "line", "stream": "stderr", "text": missing,
+                })
+                yield _ndjson({
+                    "type": "result",
+                    "result": {
+                        "returncode": -1, "success": False, "error": missing,
+                    },
+                })
+                if released:
+                    await source.start()
+                    yield _ndjson({
+                        "type": "line",
+                        "stream": "stdout",
+                        "text": (
+                            f"Flash aborted; {source.name} restored on {port}."
+                        ),
+                    })
+                ctx.set_result("error")
+                return
+
+            # Credit: javastraat/meshpoint 85fb576 — erase toggle on flash
+            # stream. Subcommand is write_flash (esptool 4.x); write-flash
+            # only exists on esptool 5+ and exits non-zero on 4.7.x.
             cmd = [
-                _esptool.resolve(), "--chip", "auto", "--port", port, "--baud", "921600",
-                "write-flash", *(["--erase-all"] if req.erase_all else []),
+                *_esptool.resolve_argv(),
+                "--chip", "auto", "--port", port, "--baud", "921600",
+                WRITE_FLASH_SUBCOMMAND,
+                *(["--erase-all"] if req.erase_all else []),
                 "0x0", str(fw["merged_bin"]),
             ]
             success = False
@@ -388,13 +416,37 @@ async def flash_meshcore_stream(
                     success = bool((event.get("result") or {}).get("success"))
 
             if released:
-                if req.flavor == "ble":
+                if not success:
+                    yield _ndjson({
+                        "type": "line",
+                        "stream": "stderr",
+                        "text": (
+                            "Flash failed (esptool exited non-zero). "
+                            "Board firmware was not updated. Restoring "
+                            "USB capture on the previous build…"
+                        ),
+                    })
+                    await source.start()
                     yield _ndjson({
                         "type": "line",
                         "stream": "stdout",
                         "text": (
-                            f"Flashed BLE firmware -- {source.name} won't reconnect over "
-                            "USB (that's expected); pair it with the MeshCore app instead."
+                            f"{source.name} restored on {port}."
+                            if source.connected
+                            else (
+                                f"{source.name} did NOT come back -- "
+                                "a service restart may be needed."
+                            )
+                        ),
+                    })
+                elif req.flavor == "ble":
+                    yield _ndjson({
+                        "type": "line",
+                        "stream": "stdout",
+                        "text": (
+                            f"Flashed BLE firmware -- {source.name} won't "
+                            "reconnect over USB (that's expected); pair it "
+                            "with the MeshCore app instead."
                         ),
                     })
                 else:

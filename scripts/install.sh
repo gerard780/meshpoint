@@ -470,16 +470,15 @@ pip install --upgrade pip -q
 pip install -r "${MESHPOINT_DIR}/requirements.txt" -q
 pip install pyserial -q
 
-# Configuration → Firmware flash (Meshtastic / MeshCore) needs a bare
-# `esptool` on PATH for the meshpoint service. Install into the venv so
-# the daemon sees it without touching system Python.
+# Configuration → Firmware flash (Meshtastic / MeshCore) needs esptool
+# in the Meshpoint venv. Always install here: do not skip when a system
+# `esptool` is on PATH (Debian/trixie packages can miss ESP32-S3), and
+# do not rely on Updates Apply alone for fleets that never re-ran
+# install.sh. Pin stays in requirements.txt; this line keeps upgrades
+# idempotent when that file was already applied without esptool.
 # Credit: javastraat/meshpoint (esptool install path adapted for venv).
-if command -v esptool &>/dev/null; then
-    info "esptool already on PATH, skipping"
-else
-    info "Installing esptool into Meshpoint venv..."
-    pip install --upgrade esptool -q
-fi
+info "Ensuring esptool is installed in Meshpoint venv..."
+pip install --upgrade 'esptool>=4.7.0,<5' -q
 
 deactivate
 

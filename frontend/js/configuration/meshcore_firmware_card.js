@@ -54,9 +54,9 @@ class MeshcoreFirmwareConfigCard {
                     </label>
                     <label class="cfg-field cfg-firmware-field">
                         <span class="cfg-field__label">Board</span>
-                        <input class="cfg-field__input" type="text" list="mc-firmware-boards-list"
-                               data-mc-firmware-board placeholder="Search boards…" autocomplete="off">
-                        <datalist id="mc-firmware-boards-list"></datalist>
+                        <select class="cfg-field__input" data-mc-firmware-board>
+                            <option value="">Loading boards…</option>
+                        </select>
                     </label>
                     <label class="cfg-field cfg-firmware-field">
                         <span class="cfg-field__label">Device to flash</span>
@@ -98,7 +98,7 @@ class MeshcoreFirmwareConfigCard {
         this._root.querySelector('[data-mc-firmware-flavor]')
             .addEventListener('change', () => this._loadMcFirmwareTargets());
         this._root.querySelector('[data-mc-firmware-board]')
-            .addEventListener('input', () => this._updateFlashButtonState());
+            .addEventListener('change', () => this._updateFlashButtonState());
         this._root.querySelector('[data-mc-rescan-releases]')
             .addEventListener('click', (e) => this._rescanReleases(e.currentTarget));
         this._root.querySelector('[data-mc-rescan-usb]')
@@ -230,20 +230,16 @@ class MeshcoreFirmwareConfigCard {
         return parts.filter(Boolean).join(' — ');
     }
 
-    /** Board choices for the searchable Board field, derived live from
-     * whichever release+flavor is currently selected (see
-     * meshcore_firmware_routes.py's module docstring for why this isn't
-     * a static curated list) -- a real difference exists per flavor, not
-     * just theoretical, so this re-fetches on every Version/Flavor
-     * change, not just once at mount. Renders as a <datalist> (search-
-     * as-you-type against ~30 boards) rather than a plain <select>,
-     * matching this app's existing USB-port-picker pattern. */
+    /** Board choices for the Board dropdown, derived live from whichever
+     * release+flavor is currently selected. Re-fetches on every
+     * Version/Flavor change (USB vs BLE board sets differ). Plain
+     * ``<select>`` (not datalist) so mobile and desktop both pick the
+     * exact asset id (e.g. Heltec_v3) without case/underscore typos. */
     async _loadMcFirmwareTargets() {
-        const input = this._root.querySelector('[data-mc-firmware-board]');
-        const list = this._root.querySelector('#mc-firmware-boards-list');
-        const flashBtn = this._root.querySelector('[data-mc-firmware-flash]');
-        if (!input || !list) return;
+        const select = this._root.querySelector('[data-mc-firmware-board]');
+        if (!select) return;
 
+        const previous = select.value;
         const tag = this._root.querySelector('[data-mc-firmware-tag]')?.value || '';
         const flavor = this._root.querySelector('[data-mc-firmware-flavor]')?.value || 'usb';
         const params = new URLSearchParams();
@@ -254,17 +250,18 @@ class MeshcoreFirmwareConfigCard {
         const boards = (result && Array.isArray(result.boards)) ? result.boards : [];
         this._boards = boards;
 
-        list.innerHTML = boards.map((b) => (
-            `<option value="${this._esc(b.board)}" label="${this._esc(b.label)}"></option>`
-        )).join('');
-
-        // The previously-picked board might not exist for the newly
-        // selected flavor (companion-v1.16.0: 29 USB boards vs. 32 BLE,
-        // not the same set) -- clear it rather than silently keep a
-        // choice that would just fail to find a matching asset at flash
-        // time.
-        if (input.value && !boards.some((b) => b.board === input.value)) {
-            input.value = '';
+        if (boards.length === 0) {
+            select.innerHTML = '<option value="">No boards for this version/flavor</option>';
+        } else {
+            select.innerHTML = [
+                '<option value="">Select a board…</option>',
+                ...boards.map((b) => (
+                    `<option value="${this._esc(b.board)}">${this._esc(b.label)}</option>`
+                )),
+            ].join('');
+            if (previous && boards.some((b) => b.board === previous)) {
+                select.value = previous;
+            }
         }
         this._updateFlashButtonState();
     }
@@ -398,14 +395,10 @@ class MeshcoreFirmwareConfigCard {
         if (!board || !port) return;
 
         const status = this._root.querySelector('[data-mc-firmware-status]');
-        // Free-text field (search-as-you-type against the datalist) --
-        // unlike a <select>, nothing stops a value that doesn't match any
-        // real board from being submitted, so check before wasting a
-        // round trip on a request that could only ever fail server-side.
         if (!(this._boards || []).some((b) => b.board === board)) {
             if (status) {
                 status.dataset.kind = 'error';
-                status.textContent = `"${board}" isn't in the current board list -- pick one from the suggestions.`;
+                status.textContent = 'Pick a board from the list.';
             }
             return;
         }

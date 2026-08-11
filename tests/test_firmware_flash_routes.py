@@ -81,11 +81,18 @@ class TestEspToolHelpers(unittest.TestCase):
         self.assertTrue(raw.endswith(b"\n"))
         self.assertEqual(json.loads(raw), {"type": "line", "text": "hi"})
 
-    def test_resolver_falls_back_to_name(self):
+    def test_resolver_falls_back_to_module_argv(self):
         resolver = EspToolBinaryResolver()
         with patch.object(Path, "is_file", return_value=False), patch(
             "src.api.firmware.esptool_binary.shutil.which", return_value=None,
+        ), patch(
+            "src.api.firmware.esptool_binary.sys.executable",
+            "/opt/meshpoint/venv/bin/python",
         ):
+            self.assertEqual(
+                resolver.resolve_argv(),
+                ["/opt/meshpoint/venv/bin/python", "-m", "esptool"],
+            )
             self.assertEqual(resolver.resolve(), "esptool")
 
     def test_resolver_uses_venv_sibling_without_resolve(self):
@@ -99,6 +106,50 @@ class TestEspToolHelpers(unittest.TestCase):
         with patch("src.api.firmware.esptool_binary.sys.executable", str(fake_python)):
             with patch.object(Path, "is_file", is_file):
                 self.assertEqual(resolver.resolve(), str(fake_esptool))
+                self.assertEqual(resolver.resolve_argv(), [str(fake_esptool)])
+
+    def test_write_flash_subcommand_is_underscore(self):
+        from src.api.firmware.esptool_binary import WRITE_FLASH_SUBCOMMAND
+
+        self.assertEqual(WRITE_FLASH_SUBCOMMAND, "write_flash")
+        self.assertNotIn("-", WRITE_FLASH_SUBCOMMAND)
+
+    def test_missing_hint_when_package_absent(self):
+        resolver = EspToolBinaryResolver()
+
+        def _no_esptool(name, *args, **kwargs):
+            if name == "esptool" or (
+                isinstance(name, str) and name.startswith("esptool")
+            ):
+                raise ImportError("no esptool")
+            return __import__(name, *args, **kwargs)
+
+        with patch.object(resolver, "resolve_path", return_value=None), patch(
+            "builtins.__import__", side_effect=_no_esptool,
+        ):
+            hint = resolver.missing_install_hint()
+        self.assertIsNotNone(hint)
+        self.assertIn("pip install", hint)
+
+    def test_erase_flag_omitted_from_cmd_when_false(self):
+        from src.api.firmware.esptool_binary import WRITE_FLASH_SUBCOMMAND
+
+        erase_all = False
+        args = [
+            WRITE_FLASH_SUBCOMMAND,
+            *(["--erase-all"] if erase_all else []),
+            "0x0",
+            "fw.bin",
+        ]
+        self.assertNotIn("--erase-all", args)
+        erase_all = True
+        args = [
+            WRITE_FLASH_SUBCOMMAND,
+            *(["--erase-all"] if erase_all else []),
+            "0x0",
+            "fw.bin",
+        ]
+        self.assertIn("--erase-all", args)
 
 
 class TestFirmwareRouteAuth(unittest.TestCase):
@@ -139,14 +190,6 @@ class TestFirmwareRouteAuth(unittest.TestCase):
             res = self.client.get("/api/config/meshcore/firmware/releases")
         self.assertEqual(res.status_code, 200)
         self.assertEqual(res.json()["releases"][0]["tag"], "companion-v1.16.0")
-
-    def test_erase_flag_omitted_from_cmd_when_false(self):
-        erase_all = False
-        args = ["write-flash", *(["--erase-all"] if erase_all else []), "0x0", "fw.bin"]
-        self.assertNotIn("--erase-all", args)
-        erase_all = True
-        args = ["write-flash", *(["--erase-all"] if erase_all else []), "0x0", "fw.bin"]
-        self.assertIn("--erase-all", args)
 
 
 class TestMeshcoreSourceConnectedProperty(unittest.TestCase):

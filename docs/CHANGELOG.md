@@ -12,6 +12,21 @@
   USB devices, prefers `/dev/serial/by-path/…` labels, and warns before save
   when a GPS-class port is selected as a Meshtastic serial device.
 
+#### Firmware flash
+
+- **esptool is a real dependency.** Pinned `esptool>=4.7.0,<5` in
+  `requirements.txt`; `install.sh` always installs it into the venv (never
+  skips because a system `esptool` is on PATH).
+- **Flash uses `write_flash` (esptool 4.x).** The hyphen form only works on
+  esptool 5+ and left RC boards on the old companion build while the UI said
+  reconnect succeeded.
+- **Failed flash no longer claims reconnect success.** esptool non-zero exit
+  restores USB capture and reports the failure; reconnect wording is only
+  after a successful write.
+- **Board picker is a dropdown.** MeshCore and Meshtastic Firmware cards use
+  a real `<select>` of release assets so mobile/desktop pick exact ids
+  (e.g. `Heltec_v3`) without case or underscore typos.
+
 #### Dashboard
 
 - **Firmware page shows installed companion versions.** Configuration → Firmware
