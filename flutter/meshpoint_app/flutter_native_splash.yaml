@@ -1,0 +1,22 @@
+# Native splash screen shown while the app boots, before Flutter's own
+# UI can render -- same real meshpoint icon as the launcher icon
+# (assets/icon/icon.png), on the same dark background every one of the
+# app's 3 themes uses (see lib/theme/meshpoint_theme.dart -- there's no
+# actual light theme to branch on here, all three are dark variants).
+# Run: dart run flutter_native_splash:create
+flutter_native_splash:
+  color: "#0a0e17"
+  image: assets/icon/icon.png
+
+  color_dark: "#0a0e17"
+  image_dark: assets/icon/icon.png
+
+  android_12:
+    color: "#0a0e17"
+    image: assets/icon/icon.png
+    color_dark: "#0a0e17"
+    image_dark: assets/icon/icon.png
+
+  web: false
+  android: true
+  ios: true

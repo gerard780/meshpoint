@@ -1,11 +1,11 @@
 {
-    "name": "meshpoint_app",
-    "short_name": "meshpoint_app",
+    "name": "Meshpoint Fleet Manager",
+    "short_name": "Meshpoint",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0a0e17",
     "theme_color": "#06b6d4",
-    "description": "A new Flutter project.",
+    "description": "Manage and view multiple Meshpoint deployments from one app.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

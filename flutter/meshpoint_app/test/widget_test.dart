@@ -16,6 +16,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:meshpoint_app/main.dart';
+import 'package:meshpoint_app/screens/splash_screen.dart';
+import 'package:meshpoint_app/theme/meshpoint_theme.dart';
 
 void main() {
   const channel = MethodChannel('plugins.it_nomads.com/flutter_secure_storage');
@@ -43,15 +45,41 @@ void main() {
         .setMockMethodCallHandler(channel, null);
   });
 
-  testWidgets('App boots and shows the fleet screen', (WidgetTester tester) async {
+  testWidgets('Splash screen shows first, then the fleet screen', (WidgetTester tester) async {
     await tester.pumpWidget(const MeshpointApp());
+
+    // Before anything has settled, the splash screen (real widget, not a
+    // no-op passthrough) is what's actually on screen -- ServerStore.load()
+    // hasn't resolved yet at this exact point, even against a mocked
+    // channel, since it's still a real async call.
+    expect(find.byType(SplashScreen), findsOneWidget);
+    expect(find.byType(Image), findsOneWidget);
+    expect(find.text('Meshpoint Fleet Manager'), findsOneWidget);
+
     await tester.pumpAndSettle();
 
-    expect(find.text('Meshpoint Fleet'), findsOneWidget);
+    // And once loading finishes, it hands off to the real fleet screen.
+    expect(find.byType(SplashScreen), findsNothing);
+    expect(find.text('Meshpoint Fleet Manager'), findsOneWidget);
     expect(find.text('No meshpoint servers yet'), findsOneWidget);
     // Two by design: the empty-state's own "Add your first server"
     // button, plus the screen's persistent FloatingActionButton.
     expect(find.byIcon(Icons.add), findsNWidgets(2));
     expect(find.byType(FloatingActionButton), findsOneWidget);
+  });
+
+  test('Light theme actually carries Brightness.light through to ThemeData', () {
+    // The other three palettes rely on MeshpointPalette's default
+    // (Brightness.dark) -- this only proves anything for the one palette
+    // that overrides it.
+    expect(MeshpointPalette.light.brightness, Brightness.light);
+    expect(MeshpointPalette.dark.brightness, Brightness.dark);
+
+    final lightTheme = buildMeshpointTheme(MeshpointPalette.light);
+    expect(lightTheme.brightness, Brightness.light);
+    expect(lightTheme.scaffoldBackgroundColor, MeshpointPalette.light.bgPrimary);
+
+    final darkTheme = buildMeshpointTheme(MeshpointPalette.dark);
+    expect(darkTheme.brightness, Brightness.dark);
   });
 }

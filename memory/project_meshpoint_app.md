@@ -421,3 +421,120 @@ point for this feature; next real steps whenever picked back up are the
 explicitly-deferred v2 items (config editing, repeater management,
 per-protocol pages, push notifications) or a first Android/iOS device
 test (only macOS has been live-tested so far).
+
+## App name + splash screen (2026-08-11, same session)
+
+User: "in the app can you name everything the app is Meshpoint Fleet
+Manager can you fix this in the flutter app everywhere ?" + "also the
+start needs the app icon to be shown splash screen."
+
+### Renamed everywhere a display name actually appears
+
+Every platform's window title / bundle display name / task-switcher
+label, updated to "Meshpoint Fleet Manager": `lib/main.dart`
+(`MaterialApp.title`), `lib/screens/start_screen.dart` (AppBar),
+`macos/Runner/Configs/AppInfo.xcconfig` (`PRODUCT_NAME` -- this is the
+one that actually controls the macOS window/bundle title, confirmed
+live: the built app is literally named `Meshpoint Fleet Manager.app`
+now), `ios/Runner/Info.plist` (`CFBundleDisplayName` and
+`CFBundleName`), `android/app/src/main/AndroidManifest.xml`
+(`android:label`), `linux/runner/my_application.cc` (header bar +
+window title), `windows/runner/Runner.rc` (`FileDescription`/
+`ProductName` -- left `InternalName`/`OriginalFilename` as the literal
+`.exe` filename, not a display string) and `main.cpp` (window title),
+`web/manifest.json` (`name`/`description` -- `short_name` deliberately
+kept as just "Meshpoint", a PWA-specific space-constrained field, not
+really a second "app name"), `web/index.html` (`<title>` +
+`apple-mobile-web-app-title` + description meta), `pubspec.yaml`
+(`description`, not the Dart package `name:` itself -- renaming that
+would cascade into every import statement across the project for a
+purely internal identifier, not something "everywhere the app is
+named" was actually asking for). `test/widget_test.dart`'s assertion
+updated to match.
+
+One deliberate technical caveat left as-is rather than silently
+avoided: iOS's `CFBundleName` is traditionally meant to stay short
+(~15 chars) since it's used in space-constrained system UI; "Meshpoint
+Fleet Manager" is 23. Set it anyway per the explicit "everywhere"
+instruction -- iOS will just truncate it wherever that constraint
+actually bites, which is a device-rendering behavior, not a bug in
+this app.
+
+Verified with a real `flutter build macos --debug` (not just
+`analyze`/`test`) specifically to see the actual built bundle name
+change, not just trust the config edit -- confirmed
+`Meshpoint Fleet Manager.app` really is the output filename now.
+Launched it and confirmed via `ps aux` it runs.
+
+### Splash screen
+
+Native splash (via new `flutter_native_splash` dev dependency,
+`flutter_native_splash.yaml` config, `dart run
+flutter_native_splash:create`) for Android/iOS -- the platforms that
+actually have an OS-level splash phase before the Flutter engine even
+starts. Uses the same real `assets/icon/icon.png` on the same dark
+background every one of the app's 3 themes shares (`#0a0e17`).
+
+macOS/Windows/Linux have no such OS-level concept at all -- flutter_native_splash
+doesn't target desktop for exactly that reason -- so `lib/screens/splash_screen.dart`
+(new) is a plain Flutter widget shown instead, for the platform this
+app has actually been live-tested on. Bundled `assets/icon/icon.png`
+as a real runtime asset (`pubspec.yaml`'s `flutter: assets:`, previously
+only used as an icon-generator *input*, never loadable at runtime) so
+`Image.asset()` can actually show it.
+
+**A real design bug caught by writing a real test for this, not just
+eyeballing it**: first version had `SplashScreen.build()` internally
+return `StartScreen()` once `ServerStore.loaded` was true -- meaning
+`SplashScreen` never actually left the widget tree, it just changed
+what it rendered as its own child, so `find.byType(SplashScreen)`
+still matched even after "handoff." A test asserting `findsNothing`
+for `SplashScreen` post-settle caught this immediately. Fixed by
+moving the loaded/not-loaded decision up to `MeshpointApp` itself
+(`Consumer<ServerStore>` picking between `StartScreen`/`SplashScreen`
+directly as siblings, not one wrapping the other) -- genuinely mutually
+exclusive in the tree now, confirmed by the same test passing after
+the restructure. `flutter analyze` clean, `flutter test` passes (2
+assertions: splash visible + real `Image` widget present before
+settling, splash gone + fleet screen visible after), `flutter build
+macos --debug` still succeeds, launched and confirmed running via
+`ps aux`.
+
+Splash text updated per follow-up ask ("under our icon also display
+Meshpoint Fleet Manager as text"): added a `Text('Meshpoint Fleet
+Manager')` below the icon in `splash_screen.dart`, styled off
+`MeshpointPalette.dark.textPrimary` (the splash always uses the dark
+palette regardless of the user's chosen theme, since it renders before
+`ThemeStore.load()` resolves). `widget_test.dart`'s pre-settle
+assertions extended to check `find.text('Meshpoint Fleet Manager')`
+alongside the existing `SplashScreen`/`Image` checks.
+
+### Light theme
+
+Fourth theme, `MeshpointThemeName.light` -- unlike the other three
+(`dark`/`highContrast`/`sunlight`, all mirrored from the web
+dashboard's actual CSS), there's no light theme on the web dashboard to
+mirror, so this reuses the real, already-tuned light palette from
+`extra/local_meshradar/dashboard.html` (contrast-fixed for real bugs
+earlier in this same session, so proven values, not a fresh guess).
+`accentBlue` has no local_meshradar equivalent and was picked fresh
+(`#2563EB`) to read cleanly on white.
+
+Required `MeshpointPalette` to stop assuming dark mode everywhere: added
+a `brightness` field (default `Brightness.dark`, so the three existing
+palettes needed no changes) and made `buildMeshpointTheme()` read
+`p.brightness` instead of hardcoding it -- also switches between
+`ThemeData.dark().textTheme`/`ThemeData.light().textTheme` as the base
+before applying palette colors. `_ThemeMenuButton` in
+`start_screen.dart` needed no changes at all since it already iterates
+`MeshpointThemeName.values` generically -- confirmed by reading it, not
+assumed.
+
+Added a real (non-widget) test asserting the brightness genuinely
+propagates: `MeshpointPalette.light.brightness == Brightness.light`,
+and that `buildMeshpointTheme(MeshpointPalette.light).brightness` and
+`.scaffoldBackgroundColor` come out right too -- guards against a
+palette field existing but silently not being read anywhere, the same
+class of bug the splash-screen test caught earlier. `flutter analyze`
+clean, `flutter test` passes (3 assertions total now), `flutter build
+macos --debug` still succeeds.

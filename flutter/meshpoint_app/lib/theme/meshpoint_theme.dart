@@ -1,38 +1,50 @@
 import 'package:flutter/material.dart';
 
-/// The web dashboard's own three named themes -- not invented here,
-/// read directly from `frontend/js/theme_controller.js` (`dark` /
+/// The main web dashboard only has three named (all dark) themes -- read
+/// directly from `frontend/js/theme_controller.js` (`dark` /
 /// `high-contrast` / `sunlight`) and their real color values from
 /// `frontend/css/dashboard.css` (`:root`, the base "dark" palette) and
 /// `frontend/css/theme_high_contrast.css` (the other two, which only
 /// override a subset of variables -- anything not overridden there
 /// falls back to the dark palette's own value, same as the CSS itself
-/// does via custom-property cascade).
-enum MeshpointThemeName { dark, highContrast, sunlight }
+/// does via custom-property cascade). `light` is a fourth option this
+/// app adds on top -- there's no light theme on the main dashboard to
+/// mirror, so it reuses the real, already-tuned light palette from
+/// `extra/local_meshradar/dashboard.html` instead (the one sibling
+/// meshpoint surface that does have a light theme -- same session this
+/// app was built in already fixed real contrast bugs in those exact
+/// values, so they're proven, not a fresh guess).
+enum MeshpointThemeName { dark, highContrast, sunlight, light }
 
 extension MeshpointThemeNameLabel on MeshpointThemeName {
   String get label => switch (this) {
         MeshpointThemeName.dark => 'Dark',
         MeshpointThemeName.highContrast => 'High contrast',
         MeshpointThemeName.sunlight => 'Sunlight',
+        MeshpointThemeName.light => 'Light',
       };
 
   static MeshpointThemeName fromStorageKey(String? key) => switch (key) {
         'high-contrast' => MeshpointThemeName.highContrast,
         'sunlight' => MeshpointThemeName.sunlight,
+        'light' => MeshpointThemeName.light,
         _ => MeshpointThemeName.dark,
       };
 
-  /// Matches `ThemeController`'s own `localStorage` value spelling, in
-  /// case the two apps ever need to compare notes on a shared device.
+  /// Matches `ThemeController`'s own `localStorage` value spelling for
+  /// the three it shares, in case the two apps ever need to compare
+  /// notes on a shared device. `light` has no web-dashboard counterpart
+  /// to match, so its key is just this app's own invention.
   String get storageKey => switch (this) {
         MeshpointThemeName.dark => 'dark',
         MeshpointThemeName.highContrast => 'high-contrast',
         MeshpointThemeName.sunlight => 'sunlight',
+        MeshpointThemeName.light => 'light',
       };
 }
 
 class MeshpointPalette {
+  final Brightness brightness;
   final Color bgPrimary;
   final Color bgSecondary;
   final Color bgCard;
@@ -48,6 +60,7 @@ class MeshpointPalette {
   final Color accentBlue;
 
   const MeshpointPalette({
+    this.brightness = Brightness.dark,
     required this.bgPrimary,
     required this.bgSecondary,
     required this.bgCard,
@@ -118,31 +131,60 @@ class MeshpointPalette {
     accentBlue: Color(0xFF3B82F6),
   );
 
+  // extra/local_meshradar/dashboard.html's `:root[data-theme="light"]`
+  // block -- the one real light theme anywhere in the meshpoint
+  // ecosystem, already live-fixed for real contrast bugs (badges that
+  // silently kept dark-theme neon colors instead of these light-theme
+  // ones) earlier in this same session. accentBlue has no local_meshradar
+  // equivalent (that app never defined one), picked to read cleanly on
+  // white rather than left matching the dark palette's own value.
+  static const light = MeshpointPalette(
+    brightness: Brightness.light,
+    bgPrimary: Color(0xFFF4F6FB),
+    bgSecondary: Color(0xFFEDF0F5),
+    bgCard: Color(0xFFFFFFFF),
+    border: Color(0xFFDBE1EC),
+    textPrimary: Color(0xFF1A2233),
+    textSecondary: Color(0xFF64748A),
+    textMuted: Color(0xFF94A0B8),
+    accentCyan: Color(0xFF0891B2),
+    accentGreen: Color(0xFF059669),
+    accentAmber: Color(0xFFB45309),
+    accentRed: Color(0xFFDC2626),
+    accentPurple: Color(0xFF9333EA),
+    accentBlue: Color(0xFF2563EB),
+  );
+
   static MeshpointPalette forTheme(MeshpointThemeName name) => switch (name) {
         MeshpointThemeName.dark => dark,
         MeshpointThemeName.highContrast => highContrast,
+        MeshpointThemeName.light => light,
         MeshpointThemeName.sunlight => sunlight,
       };
 }
 
-/// Builds a real Flutter [ThemeData] from a [MeshpointPalette]. All
-/// three are dark-mode-ish variants (the web app's own "sunlight" theme
-/// is still a dark background, just brighter/higher-contrast for
-/// outdoor readability -- see theme_high_contrast.css's own comment),
-/// so every one of these uses `Brightness.dark` as its base.
+/// Builds a real Flutter [ThemeData] from a [MeshpointPalette]. Three of
+/// the four are dark-mode-ish (the web app's own "sunlight" theme is
+/// still a dark background, just brighter/higher-contrast for outdoor
+/// readability -- see theme_high_contrast.css's own comment) but `light`
+/// genuinely isn't, so this reads [MeshpointPalette.brightness] rather
+/// than hardcoding `Brightness.dark` the way it used to before `light`
+/// existed.
 ThemeData buildMeshpointTheme(MeshpointPalette p) {
   final colorScheme = ColorScheme.fromSeed(
     seedColor: p.accentCyan,
-    brightness: Brightness.dark,
+    brightness: p.brightness,
     primary: p.accentCyan,
     secondary: p.accentPurple,
     error: p.accentRed,
     surface: p.bgCard,
   );
+  final baseTextTheme =
+      p.brightness == Brightness.dark ? ThemeData.dark().textTheme : ThemeData.light().textTheme;
 
   return ThemeData(
     useMaterial3: true,
-    brightness: Brightness.dark,
+    brightness: p.brightness,
     colorScheme: colorScheme,
     scaffoldBackgroundColor: p.bgPrimary,
     canvasColor: p.bgPrimary,
@@ -153,7 +195,7 @@ ThemeData buildMeshpointTheme(MeshpointPalette p) {
       foregroundColor: p.textPrimary,
       elevation: 0,
     ),
-    textTheme: ThemeData.dark().textTheme.apply(
+    textTheme: baseTextTheme.apply(
           bodyColor: p.textPrimary,
           displayColor: p.textPrimary,
         ),

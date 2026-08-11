@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import 'screens/splash_screen.dart';
 import 'screens/start_screen.dart';
 import 'services/server_store.dart';
 import 'services/theme_store.dart';
@@ -23,9 +24,13 @@ class MeshpointApp extends StatelessWidget {
       child: Consumer<ThemeStore>(
         builder: (context, themeStore, _) {
           return MaterialApp(
-            title: 'Meshpoint',
+            title: 'Meshpoint Fleet Manager',
             theme: buildMeshpointTheme(MeshpointPalette.forTheme(themeStore.current)),
-            home: const StartScreen(),
+            home: Consumer<ServerStore>(
+              builder: (context, serverStore, _) {
+                return serverStore.loaded ? const StartScreen() : const SplashScreen();
+              },
+            ),
           );
         },
       ),
