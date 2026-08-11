@@ -7,8 +7,14 @@ plugins {
 
 android {
     namespace = "com.example.meshpoint_app"
-    compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
+    // Pinned above the Flutter tool's own bundled defaults --
+    // flutter_secure_storage/flutter_native_splash/path_provider_android
+    // all need compileSdk 36 / NDK 27.0.12077973, higher than what this
+    // Flutter install's `flutter.compileSdkVersion`/`flutter.ndkVersion`
+    // resolve to. Both are backward compatible, so this doesn't raise
+    // the app's actual minimum supported Android version on its own.
+    compileSdk = 36
+    ndkVersion = "27.0.12077973"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
@@ -24,7 +30,12 @@ android {
         applicationId = "com.example.meshpoint_app"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
+        // flutter_secure_storage's manifest declares minSdk 23 -- the
+        // Flutter tool's own default of 21 fails the manifest merge, so
+        // this is raised to match rather than overridden away with
+        // tools:overrideLibrary (which the plugin's own error message
+        // warns "may lead to runtime failures").
+        minSdk = 23
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
