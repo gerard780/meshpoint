@@ -54,13 +54,13 @@ void main() {
     // channel, since it's still a real async call.
     expect(find.byType(SplashScreen), findsOneWidget);
     expect(find.byType(Image), findsOneWidget);
-    expect(find.text('Meshpoint Fleet Manager'), findsOneWidget);
+    expect(find.text('Meshpoint Manager'), findsOneWidget);
 
     await tester.pumpAndSettle();
 
     // And once loading finishes, it hands off to the real fleet screen.
     expect(find.byType(SplashScreen), findsNothing);
-    expect(find.text('Meshpoint Fleet Manager'), findsOneWidget);
+    expect(find.text('Meshpoint Manager'), findsOneWidget);
     expect(find.text('No meshpoint servers yet'), findsOneWidget);
     // Two by design: the empty-state's own "Add your first server"
     // button, plus the screen's persistent FloatingActionButton.

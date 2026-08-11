@@ -55,7 +55,7 @@ class _StartScreenState extends State<StartScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Meshpoint Fleet Manager'),
+        title: const Text('Meshpoint Manager'),
         actions: [_ThemeMenuButton()],
       ),
       body: !store.loaded

@@ -37,7 +37,7 @@ class SplashScreen extends StatelessWidget {
             ),
             const SizedBox(height: 20),
             Text(
-              'Meshpoint Fleet Manager',
+              'Meshpoint Manager',
               style: TextStyle(
                 color: palette.textPrimary,
                 fontSize: 18,

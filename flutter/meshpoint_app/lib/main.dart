@@ -24,7 +24,7 @@ class MeshpointApp extends StatelessWidget {
       child: Consumer<ThemeStore>(
         builder: (context, themeStore, _) {
           return MaterialApp(
-            title: 'Meshpoint Fleet Manager',
+            title: 'Meshpoint Manager',
             theme: buildMeshpointTheme(MeshpointPalette.forTheme(themeStore.current)),
             home: Consumer<ServerStore>(
               builder: (context, serverStore, _) {
