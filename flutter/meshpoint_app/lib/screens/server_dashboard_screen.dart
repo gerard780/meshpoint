@@ -8,6 +8,8 @@ import '../models/packet_event.dart';
 import '../services/api_client.dart';
 import '../services/server_store.dart';
 import '../services/websocket_service.dart';
+import '../widgets/node_card.dart';
+import '../widgets/node_detail_sheet.dart';
 
 /// v1 scope, deliberately narrow (see memory/project_meshpoint_app.md):
 /// device-status tile + a searchable node list + a live packet feed.
@@ -250,30 +252,13 @@ class _NodesTab extends StatelessWidget {
             child: filtered.isEmpty
                 ? const Center(child: Text('No nodes'))
                 : ListView.builder(
+                    padding: const EdgeInsets.symmetric(vertical: 6),
                     itemCount: filtered.length,
                     itemBuilder: (context, i) {
                       final n = filtered[i];
-                      return ListTile(
-                        title: Text(n.displayName),
-                        subtitle: Text(
-                          [
-                            n.protocol,
-                            if (n.role != null) n.role!,
-                            if (n.hardwareModel != null) n.hardwareModel!,
-                          ].join(' · '),
-                        ),
-                        trailing: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          crossAxisAlignment: CrossAxisAlignment.end,
-                          children: [
-                            Text(n.lastHeardLabel()),
-                            if (n.rssi != null)
-                              Text(
-                                '${n.rssi!.toStringAsFixed(0)} dBm',
-                                style: Theme.of(context).textTheme.bodySmall,
-                              ),
-                          ],
-                        ),
+                      return NodeCard(
+                        node: n,
+                        onTap: () => showNodeDetailSheet(context, n),
                       );
                     },
                   ),

@@ -538,3 +538,99 @@ palette field existing but silently not being read anywhere, the same
 class of bug the splash-screen test caught earlier. `flutter analyze`
 clean, `flutter test` passes (3 assertions total now), `flutter build
 macos --debug` still succeeds.
+
+### Node cards + detail popup
+
+User's ask: make the Nodes tab's node list look like the web dashboard's
+own node cards, and open a detail popup on tap. Read both real
+references first: `frontend/js/node_cards.js` +
+`frontend/css/node_cards.css` (the live dashboard's rich card --
+hash-colored avatar, online dot, protocol badge, signal/telemetry/meta
+chip rows) and `extra/local_meshradar/dashboard.html`'s `.node-card`
+(the "perfect" one the user specifically called out -- same visual
+language, standalone single-file version), plus `frontend/js/node_drawer.js`
+for the slide-out detail panel's section structure.
+
+**Model gap found first**: `NodeSummary` only captured a handful of the
+fields `/api/nodes` (`NodeRepository.get_all_with_signal()` in
+`src/storage/node_repository.py`) actually returns -- confirmed by
+reading the real backend route (`src/api/routes/nodes.py`'s
+`list_nodes()`, `enrich=True` by default) and repository method, not
+assumed. Extended the model with every `latest_*` flat column the query
+joins in (`latest_hops`, `latest_capture_source`, `latest_battery`,
+`latest_voltage`, `latest_temperature`, `latest_humidity`,
+`latest_channel_util`, `latest_air_util`) plus base columns the model
+was missing (`short_name`, `firmware_version`, `altitude`, `first_seen`).
+No new API calls needed -- this all already comes back from the single
+`GET /api/nodes` call the app already makes; only the model was
+under-reading the response.
+
+New files:
+- `lib/utils/node_visuals.dart` -- shared signal-quality/battery-tier/
+  avatar-hash-color helpers, ported from the same tier breaks
+  `node_cards.js`/`node_drawer.js` use (so an RSSI value reads the same
+  color here as on the web dashboard), used by both the card and the
+  detail sheet so they can't drift apart.
+- `lib/utils/hardware_names.dart` -- direct port of
+  `frontend/js/meshtastic_hw_names.js`'s `HW_NAMES` enum table (57
+  entries, same enum values) so hardware models resolve to the same
+  names on both surfaces.
+- `lib/widgets/node_card.dart` -- `NodeCard`, mirrors `nc-card`'s
+  layout: avatar + online dot + name/heard-time + MT/MC protocol badge,
+  then wrapped chip rows for signal (bars + dBm + SNR + quality label),
+  telemetry (voltage/battery/temp/humidity/ChUtil/AirUtil), and meta
+  (hardware/role/band/node-id). Palette-aware via
+  `MeshpointPalette.forTheme(context.watch<ThemeStore>().current)`, so
+  it reskins correctly across all 4 themes including the new light one,
+  not hardcoded to dark like the splash screen deliberately is.
+- `lib/widgets/node_detail_sheet.dart` -- `showNodeDetailSheet()` opens
+  a `DraggableScrollableSheet` (reads as "more about the card you
+  tapped", not a full navigation away, matching how `node_drawer.js`'s
+  slide-out panel relates to the node list beside it) with Node
+  Info/Signal/Device Metrics/Environment/Position sections, mirroring
+  `node_drawer.js`'s own section split. Deliberately v1-scoped: no
+  metrics-over-time chart, no recent-packets list -- both need their own
+  API calls (`/api/nodes/{id}/metrics_history`,
+  `/api/packets/by-source/{id}`) this app doesn't make yet, left for a
+  later pass rather than half-building them now.
+
+`server_dashboard_screen.dart`'s `_NodesTab` swapped from a plain
+`ListTile` list to `ListView.builder` of `NodeCard`, `onTap:
+showNodeDetailSheet(context, n)`.
+
+**Real bug caught by writing a real test, not just eyeballing the UI**:
+first version of `test/node_card_test.dart` wrapped `ThemeStore`'s
+provider around only the `Scaffold`/`home` content, not `MaterialApp`
+itself. `showModalBottomSheet` inserts into the `Navigator`'s `Overlay`,
+which is a sibling of `home`'s subtree, not a descendant of it -- so
+`NodeDetailSheet`'s `context.watch<ThemeStore>()` threw
+`ProviderNotFoundException` the instant the sheet opened. Fixed by
+wrapping `MaterialApp` itself in the provider, matching `main.dart`'s
+real placement (`MultiProvider` wraps `MaterialApp` there too) -- this
+was a genuine placement bug the test caught, not a test-only quirk.
+`flutter analyze` clean, `flutter test` passes (4 assertions total:
+card renders identity/badge/chips; tapping opens the real sheet with
+matching RSSI/band/hardware/role info), `flutter build macos --debug`
+still succeeds.
+
+### Unrelated fix found along the way: macOS About panel copyright
+
+User noticed the native "About Meshpoint Fleet Manager" panel (macOS
+app menu) showed "Copyright © 2026 com.example. All rights reserved."
+-- the unconfigured `flutter create` template default leaking through.
+Traced to `macos/Runner/Configs/AppInfo.xcconfig`'s `PRODUCT_COPYRIGHT`,
+which `macos/Runner/Info.plist`'s `NSHumanReadableCopyright` reads via
+`$(PRODUCT_COPYRIGHT)` -- confirmed by grepping for both keys, not
+guessed. Changed to "Copyright © 2026 Meshpoint. All rights reserved."
+Verified against the actual built bundle, not just the source template:
+`PlistBuddy -c "Print :NSHumanReadableCopyright"` on the real `.app`'s
+`Info.plist` after a fresh `flutter build macos --debug`.
+
+**Deliberately left alone**: the bundle identifiers are also still
+`com.example.meshpointApp` (macOS/iOS) / `com.example.meshpoint_app`
+(Android), same template default. Not touched here -- changing a bundle
+ID changes the app's code-signing identity, which is exactly what broke
+Keychain access earlier this session (`PlatformException -34018`, see
+above) when the signing identity shifted between builds. Worth doing
+deliberately as its own change if the user wants it, not as a drive-by
+alongside a copyright string edit.
