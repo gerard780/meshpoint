@@ -396,3 +396,28 @@ exact fix's own explanatory comment, caught immediately by grepping for
 re-running the single-file parse check that already caught it twice
 today) -- this really is worth remembering going forward, not just
 noting after the fact each time.
+
+### Resolved -- confirmed live by the user ("works fixed :)")
+
+The Keychain error persisted one more round after the App Sandbox
+removal, still showing the same `errSecMissingEntitlement`-family
+message. Root cause was environmental, not a further code bug: a stale
+Keychain item from an earlier build (ad-hoc signing regenerates a new
+identity each rebuild, so a keychain entry written under an older
+signature can become inaccessible to a newer build even after the
+actual entitlements are fixed) combined with the running process not
+yet being a genuinely fresh launch. Resolved by the user clearing the
+stale `meshpoint` entry in Keychain Access.app and doing a full quit +
+fresh `flutter run -d macos`. No further code change needed -- the
+App Sandbox removal from earlier was the correct and sufficient fix;
+this last round was purely stale local state on the test machine.
+
+**v1 is now fully live-verified end to end**: server add/login (real
+bearer token from the updated Pi), the dashboard's Status/Nodes/Live
+tabs, real app icon, and the 3-theme picker all confirmed working on an
+actual running build against a real deployed meshpoint box, not just
+`flutter analyze`/`flutter test`/a build-success check. Good stopping
+point for this feature; next real steps whenever picked back up are the
+explicitly-deferred v2 items (config editing, repeater management,
+per-protocol pages, push notifications) or a first Android/iOS device
+test (only macOS has been live-tested so far).
