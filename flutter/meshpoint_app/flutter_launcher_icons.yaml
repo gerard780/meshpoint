@@ -1,0 +1,23 @@
+# Generates real platform app icons from meshpoint's own existing icon
+# asset (frontend/assets/icon-512.png, already used as the web PWA icon --
+# copied to assets/icon/icon.png), replacing the stock Flutter icon on
+# every platform. Run: dart run flutter_launcher_icons
+flutter_launcher_icons:
+  android: true
+  ios: true
+  # iOS requires a fully opaque icon (no alpha channel) -- App Store
+  # Connect rejects a transparent one outright, and the source PNG has
+  # transparency outside its own pre-baked rounded-card shape.
+  remove_alpha_ios: true
+  image_path: "assets/icon/icon.png"
+  macos:
+    generate: true
+    image_path: "assets/icon/icon.png"
+  windows:
+    generate: true
+    image_path: "assets/icon/icon.png"
+  web:
+    generate: true
+    image_path: "assets/icon/icon.png"
+    background_color: "#0a0e17"
+    theme_color: "#06b6d4"

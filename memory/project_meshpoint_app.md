@@ -275,3 +275,124 @@ signing setup (irrelevant until an actual device build is attempted),
 app icon/branding (still the default Flutter icon), and everything
 explicitly deferred to v2 in the original plan (config editing,
 repeater management, per-protocol pages, push notifications).
+
+## Real branding + theme system (2026-08-11, live-tested via real macOS run)
+
+User: "the appicons can you please use the icons from meshpoint now its
+all the stock icons" + "also can you use the same color sheme as
+meshpoint please also a toggle for light/dark/blue etc the meshpoint has
+like 3 darkthemes."
+
+- **App icon**: copied the real existing `frontend/assets/icon-512.png`
+  (already used as the web PWA icon -- purple/orange gradient, mesh-globe
+  "M" mark, "Meshpoint" wordmark) into `assets/icon/icon.png`, added
+  `flutter_launcher_icons` as a dev dependency, ran it to regenerate real
+  icons for Android/iOS/macOS/Windows/web from that one source
+  (`remove_alpha_ios: true` since iOS requires an opaque icon and the
+  source has transparency outside its own pre-baked rounded-card shape;
+  web background/theme color set to the real dark theme's
+  `--bg-primary`/`--accent-cyan`). Did not design a new icon -- reused
+  the existing brand asset exactly as asked.
+- **Theme system**: NOT invented -- read the web dashboard's actual
+  `frontend/js/theme_controller.js` (three named themes: `dark` default,
+  `high-contrast`, `sunlight`) and pulled real color values straight from
+  `frontend/css/dashboard.css`'s `:root` and
+  `frontend/css/theme_high_contrast.css`'s two override blocks. All
+  three are dark-background variants (the user's "like 3 darkthemes" was
+  accurate -- there's no actual light theme to port). Built
+  `lib/theme/meshpoint_theme.dart` (3 `MeshpointPalette` consts with the
+  exact hex values + a `ThemeData` builder) and
+  `lib/services/theme_store.dart` (persists the choice via the same
+  secure-storage instance the server list already uses, rather than
+  adding `shared_preferences` for one extra value). Toggle is a palette
+  icon button in `StartScreen`'s AppBar (`_ThemeMenuButton`, a popup menu
+  with the 3 named options + a checkmark on the current one) --
+  deliberately a named-options menu, not a blind cycle button, since a
+  first-time user picking from labels beats guessing what a cycle icon
+  does.
+
+### Real bugs found live (only surfaced once the user actually ran the app)
+
+1. **Auth token still missing after "I updated meshpoint"** -- turned
+   out to be exactly the standing gotcha this whole project's own memory
+   already warns about: `git pull` doesn't reload a running Python
+   process. Diagnosed cleanly via a raw `curl -X POST .../api/auth/login
+   -H "X-Meshpoint-Client: app" ...` bypassing the app entirely --
+   confirmed `{"role":"admin"}` with no `token` field, i.e. definitely
+   still the old pre-fix code. User then confirmed the commit *was*
+   present locally (`git log` showed it) but the fix only actually took
+   effect after `sudo systemctl restart meshpoint`. Not a code bug on
+   either side -- a deployment-step gotcha, resolved by direct
+   verification rather than guessing.
+2. **`PlatformException(-34018, "A required entitlement isn't
+   present.")` on every `flutter_secure_storage` write, live on the real
+   macOS build** (removing a server, changing the theme -- anything that
+   persists). Root cause: `flutter_secure_storage` uses the Keychain on
+   macOS, and under App Sandbox (already enabled in both entitlements
+   files from the earlier network-permission fixes) Keychain API calls
+   need an explicit `keychain-access-groups` entitlement or they fail
+   with exactly this error code -- a real, separate gotcha from the
+   network-client one found earlier, not caught by `flutter analyze`/
+   `flutter test` since the widget test mocks the storage channel
+   entirely (never exercises the real macOS Keychain code path). Fixed
+   by adding `keychain-access-groups` (`$(AppIdentifierPrefix)$(PRODUCT_BUNDLE_IDENTIFIER)`)
+   to both `DebugProfile.entitlements` and `Release.entitlements`.
+   **Entitlement changes are baked into code signing at build time --
+   need a full stop + fresh `flutter run`, not hot reload/restart, to
+   actually take effect.** Not yet confirmed fixed (told the user this
+   right after making the change, live verification pending).
+3. **Self-caught, twice in the same session**: used `--` (double
+   hyphen) as a prose separator inside an XML comment twice now (once in
+   the iOS ATS comment, now again in this exact entitlements comment) --
+   XML comments cannot contain `--` anywhere in the body per spec, not
+   just at the edges, and it silently breaks the whole file's XML
+   validity. Caught both times by actually parsing the file with
+   `xml.etree.ElementTree` after editing, not by eyeballing the diff.
+   **Worth remembering for next time: never use `--` inside any
+   plist/entitlements/manifest XML comment in this project, use a plain
+   period or comma instead.**
+
+Status: awaiting live confirmation from the user that a full rebuild
+(not hot reload) resolves the Keychain crash.
+
+### Correction, same session: keychain-access-groups made it worse, not better
+
+`flutter run -d macos` immediately failed with a *build* error (worse
+than the runtime crash it was meant to fix): `"Runner" has entitlements
+that require signing with a development certificate. Enable development
+signing in the Signing & Capabilities editor.` -- adding
+`keychain-access-groups` forces Xcode to require a real Apple
+Developer signing team, which this local dev setup doesn't have
+configured. That's a strictly worse failure mode (won't build at all)
+than the one it was fixing (built fine, crashed at runtime on a
+Keychain write).
+
+**Real fix**: App Sandbox (`com.apple.security.app-sandbox`, present in
+both entitlements files since the original stock `flutter create`
+scaffold -- i.e. this bug was latent from the very start, not something
+any of this session's edits introduced) is only actually required for
+Mac App Store distribution. This app is a personal LAN utility with no
+App Store plans, so the sandbox entitlement was removed entirely from
+both `DebugProfile.entitlements` and `Release.entitlements` rather than
+trying to satisfy it with `keychain-access-groups`. Unsandboxed,
+Keychain access works with zero special entitlements and plain
+automatic/ad-hoc signing -- no Apple Developer team needed, matching how
+the project already built successfully before any of today's
+entitlements edits.
+
+**Verified for real this time, not just reasoned about**: `flutter
+build macos --debug` actually succeeds (confirmed live, was failing
+before this fix). Launched the built `.app` directly and confirmed via
+`ps aux` it's actually running, not just that the build step exited 0.
+Quit that verification instance afterward so it doesn't collide with
+the user's own `flutter run` dev session. **Still not confirmed**: the
+actual Keychain write path itself (remove a server / change theme) --
+that needs the user's own interactive test, since it requires real UI
+interaction the build+launch check above doesn't exercise.
+
+**Same `--`-in-XML-comment mistake made a third time** writing this
+exact fix's own explanatory comment, caught immediately by grepping for
+`--` across every touched file before re-validating (not just
+re-running the single-file parse check that already caught it twice
+today) -- this really is worth remembering going forward, not just
+noting after the fact each time.

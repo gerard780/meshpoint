@@ -3,6 +3,8 @@ import 'package:provider/provider.dart';
 
 import 'screens/start_screen.dart';
 import 'services/server_store.dart';
+import 'services/theme_store.dart';
+import 'theme/meshpoint_theme.dart';
 
 void main() {
   runApp(const MeshpointApp());
@@ -13,19 +15,19 @@ class MeshpointApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider(
-      create: (_) => ServerStore()..load(),
-      child: MaterialApp(
-        title: 'Meshpoint',
-        theme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(seedColor: Colors.cyan, brightness: Brightness.light),
-          useMaterial3: true,
-        ),
-        darkTheme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(seedColor: Colors.cyan, brightness: Brightness.dark),
-          useMaterial3: true,
-        ),
-        home: const StartScreen(),
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => ServerStore()..load()),
+        ChangeNotifierProvider(create: (_) => ThemeStore()..load()),
+      ],
+      child: Consumer<ThemeStore>(
+        builder: (context, themeStore, _) {
+          return MaterialApp(
+            title: 'Meshpoint',
+            theme: buildMeshpointTheme(MeshpointPalette.forTheme(themeStore.current)),
+            home: const StartScreen(),
+          );
+        },
       ),
     );
   }

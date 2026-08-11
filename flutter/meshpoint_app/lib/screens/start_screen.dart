@@ -4,6 +4,8 @@ import 'package:provider/provider.dart';
 import '../models/meshpoint_server.dart';
 import '../services/api_client.dart';
 import '../services/server_store.dart';
+import '../services/theme_store.dart';
+import '../theme/meshpoint_theme.dart';
 import 'add_edit_server_screen.dart';
 import 'server_dashboard_screen.dart';
 
@@ -52,7 +54,10 @@ class _StartScreenState extends State<StartScreen> {
     final store = context.watch<ServerStore>();
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Meshpoint Fleet')),
+      appBar: AppBar(
+        title: const Text('Meshpoint Fleet'),
+        actions: [_ThemeMenuButton()],
+      ),
       body: !store.loaded
           ? const Center(child: CircularProgressIndicator())
           : store.servers.isEmpty
@@ -200,6 +205,41 @@ class _EmptyState extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Mirrors the web dashboard's own theme picker -- same three named
+/// options (`ThemeController`'s `dark`/`high-contrast`/`sunlight`), just
+/// as a Material popup menu instead of a cycling icon button, since a
+/// first-time user picking from named options is easier than guessing
+/// what a bare cycle button does.
+class _ThemeMenuButton extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final themeStore = context.watch<ThemeStore>();
+    return PopupMenuButton<MeshpointThemeName>(
+      icon: const Icon(Icons.palette_outlined),
+      tooltip: 'Theme',
+      initialValue: themeStore.current,
+      onSelected: (name) => context.read<ThemeStore>().setTheme(name),
+      itemBuilder: (context) => MeshpointThemeName.values
+          .map(
+            (name) => PopupMenuItem(
+              value: name,
+              child: Row(
+                children: [
+                  if (name == themeStore.current)
+                    const Icon(Icons.check, size: 18)
+                  else
+                    const SizedBox(width: 18),
+                  const SizedBox(width: 8),
+                  Text(name.label),
+                ],
+              ),
+            ),
+          )
+          .toList(),
     );
   }
 }

@@ -84,8 +84,15 @@ class _AddEditServerScreenState extends State<AddEditServerScreen> {
     } on ApiException catch (e) {
       setState(() => _error = _friendlyError(e));
     } catch (e) {
-      setState(() => _error = 'Could not reach $baseUrl -- check the address and that '
-          'the device is on the same network.');
+      // Was a bare guess-message before ("check the address...") with no
+      // way to tell a real network failure apart from a bug in this
+      // app's own request code -- now shows the actual exception too,
+      // since a generic message was actively hiding the real cause
+      // (confirmed live: curl reached the same address instantly from
+      // the same Mac at the same time this error fired, so it wasn't
+      // really "unreachable").
+      setState(() => _error = 'Could not reach $baseUrl.\n\n'
+          'Details: ${e.runtimeType}: $e');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
