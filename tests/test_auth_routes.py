@@ -106,6 +106,20 @@ class TestLoginEndpoint(unittest.TestCase):
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["role"], "admin")
+        self.assertNotIn("token", response.json())
+        self.assertIn(SESSION_COOKIE_NAME, response.cookies)
+
+    def test_login_with_client_header_returns_bearer_token(self) -> None:
+        response = self.client.post(
+            "/api/auth/login",
+            json={"username": "admin", "password": _PASSWORD},
+            headers={"X-Meshpoint-Client": "app"},
+        )
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["role"], "admin")
+        self.assertIn("token", body)
+        self.assertTrue(body["token"])
         self.assertIn(SESSION_COOKIE_NAME, response.cookies)
 
     def test_login_wrong_password_returns_401(self) -> None:
