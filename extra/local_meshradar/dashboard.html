@@ -1962,12 +1962,16 @@ function connectLive() {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     liveSocket = new WebSocket(`${proto}://${location.hostname}:${window.WS_PORT}/live`);
     liveSocket.onopen = () => { liveReconnectDelay = 2000; };
-    liveSocket.onmessage = (event) => {
+    liveSocket.onmessage = async (event) => {
         try {
             const msg = JSON.parse(event.data);
             if (msg.type === 'register') applyLiveRegister(msg.data);
             else if (msg.type === 'packet') applyLivePacket(msg.data);
             else if (msg.type === 'heartbeat') applyLiveHeartbeat(msg.data);
+            // If the live socket is active, prefer an immediate resync after a
+            // real ingest event so the UI rehydrates from server state instead of
+            // waiting for the 30s safety-net poll to notice the change.
+            await loadAll();
         } catch (_) { /* ignore malformed pushes */ }
     };
     liveSocket.onclose = () => {

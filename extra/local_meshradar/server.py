@@ -28,10 +28,13 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
+import hashlib
 import hmac
 import json
 import logging
 import secrets
+import socket
 import sqlite3
 import threading
 import time
@@ -539,6 +542,57 @@ _HANDLERS = {
 _browser_subscribers: set = set()
 
 
+class _BrowserSocket:
+    """Minimal WebSocket subscriber for browser clients on port 8080."""
+
+    def __init__(self, sock: socket.socket, peer: tuple[str, int] | None):
+        self._sock = sock
+        self.remote_address = peer
+
+    def send(self, message: str) -> None:
+        payload = message.encode("utf-8")
+        frame = bytearray([0x81])
+        if len(payload) < 126:
+            frame.append(len(payload))
+        elif len(payload) < 65536:
+            frame.extend([126, (len(payload) >> 8) & 0xFF, len(payload) & 0xFF])
+        else:
+            frame.extend([
+                127,
+                0, 0, 0, 0,
+                (len(payload) >> 24) & 0xFF,
+                (len(payload) >> 16) & 0xFF,
+                (len(payload) >> 8) & 0xFF,
+                len(payload) & 0xFF,
+            ])
+        self._sock.sendall(frame + payload)
+
+    def wait_closed(self) -> None:
+        while True:
+            try:
+                chunk = self._sock.recv(1)
+            except OSError:
+                break
+            if not chunk:
+                break
+
+    def close(self) -> None:
+        try:
+            self._sock.shutdown(socket.SHUT_RDWR)
+        except OSError:
+            pass
+        try:
+            self._sock.close()
+        except OSError:
+            pass
+        _browser_subscribers.discard(self)
+
+
+def _websocket_accept(ws_key: str) -> str:
+    digest = hashlib.sha1((ws_key + "258EAFA5-E914-47DA-925EC9AF").encode("ascii")).digest()
+    return base64.b64encode(digest).decode("ascii")
+
+
 async def _broadcast_update(kind: str, data: Optional[dict]) -> None:
     """Pushes the row(s) a handler just wrote straight to every connected
     browser tab, carrying the same shape /api/devices, /api/packets, and
@@ -552,9 +606,11 @@ async def _broadcast_update(kind: str, data: Optional[dict]) -> None:
         return
     message = json.dumps({"type": kind, "data": data})
     dead = set()
-    for ws in _browser_subscribers:
+    for ws in list(_browser_subscribers):
         try:
-            await ws.send(message)
+            send_result = ws.send(message)
+            if asyncio.iscoroutine(send_result):
+                await send_result
         except Exception:
             dead.add(ws)
     _browser_subscribers.difference_update(dead)
@@ -796,7 +852,7 @@ def make_http_handler(db_path: str, ws_port: int):
                 # to the app fails with a 401 before login is ever attempted.
                 or parsed.path == "/api/identity"
             )
-            if not is_public and not self._authenticated():
+            if parsed.path != "/ws" and not is_public and not self._authenticated():
                 if parsed.path.startswith("/api/"):
                     self._send_json({"error": "unauthorized"}, status=401)
                 else:
@@ -871,6 +927,42 @@ def make_http_handler(db_path: str, ws_port: int):
                         (limit,),
                     ).fetchall()
                     self._send_json([_decode_packet_row(r) for r in rows])
+                elif parsed.path == "/ws":
+                    token = parse_qs(parsed.query).get("token", [None])[0]
+                    if token is None or token not in _valid_sessions:
+                        payload = b'{"error":"unauthorized"}'
+                        self.send_response(401)
+                        self.send_header("Content-Type", "application/json")
+                        self.send_header("Content-Length", str(len(payload)))
+                        self.end_headers()
+                        self.wfile.write(payload)
+                        return
+
+                    ws_key = self.headers.get("Sec-WebSocket-Key")
+                    upgrade = (self.headers.get("Upgrade") or "").lower()
+                    connection = (self.headers.get("Connection") or "").lower()
+                    if not ws_key or upgrade != "websocket" or "upgrade" not in connection:
+                        self._send_json({"error": "bad websocket request"}, status=400)
+                        return
+
+                    accept = _websocket_accept(ws_key)
+                    self.send_response(101, "Switching Protocols")
+                    self.send_header("Upgrade", "websocket")
+                    self.send_header("Connection", "Upgrade")
+                    self.send_header("Sec-WebSocket-Accept", accept)
+                    self.close_connection = False
+                    self.end_headers()
+
+                    peer = (self.client_address[0], self.client_address[1])
+                    browser = _BrowserSocket(self.connection, peer)
+                    _browser_subscribers.add(browser)
+                    logger.info("dashboard live-subscriber connected: peer=%s (total=%d)", peer, len(_browser_subscribers))
+                    try:
+                        browser.wait_closed()
+                    finally:
+                        _browser_subscribers.discard(browser)
+                        logger.info("dashboard live-subscriber disconnected (total=%d)", len(_browser_subscribers))
+                    return
                 else:
                     self._send_json({"error": "not found"}, status=404)
             finally:
