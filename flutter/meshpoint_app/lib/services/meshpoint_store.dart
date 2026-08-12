@@ -15,7 +15,11 @@ import '../models/meshpoint_server.dart';
 /// Stored as one JSON blob under a single key rather than one secure-
 /// storage entry per server: simplest correct thing for what's
 /// realistically a handful of servers (a personal fleet, not hundreds).
-class ServerStore extends ChangeNotifier {
+class MeshpointStore extends ChangeNotifier {
+  // Deliberately left as-is despite the class rename -- this is a
+  // persisted on-device storage key. Changing it would silently orphan
+  // every existing install's already-saved server list (a fresh read
+  // under a new key finds nothing, not an empty-but-recoverable state).
   static const _storageKey = 'meshpoint_servers_v1';
   final _storage = const FlutterSecureStorage();
 

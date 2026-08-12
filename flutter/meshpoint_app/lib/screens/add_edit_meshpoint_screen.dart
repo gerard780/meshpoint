@@ -2,22 +2,23 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../models/meshpoint_server.dart';
+import '../services/active_meshpoint_controller.dart';
 import '../services/api_client.dart';
-import '../services/server_store.dart';
-import 'server_dashboard_screen.dart';
+import '../services/meshpoint_store.dart';
+import '../services/tab_index_controller.dart';
 
-/// Add a brand-new server, or (re-)log into an existing one whose token
-/// is missing/expired -- same form either way, just pre-filled and with
-/// the name/URL fields locked when [existing] is set.
-class AddEditServerScreen extends StatefulWidget {
+/// Add a brand-new meshpoint, or (re-)log into an existing one whose
+/// token is missing/expired -- same form either way, just pre-filled
+/// and with the name/URL fields locked when [existing] is set.
+class AddEditMeshpointScreen extends StatefulWidget {
   final MeshpointServer? existing;
-  const AddEditServerScreen({super.key, this.existing});
+  const AddEditMeshpointScreen({super.key, this.existing});
 
   @override
-  State<AddEditServerScreen> createState() => _AddEditServerScreenState();
+  State<AddEditMeshpointScreen> createState() => _AddEditMeshpointScreenState();
 }
 
-class _AddEditServerScreenState extends State<AddEditServerScreen> {
+class _AddEditMeshpointScreenState extends State<AddEditMeshpointScreen> {
   final _formKey = GlobalKey<FormState>();
   late final TextEditingController _nameCtrl;
   late final TextEditingController _urlCtrl;
@@ -65,22 +66,26 @@ class _AddEditServerScreenState extends State<AddEditServerScreen> {
       final result = await client.login(_userCtrl.text.trim(), _passCtrl.text);
 
       if (!mounted) return;
-      final store = context.read<ServerStore>();
-      final MeshpointServer server;
+      final store = context.read<MeshpointStore>();
+      final MeshpointServer meshpoint;
       if (_isEditing) {
-        server = widget.existing!;
-        server.baseUrl = baseUrl;
+        meshpoint = widget.existing!;
+        meshpoint.baseUrl = baseUrl;
       } else {
-        server = await store.addServer(name: _nameCtrl.text.trim(), baseUrl: baseUrl);
+        meshpoint = await store.addServer(name: _nameCtrl.text.trim(), baseUrl: baseUrl);
       }
-      server.token = result.token;
-      server.role = result.role;
+      meshpoint.token = result.token;
+      meshpoint.role = result.role;
       await store.save();
 
       if (!mounted) return;
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => ServerDashboardScreen(server: server)),
-      );
+      // Logging into a meshpoint (new or re-auth) makes it the active
+      // one and jumps straight to its Nodes tab -- picking a meshpoint
+      // was the whole point of opening this form, so land somewhere
+      // that actually shows its data rather than back on the list.
+      context.read<ActiveMeshpointController>().setActive(meshpoint);
+      context.read<TabIndexController>().setIndex(1);
+      Navigator.of(context).pop();
     } on ApiException catch (e) {
       setState(() => _error = _friendlyError(e));
     } catch (e) {
@@ -105,7 +110,7 @@ class _AddEditServerScreenState extends State<AddEditServerScreen> {
       case 'locked_out':
         return 'Too many failed attempts -- wait a bit and try again.';
       case 'setup_required':
-        return 'This server has no admin password set yet -- finish setup '
+        return 'This meshpoint has no admin password set yet -- finish setup '
             'in its web dashboard first.';
       default:
         return e.detail;
@@ -123,7 +128,7 @@ class _AddEditServerScreenState extends State<AddEditServerScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(_isEditing ? 'Log in to ${widget.existing!.name}' : 'Add server')),
+      appBar: AppBar(title: Text(_isEditing ? 'Log in to ${widget.existing!.name}' : 'Add meshpoint')),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Form(

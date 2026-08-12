@@ -1,9 +1,9 @@
 // Real unit test for NodeSummary.withLivePacket() -- the patch applied
 // to a node's list entry on every live `/ws` packet
-// (server_dashboard_screen.dart's _applyLivePacketToNodes) so the Nodes
-// tab updates immediately instead of only on the next pull-to-refresh
-// or screen re-entry (a real bug: it was doing exactly that before this
-// method existed).
+// (active_meshpoint_controller.dart's _applyLivePacketToNodes) so the
+// Nodes tab updates immediately instead of only on the next
+// pull-to-refresh or screen re-entry (a real bug: it was doing exactly
+// that before this method existed).
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:meshpoint_app/models/node_summary.dart';

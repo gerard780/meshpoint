@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../theme/meshpoint_theme.dart';
 
-/// Shown while `ServerStore.load()` (a real, if usually fast, secure-
+/// Shown while `MeshpointStore.load()` (a real, if usually fast, secure-
 /// storage read) is in flight. Android/iOS also get a genuine native
 /// splash (see flutter_native_splash.yaml -- that one paints before the
 /// Flutter engine has even started, closing the gap this widget can't
@@ -10,9 +10,9 @@ import '../theme/meshpoint_theme.dart';
 /// all, so this is what actually shows there -- the platform the app
 /// has been live-tested on so far.
 ///
-/// Deliberately dumb: doesn't know about [ServerStore] or decide
+/// Deliberately dumb: doesn't know about [MeshpointStore] or decide
 /// anything itself -- `MeshpointApp` picks between this and
-/// [StartScreen] directly, so the two are genuinely mutually exclusive
+/// `HomeShell` directly, so the two are genuinely mutually exclusive
 /// in the tree instead of one silently wrapping the other.
 class SplashScreen extends StatelessWidget {
   const SplashScreen({super.key});
