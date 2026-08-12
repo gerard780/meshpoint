@@ -563,6 +563,14 @@ async def _broadcast_update(kind: str, data: Optional[dict]) -> None:
 # ── websocket ingest ────────────────────────────────────────────────
 
 async def ws_handler(websocket, db_path: str) -> None:
+    path = websocket.request.path.rstrip("/")
+
+    # Accept Flutter app /ws?token=... (or any WS client with no device auth)
+    # as a browser-style subscriber to the live packet feed.
+    if path == "/ws" or (path == "" and websocket.request.path.startswith("/ws")):
+        await _browser_subscriber_handler(websocket)
+        return
+
     if websocket.request.path.rstrip("/").endswith("/live"):
         await _browser_subscriber_handler(websocket)
         return
