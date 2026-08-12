@@ -878,7 +878,7 @@ function hardwareName(model) {
 }
 
 function packetDetails(p) {
-    const payload = parseJsonSafe(p.decoded_payload_json);
+    const payload = p.decoded_payload;
     if (!payload) return '--';
     switch (p.packet_type) {
         case 'position':
@@ -1131,7 +1131,7 @@ function nodeMarkerFor(node, deviceName) {
         });
     }
 
-    const signal = parseJsonSafe(node.latest_signal_json);
+    const signal = node.latest_signal;
     const rssi = signal && signal.rssi != null ? `${round1(signal.rssi)} dBm` : '--';
     marker.bindPopup(
         `<strong>${esc(node.display_name || node.node_id)}</strong><br>` +
@@ -1310,8 +1310,8 @@ function renderNodeList() {
     nodes.sort((a, b) => {
         if (toolbarState.sort === 'packet_count') return (b.packet_count || 0) - (a.packet_count || 0);
         if (toolbarState.sort === 'rssi') {
-            const ra = parseJsonSafe(a.latest_signal_json)?.rssi ?? -999;
-            const rb = parseJsonSafe(b.latest_signal_json)?.rssi ?? -999;
+            const ra = a.latest_signal?.rssi ?? -999;
+            const rb = b.latest_signal?.rssi ?? -999;
             return rb - ra;
         }
         const ta = lastActivityByNode[a.node_id] || a.last_heard || 0;
@@ -1333,8 +1333,8 @@ function renderNodeList() {
         if (seenGroup.has(key)) continue;
         seenGroup.add(key);
         const members = (nodesByStrippedId[key] || [n]).slice().sort((a, b) => {
-            const ra = parseJsonSafe(a.latest_signal_json)?.rssi ?? -999;
-            const rb = parseJsonSafe(b.latest_signal_json)?.rssi ?? -999;
+            const ra = a.latest_signal?.rssi ?? -999;
+            const rb = b.latest_signal?.rssi ?? -999;
             return rb - ra;
         });
         groups.push({ key, members });
@@ -1362,7 +1362,7 @@ function renderNodeList() {
             }, null,
         );
 
-        const telemetry = members.map((m) => parseJsonSafe(m.latest_telemetry_json)).find(Boolean);
+        const telemetry = members.map((m) => m.latest_telemetry).find(Boolean);
 
         const extraBadges = [];
         if (role != null) extraBadges.push(`<span class="badge">${esc(roleName(role))}</span>`);
@@ -1379,7 +1379,7 @@ function renderNodeList() {
         // own timestamp so a stale row doesn't look as fresh as the card
         // header implies.
         const memberInfos = members.map((m) => {
-            const signal = parseJsonSafe(m.latest_signal_json);
+            const signal = m.latest_signal;
             const heardAt = lastActivityByDeviceNode[`${m.device_id}:${m.node_id}`] || m.last_heard;
             return { m, signal, rssi: round1(signal?.rssi), snr: round1(signal?.snr), heardAt };
         });
@@ -1542,7 +1542,7 @@ function triggerLiveEffects(packets, nodes) {
         const effectColor = p.protocol === 'meshcore' ? '#a855f7' : '#00e5a0';
 
         if (p.packet_type === 'traceroute') {
-            const payload = parseJsonSafe(p.decoded_payload_json);
+            const payload = p.decoded_payload;
             const hopIds = [p.source_id, ...(payload?.route || []), p.destination_id];
             drawTraceroutePath(hopIds, nodePosById, effectColor);
             continue;
@@ -1651,8 +1651,8 @@ function ndSection(title, rows) {
 }
 
 function openNodeDrawer(n) {
-    const signal = parseJsonSafe(n.latest_signal_json);
-    const telemetry = parseJsonSafe(n.latest_telemetry_json);
+    const signal = n.latest_signal;
+    const telemetry = n.latest_telemetry;
     const rssi = round1(signal?.rssi);
     const snr = round1(signal?.snr);
     const hops = hopByNode[n.node_id];
@@ -1770,7 +1770,7 @@ function pdmLayer(title, rows) {
 }
 
 function openPacketModal(p) {
-    const payload = parseJsonSafe(p.decoded_payload_json);
+    const payload = p.decoded_payload;
     const via = deviceNameById[p.device_id] || p.device_id;
 
     const modal = document.getElementById('pdm-modal');

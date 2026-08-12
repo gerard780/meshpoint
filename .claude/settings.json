@@ -32,7 +32,19 @@
       "Bash(node --check /Users/einstein/Software/meshpoint/frontend/js/lorawan_panel.js)",
       "Bash(node --check /Users/einstein/Software/meshpoint/frontend/js/meshtastic_panel.js)",
       "Bash(node --check /Users/einstein/Software/meshpoint/frontend/js/meshcore_panel.js)",
-      "Bash(node --check /Users/einstein/Software/meshpoint/frontend/js/messaging_chat.js)"
+      "Bash(node --check /Users/einstein/Software/meshpoint/frontend/js/messaging_chat.js)",
+      "Bash(xargs cat -n)",
+      "Bash(flutter analyze *)",
+      "Bash(flutter test *)",
+      "Bash(flutter build *)",
+      "Bash(open \"build/macos/Build/Products/Debug/Meshpoint Manager.app\")",
+      "Bash(osascript -e 'quit app \"Meshpoint Manager\"')",
+      "Bash(flutter pub *)",
+      "Bash(python3 -c \"import ast; ast.parse\\(open\\('extra/local_meshradar/server.py'\\).read\\(\\)\\)\")",
+      "Bash(pipx list *)",
+      "Bash(python3 -m pip list)",
+      "Bash(python3 -c \"import websockets\")",
+      "Bash(python3 /private/tmp/claude-501/-Users-einstein-Software-meshpoint/f2f55b84-6a8b-402c-b7bf-8ac3a7dda9f3/scratchpad/verify_local_meshradar.py)"
     ]
   }
 }

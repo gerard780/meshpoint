@@ -146,11 +146,9 @@ async function loadAll() {
             { key: 'role', label: 'Role' },
             { key: 'packet_count', label: 'Packets' },
             {
-                key: 'latest_signal_json', label: 'RSSI/SNR', render: (r) => {
-                    try {
-                        const s = JSON.parse(r.latest_signal_json);
-                        if (s && s.rssi != null) return `${s.rssi} / ${s.snr}`;
-                    } catch (_) {}
+                key: 'latest_signal', label: 'RSSI/SNR', render: (r) => {
+                    const s = r.latest_signal;
+                    if (s && s.rssi != null) return `${s.rssi} / ${s.snr}`;
                     return '--';
                 },
             },

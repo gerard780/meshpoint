@@ -323,8 +323,8 @@ def handle_packet(db_path: str, message: dict) -> Optional[dict]:
     if packet_row is None:
         return None
     return {
-        "packet": dict(packet_row),
-        "node": dict(node_row) if node_row else None,
+        "packet": _decode_packet_row(packet_row),
+        "node": _decode_node_row(node_row) if node_row else None,
     }
 
 
@@ -508,7 +508,7 @@ def handle_heartbeat(db_path: str, message: dict) -> Optional[dict]:
     return {
         "device_id": device_id,
         "stats": stats,
-        "nodes": [dict(row) for row in node_rows],
+        "nodes": [_decode_node_row(row) for row in node_rows],
     }
 
 
@@ -610,6 +610,38 @@ def _rows_to_dicts(rows: list[sqlite3.Row]) -> list[dict]:
     return [dict(row) for row in rows]
 
 
+def _decode_node_row(row: sqlite3.Row) -> dict:
+    """`dict(row)` alone leaves this response unusable to a strictly-typed
+    client: `latest_signal_json`/`latest_telemetry_json` are JSON-encoded
+    *strings* under `_json`-suffixed keys (loosely-typed dashboard JS never
+    noticed), and `has_position` is SQLite's native 0/1 integer, not a real
+    JSON boolean. Reshapes both into the same `latest_signal`/
+    `latest_telemetry` (decoded nested objects) / boolean `has_position`
+    shape a real Meshpoint's own `GET /api/nodes` already returns.
+    """
+    d = dict(row)
+    d["has_position"] = bool(d.get("has_position"))
+    signal_json = d.pop("latest_signal_json", None)
+    d["latest_signal"] = json.loads(signal_json) if signal_json else None
+    telemetry_json = d.pop("latest_telemetry_json", None)
+    d["latest_telemetry"] = json.loads(telemetry_json) if telemetry_json else None
+    return d
+
+
+def _decode_packet_row(row: sqlite3.Row) -> dict:
+    """Same reasoning as `_decode_node_row`: `decoded_payload_json` is a
+    JSON string under a `_json`-suffixed key, and `want_ack`/`via_mqtt`/
+    `decrypted` are SQLite 0/1 integers, not real JSON booleans.
+    """
+    d = dict(row)
+    d["want_ack"] = bool(d.get("want_ack"))
+    d["via_mqtt"] = bool(d.get("via_mqtt"))
+    d["decrypted"] = bool(d.get("decrypted"))
+    payload_json = d.pop("decoded_payload_json", None)
+    d["decoded_payload"] = json.loads(payload_json) if payload_json else None
+    return d
+
+
 def make_http_handler(db_path: str, ws_port: int):
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, fmt, *args) -> None:  # noqa: A002 -- stdlib signature
@@ -634,8 +666,14 @@ def make_http_handler(db_path: str, ws_port: int):
             morsel = cookie.get(SESSION_COOKIE_NAME)
             return morsel.value if morsel else None
 
+        def _bearer_token(self) -> str | None:
+            auth = self.headers.get("Authorization")
+            if auth and auth.startswith("Bearer "):
+                return auth[len("Bearer "):].strip()
+            return None
+
         def _authenticated(self) -> bool:
-            token = self._session_token()
+            token = self._session_token() or self._bearer_token()
             return token is not None and token in _valid_sessions
 
         def _redirect(self, location: str) -> None:
@@ -744,7 +782,7 @@ def make_http_handler(db_path: str, ws_port: int):
                     rows = conn.execute(
                         "SELECT * FROM nodes ORDER BY last_heard DESC"
                     ).fetchall()
-                    self._send_json(_rows_to_dicts(rows))
+                    self._send_json([_decode_node_row(r) for r in rows])
                 elif parsed.path == "/api/packets":
                     qs = parse_qs(parsed.query)
                     limit = min(int(qs.get("limit", ["100"])[0]), 500)
@@ -752,7 +790,7 @@ def make_http_handler(db_path: str, ws_port: int):
                         "SELECT * FROM packets ORDER BY received_at DESC LIMIT ?",
                         (limit,),
                     ).fetchall()
-                    self._send_json(_rows_to_dicts(rows))
+                    self._send_json([_decode_packet_row(r) for r in rows])
                 else:
                     self._send_json({"error": "not found"}, status=404)
             finally:
@@ -779,8 +817,18 @@ def make_http_handler(db_path: str, ws_port: int):
 
             token = secrets.token_urlsafe(32)
             _valid_sessions.add(token)
+            payload_out: dict = {"ok": True}
+            # Same gating as real Meshpoint's own login() (src/api/routes/
+            # auth_routes.py): the raw token only goes in the response body
+            # for a caller that explicitly identifies itself as a
+            # non-browser client (the Flutter app sends this header) -- an
+            # ordinary dashboard login stays cookie-only, unchanged.
+            # Non-browser clients have no cookie jar, so they need the
+            # token directly to send as `Authorization: Bearer <token>`.
+            if self.headers.get("X-Meshpoint-Client"):
+                payload_out["token"] = token
             self._send_json(
-                {"ok": True},
+                payload_out,
                 extra_headers={
                     "Set-Cookie": f"{SESSION_COOKIE_NAME}={token}; Path=/; HttpOnly; SameSite=Lax",
                 },

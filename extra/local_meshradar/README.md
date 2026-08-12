@@ -45,6 +45,14 @@ Two listeners start:
   separately.
 - `http://0.0.0.0:8080` — the dashboard/viewer pages and their JSON API
   (`/api/devices`, `/api/nodes`, `/api/packets?limit=N`, `/api/stats`).
+  `/api/nodes`/`/api/packets` decode the DB's `latest_signal_json`/
+  `latest_telemetry_json`/`decoded_payload_json` blob columns into real
+  nested `latest_signal`/`latest_telemetry`/`decoded_payload` objects (and
+  send `has_position`/`want_ack`/`via_mqtt`/`decrypted` as real JSON
+  booleans, not SQLite's raw `0`/`1`) before responding — the on-disk
+  schema still stores them as `_json` TEXT columns either way, only the
+  HTTP response shape differs, matching the flat/nested shapes a real
+  Meshpoint's own `GET /api/nodes`/`GET /api/packets` already return.
 
 Useful flags: `--ws-port`, `--http-port`, `--db <path>` (default
 `local_meshradar.db` next to the script), `--verbose`.
@@ -60,6 +68,15 @@ survive a server restart. This is still not real multi-user auth — see
 "No auth enforcement" below for what it does and doesn't protect against.
 The `ws://.../8765` ingest port (where Meshpoint units and the browser's
 live-update socket connect) is unaffected; it never carried this data.
+
+`POST /api/auth/login` also supports the same dual-mode contract as a
+real Meshpoint's own login route: an ordinary browser login (no extra
+header) gets the `HttpOnly` cookie only, byte-for-byte the same response
+as before. A caller that sends `X-Meshpoint-Client: <anything>` (no
+cookie jar to rely on — e.g. the Flutter fleet-manager app) also gets the
+raw token back in the JSON body (`{"ok": true, "token": "..."}`), to send
+as `Authorization: Bearer <token>` on every subsequent request. Every
+`/api/*` endpoint accepts either the cookie or the bearer header.
 
 Two pages:
 
