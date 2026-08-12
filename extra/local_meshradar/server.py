@@ -610,6 +610,25 @@ def _rows_to_dicts(rows: list[sqlite3.Row]) -> list[dict]:
     return [dict(row) for row in rows]
 
 
+def _identity_payload(authenticated: bool) -> dict:
+    """Mirrors the shape (not the exact field set) of a real Meshpoint's
+    `GET /api/identity` (`src/api/routes/identity_routes.py`) closely
+    enough for the Flutter app's pre-login URL probe -- it discards this
+    response entirely today, just needs a 200. `setup_required` is always
+    False: unlike a real Meshpoint, this tool's single credential pair is
+    hardcoded, there's no first-run setup flow to redirect to.
+    """
+    payload: dict = {
+        "device_name": "Local Meshradar",
+        "firmware_version": "local-meshradar",
+        "setup_required": False,
+        "viewer_enabled": True,
+    }
+    if authenticated:
+        payload.update({"role": "viewer", "username": AUTH_USERNAME, "available_sections": []})
+    return payload
+
+
 def _decode_node_row(row: sqlite3.Row) -> dict:
     """`dict(row)` alone leaves this response unusable to a strictly-typed
     client: `latest_signal_json`/`latest_telemetry_json` are JSON-encoded
@@ -726,6 +745,14 @@ def make_http_handler(db_path: str, ws_port: int):
                 parsed.path in ("/login", "/login.html")
                 or parsed.path == "/manifest.json"
                 or parsed.path.startswith("/assets/")
+                # Matches real Meshpoint's own GET /api/identity contract
+                # (src/api/routes/identity_routes.py): deliberately
+                # unauthenticated so a client can confirm a URL is really
+                # a meshpoint-shaped box *before* ever sending credentials.
+                # The Flutter fleet-manager app calls this first, unconditionally,
+                # when adding a server -- without it, adding this server
+                # to the app fails with a 401 before login is ever attempted.
+                or parsed.path == "/api/identity"
             )
             if not is_public and not self._authenticated():
                 if parsed.path.startswith("/api/"):
@@ -738,6 +765,8 @@ def make_http_handler(db_path: str, ws_port: int):
             try:
                 if parsed.path in ("/login", "/login.html"):
                     self._send_html(LOGIN_HTML_PATH)
+                elif parsed.path == "/api/identity":
+                    self._send_json(_identity_payload(self._authenticated()))
                 elif parsed.path in ("/", "/index.html", "/dashboard", "/dashboard.html"):
                     self._send_html(DASHBOARD_HTML_PATH, inject_ws_port=True)
                 elif parsed.path in ("/viewer", "/viewer.html"):

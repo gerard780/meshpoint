@@ -44,7 +44,11 @@ Two listeners start:
   updates (see below) — same port, different path, nothing to configure
   separately.
 - `http://0.0.0.0:8080` — the dashboard/viewer pages and their JSON API
-  (`/api/devices`, `/api/nodes`, `/api/packets?limit=N`, `/api/stats`).
+  (`/api/identity`, `/api/devices`, `/api/nodes`, `/api/packets?limit=N`,
+  `/api/stats`). `/api/identity` is deliberately unauthenticated, same
+  contract as a real Meshpoint's own `GET /api/identity` — lets a client
+  (e.g. the Flutter fleet-manager app) confirm a URL is really this server
+  before ever sending credentials.
   `/api/nodes`/`/api/packets` decode the DB's `latest_signal_json`/
   `latest_telemetry_json`/`decoded_payload_json` blob columns into real
   nested `latest_signal`/`latest_telemetry`/`decoded_payload` objects (and
