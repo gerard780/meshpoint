@@ -44,11 +44,17 @@ Two listeners start:
   updates (see below) — same port, different path, nothing to configure
   separately.
 - `http://0.0.0.0:8080` — the dashboard/viewer pages and their JSON API
-  (`/api/identity`, `/api/devices`, `/api/nodes`, `/api/packets?limit=N`,
-  `/api/stats`). `/api/identity` is deliberately unauthenticated, same
-  contract as a real Meshpoint's own `GET /api/identity` — lets a client
-  (e.g. the Flutter fleet-manager app) confirm a URL is really this server
-  before ever sending credentials.
+  (`/api/identity`, `/api/device/status`, `/api/devices`, `/api/nodes`,
+  `/api/nodes/count`, `/api/packets?limit=N`, `/api/stats`). `/api/identity`
+  is deliberately unauthenticated, same contract as a real Meshpoint's own
+  `GET /api/identity` — lets a client (e.g. the Flutter fleet-manager app)
+  confirm a URL is really this server before ever sending credentials.
+  `/api/device/status`/`/api/nodes/count` exist purely so a client built
+  for a real single-device Meshpoint has *something* to show instead of a
+  404 — there's no single "device" for a multi-device aggregator to
+  honestly report on, so `/api/device/status` describes this process
+  itself (uptime, a fixed `local-meshradar` identity) and `long_name`
+  carries an aggregate `"N meshpoint(s), M nodes"` summary instead.
   `/api/nodes`/`/api/packets` decode the DB's `latest_signal_json`/
   `latest_telemetry_json`/`decoded_payload_json` blob columns into real
   nested `latest_signal`/`latest_telemetry`/`decoded_payload` objects (and

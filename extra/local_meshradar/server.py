@@ -34,6 +34,7 @@ import logging
 import secrets
 import sqlite3
 import threading
+import time
 from datetime import datetime, timezone
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -52,6 +53,13 @@ MANIFEST_PATH = Path(__file__).parent / "manifest.json"
 ASSETS_DIR = Path(__file__).parent / "assets"
 _ASSET_CONTENT_TYPES = {".png": "image/png", ".svg": "image/svg+xml"}
 
+# This tool's own version -- not tied to Meshpoint's own src/version.py
+# (a real Meshpoint's __version__), just a human-readable string surfaced
+# via /api/identity and /api/device/status so a client showing a version
+# chip (e.g. the Flutter fleet-manager app's meshpoint card) has something
+# other than a bare "?" to display. Bump by hand on real changes here.
+LOCAL_MESHRADAR_VERSION = "0.8.0"
+
 # Single hardcoded credential pair -- this tool is meant for a trusted
 # local network (see README's "No auth enforcement" section, which this
 # closes the gap on); it's not a multi-user system, so one shared login
@@ -65,6 +73,11 @@ SESSION_COOKIE_NAME = "local_meshradar_session"
 # actually a feature (no stale acceptance of a cookie from a previous,
 # possibly-redeployed server).
 _valid_sessions: set[str] = set()
+
+# Process start, for /api/device/status's uptime_seconds -- module import
+# time is close enough to "server start" here (unlike real Meshpoint's own
+# device.py, there's no separate init_routes() call before serving begins).
+_SERVER_START_MONO = time.monotonic()
 
 
 def _check_credentials(username: str, password: str) -> bool:
@@ -610,6 +623,27 @@ def _rows_to_dicts(rows: list[sqlite3.Row]) -> list[dict]:
     return [dict(row) for row in rows]
 
 
+def _stats_dict(conn: sqlite3.Connection) -> dict:
+    """Shared by /api/stats, /api/device/status, and /api/nodes/count so
+    the three don't each run their own slightly-different set of COUNT
+    queries."""
+    devices = conn.execute("SELECT COUNT(*) FROM devices").fetchone()[0]
+    nodes_unique = conn.execute("SELECT COUNT(DISTINCT node_id) FROM nodes").fetchone()[0]
+    nodes_rows = conn.execute("SELECT COUNT(*) FROM nodes").fetchone()[0]
+    packets_total = conn.execute("SELECT COUNT(*) FROM packets").fetchone()[0]
+    packets_last_hour = conn.execute(
+        "SELECT COUNT(*) FROM packets WHERE received_at >= ?",
+        (_iso_hours_ago(1),),
+    ).fetchone()[0]
+    return {
+        "devices": devices,
+        "nodes_unique": nodes_unique,
+        "nodes_rows": nodes_rows,
+        "packets_total": packets_total,
+        "packets_last_hour": packets_last_hour,
+    }
+
+
 def _identity_payload(authenticated: bool) -> dict:
     """Mirrors the shape (not the exact field set) of a real Meshpoint's
     `GET /api/identity` (`src/api/routes/identity_routes.py`) closely
@@ -620,7 +654,7 @@ def _identity_payload(authenticated: bool) -> dict:
     """
     payload: dict = {
         "device_name": "Local Meshradar",
-        "firmware_version": "local-meshradar",
+        "firmware_version": LOCAL_MESHRADAR_VERSION,
         "setup_required": False,
         "viewer_enabled": True,
     }
@@ -785,23 +819,32 @@ def make_http_handler(db_path: str, ws_port: int):
                     else:
                         self._send_json({"error": "not found"}, status=404)
                 elif parsed.path == "/api/stats":
-                    devices = conn.execute("SELECT COUNT(*) FROM devices").fetchone()[0]
-                    nodes_unique = conn.execute(
-                        "SELECT COUNT(DISTINCT node_id) FROM nodes"
-                    ).fetchone()[0]
-                    nodes_rows = conn.execute("SELECT COUNT(*) FROM nodes").fetchone()[0]
-                    packets_total = conn.execute("SELECT COUNT(*) FROM packets").fetchone()[0]
-                    packets_last_hour = conn.execute(
-                        "SELECT COUNT(*) FROM packets WHERE received_at >= ?",
+                    self._send_json(_stats_dict(conn))
+                elif parsed.path == "/api/device/status":
+                    # No single "device" for a multi-device aggregator to
+                    # honestly report on -- this describes the aggregator
+                    # process itself, in the same response shape a real
+                    # Meshpoint's own GET /api/device/status returns
+                    # (src/api/routes/device.py), so the Flutter app's
+                    # meshpoint card/detail sheet has something real to
+                    # show instead of a bare 404.
+                    stats = _stats_dict(conn)
+                    self._send_json({
+                        "status": "running",
+                        "uptime_seconds": int(time.monotonic() - _SERVER_START_MONO),
+                        "websocket_clients": len(_browser_subscribers),
+                        "device_id": "local_meshradar",
+                        "device_name": "Local Meshradar",
+                        "long_name": f"{stats['devices']} meshpoint(s), {stats['nodes_unique']} nodes",
+                        "firmware_version": LOCAL_MESHRADAR_VERSION,
+                    })
+                elif parsed.path == "/api/nodes/count":
+                    stats = _stats_dict(conn)
+                    active = conn.execute(
+                        "SELECT COUNT(DISTINCT node_id) FROM nodes WHERE last_heard >= ?",
                         (_iso_hours_ago(1),),
                     ).fetchone()[0]
-                    self._send_json({
-                        "devices": devices,
-                        "nodes_unique": nodes_unique,
-                        "nodes_rows": nodes_rows,
-                        "packets_total": packets_total,
-                        "packets_last_hour": packets_last_hour,
-                    })
+                    self._send_json({"count": stats["nodes_unique"], "active": active})
                 elif parsed.path == "/api/devices":
                     rows = conn.execute(
                         "SELECT * FROM devices ORDER BY last_seen DESC"
