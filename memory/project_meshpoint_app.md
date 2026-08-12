@@ -877,3 +877,38 @@ instant the sheet opens regardless of how tall it ends up. Also bumped
 `initialChildSize` 0.5 -> 0.6 (`minChildSize` 0.35 -> 0.4) so the status
 rows themselves need less scrolling too. `flutter analyze` clean,
 `flutter test` passes 10/10, `flutter build macos --debug` succeeds.
+
+**Follow-up, same sheet**: even after the fix above, user pushed back
+with a real screenshot showing the sheet still felt "weird" -- all 7
+rows + button were already fully visible with empty space below, yet
+the sheet still let you drag/scroll it, which reads as broken ("why can
+I scroll when there's nothing more to see?"). Asked for my take before
+touching code (per this session's own established pattern of
+discuss-then-confirm for anything past a one-line fix); diagnosis: the
+whole `DraggableScrollableSheet` was the wrong tool here. It's right for
+`NodeDetailSheet` because a node's info is genuinely variable-length
+(optional hardware/signal/telemetry/position sections). A meshpoint's
+info is always the same fixed ~7 rows -- there's nothing to
+drag-resize or scroll, so offering that affordance was itself the bug,
+not just the initial sizing.
+
+Fix, once confirmed: dropped `DraggableScrollableSheet` (and its drag
+handle) entirely for `MeshpointDetailSheet` specifically -- plain
+`SafeArea > Container > ConstrainedBox(maxHeight: 85% of screen) >
+SingleChildScrollView > Column(mainAxisSize: min)`. Sizes itself to its
+actual content; the `SingleChildScrollView`/`ConstrainedBox` are a
+quiet safety net only (kicks in on a genuinely tiny screen with a long
+device name), not a visible/advertised affordance -- no handle bar, no
+suggestion you can drag it. `showModalBottomSheet`'s own
+`isScrollControlled: true` is what lets it size past the default ~50%
+cap. `NodeDetailSheet` itself was deliberately left untouched -- its
+variable-length content is exactly the case `DraggableScrollableSheet`
+is right for.
+
+`flutter analyze` clean, `flutter test` passes 10/10, `flutter build
+macos --debug` succeeds. **Real gap, not silently glossed over**: no
+test in this suite actually opens `MeshpointDetailSheet` at all --
+`widget_test.dart` never adds a meshpoint, so the sheet is never
+triggered. Verification here was analyze + build + the user's own
+screenshots, not an automated assertion. Worth a real widget test if
+this sheet gets touched again.

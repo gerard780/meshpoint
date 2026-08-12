@@ -11,9 +11,16 @@ import '../services/theme_store.dart';
 import '../theme/meshpoint_theme.dart';
 
 /// Opens a meshpoint's detail popup -- device status/info, plus a
-/// "Switch to this meshpoint" action. Reuses the same draggable-sheet
-/// pattern as `NodeDetailSheet` for consistency: tapping a card opens
-/// more info about it, not a full navigation away.
+/// "Switch to this meshpoint" action. Tapping a card opens more info
+/// about it, not a full navigation away, same spirit as
+/// `NodeDetailSheet` -- but deliberately *not* the same
+/// `DraggableScrollableSheet` mechanics that one uses. A node's info is
+/// variable-length (hardware/role/signal/telemetry/position sections
+/// come and go), so a draggable, scrollable sheet earns its keep there.
+/// A meshpoint's info is always the same fixed ~7 rows -- a drag handle
+/// and scroll affordance on content that's already fully visible just
+/// reads as broken ("why can I scroll when there's nothing more to
+/// see?", a real complaint). This sizes itself to its content instead.
 ///
 /// This is also where the old per-server "Status" tab's content lives
 /// now that the dashboard is a shared bottom-nav shell rather than one
@@ -79,90 +86,83 @@ class _MeshpointDetailSheetState extends State<MeshpointDetailSheet> {
     final palette = MeshpointPalette.forTheme(context.watch<ThemeStore>().current);
     final isActive = context.watch<ActiveMeshpointController>().active?.id == widget.meshpoint.id;
 
-    return DraggableScrollableSheet(
-      initialChildSize: 0.6,
-      minChildSize: 0.4,
-      maxChildSize: 0.85,
-      expand: false,
-      builder: (context, scrollController) {
-        return Container(
-          decoration: BoxDecoration(
-            color: palette.bgCard,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+    return SafeArea(
+      child: Container(
+        decoration: BoxDecoration(
+          color: palette.bgCard,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+        ),
+        // No drag handle, no DraggableScrollableSheet -- this sheet's
+        // content is always the same fixed handful of rows, so it just
+        // sizes to fit them. The ConstrainedBox+SingleChildScrollView is
+        // a quiet safety net only (kicks in on a genuinely tiny screen
+        // with a long device name), not a visible/advertised affordance.
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.85),
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 8, 8),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              widget.meshpoint.name,
+                              style:
+                                  TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: palette.textPrimary),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            Text(
+                              widget.meshpoint.baseUrl,
+                              style: TextStyle(fontSize: 11.5, color: palette.textMuted, fontFamily: 'monospace'),
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.close),
+                        color: palette.textMuted,
+                        onPressed: () => Navigator.of(context).pop(),
+                      ),
+                    ],
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                  child: Column(
+                    children: [
+                      if (_loading)
+                        const Padding(
+                          padding: EdgeInsets.all(24),
+                          child: Center(child: CircularProgressIndicator()),
+                        ),
+                      if (_error != null && !_loading)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          child: Text(_error!, style: TextStyle(color: palette.accentRed)),
+                        ),
+                      if (_status != null) ..._statusRows(_status!, palette),
+                    ],
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                  child: FilledButton.icon(
+                    onPressed: (_status == null || isActive) ? null : () => _switchToThisMeshpoint(context),
+                    icon: Icon(isActive ? Icons.check : Icons.swap_horiz),
+                    label: Text(isActive ? 'Active meshpoint' : 'Switch to this meshpoint'),
+                  ),
+                ),
+              ],
+            ),
           ),
-          child: Column(
-            children: [
-              const SizedBox(height: 8),
-              Container(
-                width: 36,
-                height: 4,
-                decoration: BoxDecoration(color: palette.border, borderRadius: BorderRadius.circular(2)),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 8, 8),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            widget.meshpoint.name,
-                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: palette.textPrimary),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          Text(
-                            widget.meshpoint.baseUrl,
-                            style: TextStyle(fontSize: 11.5, color: palette.textMuted, fontFamily: 'monospace'),
-                          ),
-                        ],
-                      ),
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.close),
-                      color: palette.textMuted,
-                      onPressed: () => Navigator.of(context).pop(),
-                    ),
-                  ],
-                ),
-              ),
-              // Only the status rows scroll -- the action button below is
-              // pinned outside this Expanded/ListView so it's always
-              // visible the instant the sheet opens, never requiring a
-              // drag/scroll to reach it (real bug: at a smaller initial
-              // sheet size, it used to be the last item *inside* the
-              // scrollable list and could end up entirely off-screen).
-              Expanded(
-                child: ListView(
-                  controller: scrollController,
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                  children: [
-                    if (_loading)
-                      const Padding(
-                        padding: EdgeInsets.all(24),
-                        child: Center(child: CircularProgressIndicator()),
-                      ),
-                    if (_error != null && !_loading)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 12),
-                        child: Text(_error!, style: TextStyle(color: palette.accentRed)),
-                      ),
-                    if (_status != null) ..._statusRows(_status!, palette),
-                  ],
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                child: FilledButton.icon(
-                  onPressed: (_status == null || isActive) ? null : () => _switchToThisMeshpoint(context),
-                  icon: Icon(isActive ? Icons.check : Icons.swap_horiz),
-                  label: Text(isActive ? 'Active meshpoint' : 'Switch to this meshpoint'),
-                ),
-              ),
-            ],
-          ),
-        );
-      },
+        ),
+      ),
     );
   }
 
