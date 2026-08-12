@@ -826,3 +826,54 @@ User referenced their other Flutter app (`/Users/einstein/Software/flutter/dmr-d
 2. "the live_tab should be called packets" -> `live_tab.dart`/`LiveTab` -> `packets_tab.dart`/`PacketsTab`, including the bottom-nav label itself ("Live" -> "Packets") and the tab's own AppBar title. User noted the packets tab's UI itself ("plain `ListTile` rows) will get real design attention later -- this pass was naming only, left a comment in the file saying so rather than scope-creeping into a redesign.
 
 Verified for real after every mechanical step, not just trusted the renames: `flutter analyze` after each file (caught every broken import/reference immediately, used as the primary tool for sweeping up a rename this size), a `grep` sweep across `lib/`/`test/` afterward for any of the old symbol names flutter analyze wouldn't catch (stale doc-comment prose, not broken code), `flutter test` (10 assertions, including a new real test that taps the "Nodes" nav destination and asserts the *actual* empty-state widget appears, not just that some tab switched), and both `flutter build macos --debug` and `flutter build apk --debug` succeeding.
+
+### Meshpoints tab icon -> the web dashboard's own "Hardware" sidebar glyph
+
+User wanted the bottom-nav Meshpoints icon to be the exact same router
+pictogram the web dashboard uses for its "Hardware" sidebar item
+(`frontend/index.html`, a custom SVG -- source comment there notes it's
+a generic router pictogram from svgrepo, exact license unconfirmed but
+not a brand mark). No Material Icons glyph matches its shape, so:
+- Added `flutter_svg` (`^2.0.10+1`, resolved to `2.2.3`) -- deliberately
+  called out in `pubspec.yaml`'s own comment as pure-Dart rendering, no
+  native platform config, unlike this session's other dependency
+  additions (flutter_secure_storage, flutter_native_splash) that caused
+  real Android/entitlements grief earlier.
+- `assets/icons/hardware.svg` (new) -- the identical path data copied
+  from `frontend/index.html`, `fill="currentColor"` preserved.
+- `HomeShell`'s `_HardwareIcon` (new, private) wraps `SvgPicture.asset`
+  with a `ColorFilter.mode(IconTheme.of(context).color, BlendMode.srcIn)`
+  -- needed because (unlike a plain `Icon`) `SvgPicture` doesn't
+  automatically pick up `IconTheme`'s color for `NavigationBar`'s
+  selected/unselected tinting, so it's read explicitly. Used for both
+  `icon`/`selectedIcon` (same single shape, no separate filled variant
+  the way Material's outlined/filled icon pairs work).
+
+Verified: `flutter analyze` clean, `flutter test` still passes 10/10
+(would fail if the SVG asset were malformed/unloadable, since
+`HomeShell` renders in the widget tests), `flutter build macos --debug`
+succeeds and the built app launches without crashing (confirmed via
+`ps aux`). **Could not visually confirm via screenshot** -- no
+screen-recording permission in this environment (`screencapture` failed
+with "could not create image from display") -- said so explicitly
+rather than claiming a visual match I hadn't actually seen.
+
+### Meshpoint detail sheet: action button was scrolled off-screen by default
+
+User screenshot: opening a meshpoint's detail sheet showed only the
+very top edge of "Switch to this meshpoint" cut off at the window's
+bottom edge, requiring a manual drag-up to reach it -- reported as
+"weird feeling." Root cause: the button was the last item *inside* the
+scrollable `ListView` alongside the 7 status rows, and the sheet's
+`initialChildSize: 0.5` wasn't tall enough to fit all of that without
+scrolling -- so the one thing you actually came to this popup to do
+(switch to the meshpoint) was the first thing pushed off-screen.
+
+Fixed properly, not just by nudging the size up: restructured the
+`Column` so the button is a fixed `Padding` sibling *after* the
+`Expanded(ListView(...))`, not part of the scrollable content -- only
+the status rows scroll now, the action button is always visible the
+instant the sheet opens regardless of how tall it ends up. Also bumped
+`initialChildSize` 0.5 -> 0.6 (`minChildSize` 0.35 -> 0.4) so the status
+rows themselves need less scrolling too. `flutter analyze` clean,
+`flutter test` passes 10/10, `flutter build macos --debug` succeeds.

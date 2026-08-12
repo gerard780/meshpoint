@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:provider/provider.dart';
 
 import '../services/tab_index_controller.dart';
@@ -41,8 +42,8 @@ class HomeShell extends StatelessWidget {
         onDestinationSelected: (i) => context.read<TabIndexController>().setIndex(i),
         destinations: const [
           NavigationDestination(
-            icon: Icon(Icons.dns_outlined),
-            selectedIcon: Icon(Icons.dns),
+            icon: _HardwareIcon(),
+            selectedIcon: _HardwareIcon(),
             label: 'Meshpoints',
           ),
           NavigationDestination(
@@ -67,6 +68,30 @@ class HomeShell extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// Same router pictogram the web dashboard's sidebar uses for its
+/// "Hardware" nav item (`frontend/index.html`) -- no built-in Material
+/// Icons glyph matches its exact shape, so this renders the identical
+/// SVG (`assets/icons/hardware.svg`, same path data) instead.
+///
+/// Not a plain [Icon], so it doesn't automatically pick up
+/// [IconTheme]'s color/size the way `Icon` does internally -- read here
+/// instead, via [ColorFilter], so it still tints correctly for
+/// [NavigationBar]'s selected/unselected states.
+class _HardwareIcon extends StatelessWidget {
+  const _HardwareIcon();
+
+  @override
+  Widget build(BuildContext context) {
+    final iconTheme = IconTheme.of(context);
+    return SvgPicture.asset(
+      'assets/icons/hardware.svg',
+      width: iconTheme.size,
+      height: iconTheme.size,
+      colorFilter: ColorFilter.mode(iconTheme.color ?? Colors.black, BlendMode.srcIn),
     );
   }
 }

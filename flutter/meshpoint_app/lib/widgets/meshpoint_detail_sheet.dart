@@ -80,8 +80,8 @@ class _MeshpointDetailSheetState extends State<MeshpointDetailSheet> {
     final isActive = context.watch<ActiveMeshpointController>().active?.id == widget.meshpoint.id;
 
     return DraggableScrollableSheet(
-      initialChildSize: 0.5,
-      minChildSize: 0.35,
+      initialChildSize: 0.6,
+      minChildSize: 0.4,
       maxChildSize: 0.85,
       expand: false,
       builder: (context, scrollController) {
@@ -126,6 +126,12 @@ class _MeshpointDetailSheetState extends State<MeshpointDetailSheet> {
                   ],
                 ),
               ),
+              // Only the status rows scroll -- the action button below is
+              // pinned outside this Expanded/ListView so it's always
+              // visible the instant the sheet opens, never requiring a
+              // drag/scroll to reach it (real bug: at a smaller initial
+              // sheet size, it used to be the last item *inside* the
+              // scrollable list and could end up entirely off-screen).
               Expanded(
                 child: ListView(
                   controller: scrollController,
@@ -142,13 +148,15 @@ class _MeshpointDetailSheetState extends State<MeshpointDetailSheet> {
                         child: Text(_error!, style: TextStyle(color: palette.accentRed)),
                       ),
                     if (_status != null) ..._statusRows(_status!, palette),
-                    const SizedBox(height: 16),
-                    FilledButton.icon(
-                      onPressed: (_status == null || isActive) ? null : () => _switchToThisMeshpoint(context),
-                      icon: Icon(isActive ? Icons.check : Icons.swap_horiz),
-                      label: Text(isActive ? 'Active meshpoint' : 'Switch to this meshpoint'),
-                    ),
                   ],
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                child: FilledButton.icon(
+                  onPressed: (_status == null || isActive) ? null : () => _switchToThisMeshpoint(context),
+                  icon: Icon(isActive ? Icons.check : Icons.swap_horiz),
+                  label: Text(isActive ? 'Active meshpoint' : 'Switch to this meshpoint'),
                 ),
               ),
             ],

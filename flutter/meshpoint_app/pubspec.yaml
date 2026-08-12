@@ -39,6 +39,11 @@ dependencies:
   web_socket_channel: ^3.0.3
   provider: ^6.1.5+1
   intl: ^0.20.2
+  # Renders the same custom router-pictogram sidebar icon the web
+  # dashboard uses for "Hardware" (frontend/index.html) -- no Material
+  # Icons glyph matches its exact shape. Pure-Dart rendering, no native
+  # platform config, unlike this session's other package additions.
+  flutter_svg: ^2.0.10+1
 
 dev_dependencies:
   flutter_test:
@@ -71,6 +76,7 @@ flutter:
   # way Android/iOS do, so that screen is plain Flutter UI instead.
   assets:
     - assets/icon/icon.png
+    - assets/icons/
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images
