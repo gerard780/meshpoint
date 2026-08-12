@@ -52,4 +52,33 @@ void main() {
     expect(updated.rssi, original.rssi);
     expect(updated.snr, original.snr);
   });
+
+  group('bandLabel', () {
+    NodeSummary withCaptureSource(String? src) => NodeSummary.fromJson({
+          'node_id': '!deadbeef',
+          'protocol': 'meshtastic',
+          'packet_count': 0,
+          'has_position': false,
+          'latest_capture_source': src,
+        });
+
+    test('labelled serial/meshcore_usb suffixes are trusted (deployer-set, not guessed)', () {
+      expect(withCaptureSource('serial_433').bandLabel, '433 MHz');
+      expect(withCaptureSource('serial_868').bandLabel, '868 MHz');
+      expect(withCaptureSource('meshcore_usb_868').bandLabel, '868 MHz');
+    });
+
+    test('a bare "concentrator" source shows no band, not a guessed one', () {
+      // Real bug report: a US tester (915 MHz) saw every node labelled
+      // "868 MHz" because concentrator_source.py stamps the exact same
+      // "concentrator" capture_source string regardless of RF region --
+      // it carries no band information at all, so guessing was wrong.
+      expect(withCaptureSource('concentrator').bandLabel, isNull);
+    });
+
+    test('an unrecognized or missing capture source shows no band', () {
+      expect(withCaptureSource('serial').bandLabel, isNull);
+      expect(withCaptureSource(null).bandLabel, isNull);
+    });
+  });
 }

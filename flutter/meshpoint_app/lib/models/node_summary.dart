@@ -147,16 +147,26 @@ class NodeSummary {
     return role!.toUpperCase();
   }
 
-  /// Mirrors `_bandLabel()` in `frontend/js/node_cards.js`/`node_drawer.js`
-  /// -- derived from the labelled capture source, not `frequency_mhz`
-  /// (the serial USB source stamps a placeholder frequency regardless of
-  /// the stick's real firmware region).
+  /// Derived from the labelled capture source, not `frequency_mhz` (the
+  /// serial USB source stamps a placeholder frequency regardless of the
+  /// stick's real firmware region). `_433`/`_868` suffixes come from a
+  /// deployer-set per-device `label` in `local.yaml`
+  /// (`SerialDeviceConfig.label`/`MeshcoreUsbConfig.label` in
+  /// `src/config.py`) -- a real, explicitly-asserted signal, not a guess.
+  ///
+  /// Deliberately does NOT special-case `capture_source == "concentrator"`
+  /// the way `frontend/js/node_cards.js`/`node_drawer.js`'s `_bandLabel()`
+  /// does (hardcoding it to "868 MHz") -- `concentrator_source.py` stamps
+  /// that exact same literal string for every concentrator regardless of
+  /// its real RF region, so it carries zero band information. A US
+  /// deployer on 915 MHz was seeing every node confidently mislabeled
+  /// "868 MHz" because of that guess. Showing nothing here is honest;
+  /// showing a wrong band isn't.
   String? get bandLabel {
     final src = captureSource;
     if (src == null) return null;
     if (src.endsWith('_433')) return '433 MHz';
     if (src.endsWith('_868')) return '868 MHz';
-    if (src == 'concentrator') return '868 MHz';
     return null;
   }
 

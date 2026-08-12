@@ -748,3 +748,58 @@ path would need a DI refactor beyond this bug's scope; flagged here as a
 real gap, not silently skipped. `flutter analyze` clean, `flutter test`
 passes (6 assertions total now), `flutter build macos --debug` still
 succeeds.
+
+### Splash screen / boot screen churn -- reverted, not pursued further
+
+A long back-and-forth followed (rename "Meshpoint Fleet Manager" ->
+"Meshpoint Manager", minimum splash display duration, removing the
+spinner, trying to fix a "two screens" complaint on Android via a blank
+native splash, discovering Android 12's SplashScreen API always falls
+back to showing the launcher icon regardless, attempting a platform-
+conditional gate). The user ended up running `git checkout` to discard
+essentially all of it and said "we reverted to working boot screen :)".
+Current real state: back to the original splash (icon + "Meshpoint
+Fleet Manager" text + spinner, held only as long as `ServerStore.load()`
+takes, no minimum duration, native Android/iOS splash shows the plain
+icon via `flutter_native_splash.yaml`'s original `image`/`image_dark:
+assets/icon/icon.png` config) -- i.e. everything from before this
+sub-thread started. **Don't re-attempt any of this unprompted** -- if
+asked again, start from a much smaller, single change verified on a
+real device before layering another on top, rather than iterating
+blind through several native-platform-config changes in a row.
+
+### Node band label ("MHz" chip) was hardcoded to 868, wrong for non-EU users
+
+User's friend tested from the US (915 MHz ISM band) and every node
+showed "868 MHz" regardless. Confirmed by reading
+`src/capture/concentrator_source.py` (backend, read-only -- user
+explicitly said "not the meshpoint python", so no backend change made):
+`capture_source="concentrator"` is a fixed literal stamped for every
+concentrator-sourced packet regardless of its real RF region -- it
+carries zero band information. `NodeSummary.bandLabel` (ported from
+`frontend/js/node_cards.js`/`node_drawer.js`'s `_bandLabel()`) had
+special-cased `capture_source == 'concentrator' -> '868 MHz'`, i.e. a
+blanket guess baked from the original EU deployment, now proven wrong
+by a real screenshot the user sent showing every single node card in
+their own RAKV2 box uniformly labelled "868 MHz" regardless of node --
+exactly the "always the same value, not real per-node data" signature
+of a hardcoded fallback.
+
+Fix, scoped to the Flutter app only per the user's explicit instruction
+(web dashboard's own `node_cards.js`/`node_drawer.js` has the identical
+bug, deliberately left untouched -- out of scope for this ask): removed
+the `'concentrator' -> '868 MHz'` special case from
+`lib/models/node_summary.dart`'s `bandLabel` getter. The `_433`/`_868`
+suffix matching (`serial_868`, `meshcore_usb_433`, etc.) stays -- those
+come from a deployer-set per-device `label` in `local.yaml`
+(`SerialDeviceConfig.label`/`MeshcoreUsbConfig.label` in
+`src/config.py`), a real asserted signal, not a guess. A concentrator
+source (or any other unrecognized `capture_source`) now shows no band
+chip at all rather than a confidently wrong one.
+
+Real tests added: `test/node_summary_test.dart` gained a `bandLabel`
+group -- labelled suffixes still resolve correctly, `'concentrator'`
+now resolves to `null` (the exact regression this fixes), and a bare
+`'serial'`/missing capture source also correctly shows nothing.
+`flutter analyze` clean, `flutter test` passes (9 assertions total
+now), `flutter build macos --debug` still succeeds.
