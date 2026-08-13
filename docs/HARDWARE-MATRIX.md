@@ -161,9 +161,9 @@ plugged into the Pi's USB port. Different protocol from Meshtastic, listens
 on a different default frequency.
 
 Flash the radio with the **`companion_radio_usb`** firmware variant from
-[flasher.meshcore.co.uk](https://flasher.meshcore.co.uk/) before plugging
+[meshcore.io/flasher](https://meshcore.io/flasher) before plugging
 into the Pi. The setup wizard auto-detects the device and configures its
-frequency to match your region.
+frequency to match your region. You can also flash from Configuration → Firmware.
 
 ### Why a USB companion instead of the SX1302 concentrator?
 

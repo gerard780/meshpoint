@@ -49,6 +49,30 @@ class ListSerialPortsStablePathsTest(unittest.TestCase):
         self.assertEqual(
             ports[0].stable_path, "/dev/serial/by-path/platform-usb-0"
         )
+        self.assertEqual(ports[0].port_class, PortClass.UNKNOWN)
+
+    @patch("src.hal.usb_classifier._resolve_symlinks")
+    @patch("src.hal.usb_classifier.UsbPortClassifier.list_ports")
+    def test_gps_port_class_propagates(self, list_ports, resolve):
+        list_ports.return_value = [
+            PortInfo(
+                device="/dev/ttyACM1",
+                vid=0x1546,
+                pid=0x01A8,
+                manufacturer="u-blox",
+                product="u-blox GNSS",
+                port_class=PortClass.GPS_KNOWN,
+            )
+        ]
+        resolve.return_value = {}
+        with patch("src.hal.usb_classifier.os.path.realpath", side_effect=lambda p: p):
+            ports = list_serial_ports_with_stable_paths()
+        self.assertEqual(ports[0].port_class, PortClass.GPS_KNOWN)
+        from src.hal.usb_classifier import serial_port_held_hint
+
+        hint = serial_port_held_hint(ports[0].port_class)
+        self.assertIsNotNone(hint)
+        self.assertIn("GPS", hint)
 
 
 if __name__ == "__main__":

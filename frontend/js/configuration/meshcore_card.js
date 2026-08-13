@@ -1,14 +1,6 @@
 /**
- * Configuration → MeshCore card.
- *
- * Single responsibility: edit the MeshCore companion channel keys
- * (stored as hex to match the MeshCore native app format) and
- * surface the two on-demand companion actions, Send Advert and
- * Refresh. Companion radio readouts (frequency / bandwidth / SF /
- * TX power) are shown for context but are read-only here.
- *
- * The top-level Radio page renders the same readouts plus a
- * deep-link to this card per the v0.7.4 IA refactor.
+ * Configuration → MeshCore card: USB source, companion name/channels,
+ * and (via MeshcoreRadioSettings) live radio presets.
  */
 
 class MeshcoreConfigCard {
@@ -16,6 +8,7 @@ class MeshcoreConfigCard {
         this._api = api;
         this._root = null;
         this._focusedRow = null;
+        this._radioSettings = null;
     }
 
     mount(root) {
@@ -66,12 +59,18 @@ class MeshcoreConfigCard {
                     <div data-mc-body></div>
                     <p class="cfg-status" data-mc-status aria-live="polite"></p>
                 </article>
+                <div data-mc-radio-host></div>
             </div>
         `;
         this._body = this._root.querySelector('[data-mc-body]');
         this._statusEl = this._root.querySelector('[data-mc-status]');
         this._usbForm = this._root.querySelector('[data-mc-usb-form]');
         this._usbForm.addEventListener('submit', (e) => this._saveUsbSource(e));
+        const radioHost = this._root.querySelector('[data-mc-radio-host]');
+        if (radioHost && window.MeshcoreRadioSettings) {
+            this._radioSettings = new MeshcoreRadioSettings(this._api);
+            this._radioSettings.mount(radioHost);
+        }
     }
 
     render(config) {
@@ -90,9 +89,11 @@ class MeshcoreConfigCard {
         const mc = (config && config.meshcore) || {};
         if (!mc.connected) {
             this._renderOffline(config);
+            if (this._radioSettings) this._radioSettings.clear();
             return;
         }
         this._renderOnline(mc);
+        if (this._radioSettings) this._radioSettings.render(mc);
     }
 
     async _saveUsbSource(event) {
@@ -471,10 +472,7 @@ class MeshcoreConfigCard {
                             (advertRes.error ? `: ${advertRes.error}` : ''),
                     );
                 }
-            } catch (_e) {
-                // Rename already stuck on flash; advert failure is a
-                // soft error. Rely on the toast to surface it.
-            }
+            } catch (_e) { /* rename stuck; toast covers advert miss */ }
         }
 
         await this._api.refresh();
@@ -487,9 +485,9 @@ class MeshcoreConfigCard {
         this._statusEl.textContent = message;
     }
 
-    _fmtFreq(v)    { return v ? `${v} MHz` : '--'; }
-    _fmtBw(v)      { return v ? `${v} kHz` : '--'; }
-    _fmtSf(v)      { return v ? `SF${v}` : '--'; }
+    _fmtFreq(v) { return v ? `${v} MHz` : '--'; }
+    _fmtBw(v) { return v ? `${v} kHz` : '--'; }
+    _fmtSf(v) { return v ? `SF${v}` : '--'; }
     _fmtTxPower(v) { return v != null ? `${v} dBm` : '--'; }
 
     _esc(str) {

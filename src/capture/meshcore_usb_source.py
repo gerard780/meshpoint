@@ -37,7 +37,6 @@ _MESHCORE_COMMAND_TIMEOUT_SECONDS = 12.0
 _HEALTH_CHECK_TIMEOUT_SECONDS = 15.0
 _RECONNECT_BASE_DELAY_SECONDS = 5
 _RECONNECT_MAX_DELAY_SECONDS = 60
-_DTR_RESET_PULSE_SECONDS = 0.1
 
 
 class MeshcoreUsbCaptureSource(CaptureSource):
@@ -60,13 +59,28 @@ class MeshcoreUsbCaptureSource(CaptureSource):
         self._resolved_port: Optional[str] = None
         self._health_task: Optional[asyncio.Task] = None
         self._reconnect_task: Optional[asyncio.Task] = None
+        # Two triggers can race (health-check inline _reconnect vs
+        # command-timeout _trigger_reconnect). Guard serializes them.
+        # Credit: javastraat/meshpoint c1bc3b8
+        self._reconnect_in_progress: bool = False
         self._last_rf_signal: Optional[SignalMetrics] = None
         self._last_event_at: float = 0.0
+        self._last_device_info: Optional[dict] = None
         self._on_connected_callback = None
 
     @property
     def name(self) -> str:
         return "meshcore_usb"
+
+    @property
+    def connected(self) -> bool:
+        """True while the MeshCore companion serial session is live."""
+        return self._connected
+
+    @property
+    def last_device_info(self) -> Optional[dict]:
+        """Cached DEVICE_INFO (version / model / build), if queried."""
+        return self._last_device_info
 
     @property
     def is_running(self) -> bool:
@@ -179,6 +193,7 @@ class MeshcoreUsbCaptureSource(CaptureSource):
                 return
 
             self._connected = True
+            await self._cache_device_info_on_connect()
 
             for event_type in (
                 EventType.RX_LOG_DATA,
@@ -227,68 +242,73 @@ class MeshcoreUsbCaptureSource(CaptureSource):
     async def _reconnect(self) -> None:
         """Disconnect, wait with backoff, and reconnect.
 
-        On retries (not the first attempt) we pulse DTR low briefly
-        before opening the port. On most ESP32 dev boards (Heltec V3
-        included) DTR is wired to the chip's RESET pin, so a short
-        pulse triggers a hardware reset of the companion. This
-        recovers from a stuck USB-CDC state that otherwise requires
-        a manual unplug/replug. On boards where DTR is not wired
-        to RESET the pulse is a harmless no-op.
+        Retries pulse DTR for ESP32 soft-reset. Re-entrancy guarded so
+        health-check and command-timeout paths cannot race on the port.
+        Credit: javastraat/meshpoint c1bc3b8
         """
-        await self._disconnect()
-        delay = _RECONNECT_BASE_DELAY_SECONDS
-        attempt = 0
-
-        while self._running:
-            logger.info(
-                "MeshCore USB reconnecting in %ds...", delay
-            )
-            await asyncio.sleep(delay)
-            if not self._running:
-                return
-
-            attempt += 1
-            if attempt >= 2 and self._resolved_port:
-                await asyncio.to_thread(
-                    self._pulse_dtr_reset, self._resolved_port
-                )
-                # Give the chip a moment to come back from reset.
-                await asyncio.sleep(2.0)
-
-            await self._connect(self._resolved_port)
-            if self._connected:
-                logger.info("MeshCore USB reconnected successfully")
-                return
-
-            delay = min(delay * 2, _RECONNECT_MAX_DELAY_SECONDS)
-
-    def _pulse_dtr_reset(self, port: str) -> None:
-        """Toggle DTR low to soft-reset an ESP32 companion. Best-effort.
-
-        Runs in a worker thread (called via asyncio.to_thread) because
-        pyserial's open and the DTR sleep are blocking. Safe to fail
-        silently: if the host's serial driver doesn't expose DTR or the
-        port is unavailable, we just skip and let the regular reconnect
-        attempt proceed.
-        """
-        try:
-            import serial  # transitive dep via meshcore lib
-        except ImportError:
-            return
-        try:
-            import time as _time
-            with serial.Serial(port, self._baud_rate, timeout=0.5) as ser:
-                ser.dtr = False
-                _time.sleep(_DTR_RESET_PULSE_SECONDS)
-                ser.dtr = True
-            logger.info(
-                "MeshCore USB pulsed DTR on %s to attempt soft reset",
-                port,
-            )
-        except Exception as exc:
+        if self._reconnect_in_progress:
             logger.debug(
-                "MeshCore USB DTR pulse skipped on %s: %s", port, exc
+                "MeshCore USB reconnect already in progress, skipping"
             )
+            return
+        self._reconnect_in_progress = True
+        try:
+            await self._disconnect()
+            delay = _RECONNECT_BASE_DELAY_SECONDS
+            attempt = 0
+
+            while self._running:
+                logger.info(
+                    "MeshCore USB reconnecting in %ds...", delay
+                )
+                await asyncio.sleep(delay)
+                if not self._running:
+                    return
+
+                attempt += 1
+                if attempt >= 2 and self._resolved_port:
+                    from src.capture.meshcore_dtr import pulse_dtr_reset
+
+                    await asyncio.to_thread(
+                        pulse_dtr_reset,
+                        self._resolved_port,
+                        self._baud_rate,
+                    )
+                    await asyncio.sleep(2.0)
+
+                await self._connect(self._resolved_port)
+                if self._connected:
+                    logger.info("MeshCore USB reconnected successfully")
+                    return
+
+                delay = min(delay * 2, _RECONNECT_MAX_DELAY_SECONDS)
+        finally:
+            self._reconnect_in_progress = False
+
+    def _trigger_reconnect(self, reason: str) -> None:
+        """Kick recovery now after a command-channel timeout.
+
+        Passive RX can mask a wedged command channel from the health loop;
+        timeouts must not leave the source marked connected for minutes.
+        Credit: javastraat/meshpoint b04e91c / c1bc3b8
+        """
+        if self._reconnect_in_progress:
+            logger.debug(
+                "MeshCore USB: %s -- reconnect already in progress, skipping",
+                reason,
+            )
+            return
+        logger.warning(
+            "MeshCore USB: %s -- reconnecting now", reason,
+        )
+        if self._health_task:
+            self._health_task.cancel()
+            self._health_task = None
+        self._connected = False
+        self._reconnect_task = asyncio.create_task(
+            self._reconnect_until_connected(),
+            name="meshcore-command-timeout-reconnect",
+        )
 
     async def _health_check_loop(self) -> None:
         """Periodically verify the serial companion is still responding.
@@ -349,6 +369,44 @@ class MeshcoreUsbCaptureSource(CaptureSource):
         now = asyncio.get_event_loop().time()
         return (now - self._last_event_at) < _RECENT_EVENT_HEALTHY_WINDOW_SECONDS
 
+    async def _cache_device_info_on_connect(self) -> None:
+        """Query DEVICE_INFO once before auto-fetch starts (clean window)."""
+        if not self._meshcore:
+            return
+        try:
+            from meshcore import EventType
+            from src.transmit.meshcore_device_info import MeshcoreDeviceInfoQuery
+
+            result = await asyncio.wait_for(
+                self._meshcore.commands.send_device_query(),
+                timeout=_MESHCORE_COMMAND_TIMEOUT_SECONDS,
+            )
+            if result is None or result.type == EventType.ERROR:
+                return
+            payload = getattr(result, "payload", None)
+            if isinstance(payload, dict):
+                self._last_device_info = MeshcoreDeviceInfoQuery.normalize(payload)
+                logger.info(
+                    "MeshCore DEVICE_INFO cached: version=%s model=%s",
+                    self._last_device_info.get("version"),
+                    self._last_device_info.get("model"),
+                )
+        except Exception:
+            logger.debug("MeshCore DEVICE_INFO cache on connect failed", exc_info=True)
+
+    def _remember_device_info_event(self, result) -> None:
+        try:
+            from meshcore import EventType
+            from src.transmit.meshcore_device_info import MeshcoreDeviceInfoQuery
+
+            if result is None or result.type != EventType.DEVICE_INFO:
+                return
+            payload = getattr(result, "payload", None)
+            if isinstance(payload, dict):
+                self._last_device_info = MeshcoreDeviceInfoQuery.normalize(payload)
+        except Exception:
+            logger.debug("Could not cache MeshCore DEVICE_INFO", exc_info=True)
+
     async def _check_health(self) -> bool:
         """Send a device query and verify we get a response."""
         if not self._meshcore:
@@ -360,7 +418,10 @@ class MeshcoreUsbCaptureSource(CaptureSource):
                 self._meshcore.commands.send_device_query(),
                 timeout=_HEALTH_CHECK_TIMEOUT_SECONDS,
             )
-            return result.type != EventType.ERROR
+            if result.type != EventType.ERROR:
+                self._remember_device_info_event(result)
+                return True
+            return False
         except Exception:
             return False
 

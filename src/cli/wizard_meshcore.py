@@ -156,7 +156,11 @@ def configure_meshcore_radio(
         print(f"        Current: {status.summary()}")
         print()
 
-        meshcore_region_map = {"US": "US", "EU_868": "EU", "ANZ": "ANZ"}
+        meshcore_region_map = {
+            "US": "USA_CANADA",
+            "EU_868": "EU_UK_NARROW",
+            "ANZ": "AUSTRALIA_NARROW",
+        }
         auto_preset_key = meshcore_region_map.get(region)
 
         if auto_preset_key and auto_preset_key in REGION_PRESETS:

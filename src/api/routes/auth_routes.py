@@ -17,8 +17,9 @@ contract is auditable.
 from __future__ import annotations
 
 import logging
+from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
 
 from src.api.audit import AuditLogWriter
@@ -158,13 +159,25 @@ async def setup_password(
 
 @router.post("/login")
 async def login(
-    payload: LoginRequest, request: Request, response: Response
+    payload: LoginRequest,
+    request: Request,
+    response: Response,
+    x_meshpoint_client: Optional[str] = Header(default=None),
 ) -> dict:
     result = _service().login(payload.username, payload.password)
     if isinstance(result, LoginSuccess):
         _set_session_cookie(request, response, result.token)
         logger.info("user logged in (role=%s)", result.role)
-        return {"role": result.role}
+        body: dict = {"role": result.role}
+        # Raw token only in the JSON body for non-browser clients that
+        # opt in via X-Meshpoint-Client (e.g. companion apps send "app").
+        # Browser logins stay cookie-only so HttpOnly XSS protection is
+        # not undercut by exposing the JWT to page JS. Non-browser
+        # clients have no cookie jar and need the token for
+        # ``Authorization: Bearer`` (see dependencies.py).
+        if x_meshpoint_client:
+            body["token"] = result.token
+        return body
     raise _reject_login(result)
 
 

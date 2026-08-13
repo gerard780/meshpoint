@@ -13,7 +13,7 @@
 [![GitHub stars](https://img.shields.io/github/stars/KMX415/meshpoint?style=flat&color=yellow)](https://github.com/KMX415/meshpoint/stargazers)
 [![GitHub issues](https://img.shields.io/github/issues/KMX415/meshpoint)](https://github.com/KMX415/meshpoint/issues)
 [![Last commit](https://img.shields.io/github/last-commit/KMX415/meshpoint)](https://github.com/KMX415/meshpoint/commits/main)
-[![Version](https://img.shields.io/badge/version-0.7.8-orange.svg)](docs/CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.7.9-orange.svg)](docs/CHANGELOG.md)
 
 ### Meshradar Cloud Dashboard
 ![Meshradar Cloud Dashboard](Meshradar414.png)
@@ -76,7 +76,9 @@ Everything is managed from a browser dashboard: full chat with channels and DMs,
 
 **Dual-protocol MQTT gateway.** Publish captured packets to community MQTT brokers and Home Assistant. Dual-protocol: Meshtastic (protobuf) and MeshCore (JSON) from a single device. Two-gate privacy model ensures private channel data never leaks. Optional JSON publishing, HA auto-discovery, and configurable location precision.
 
-**Auto-detect hardware.** RAK Hotspot V2, SenseCap M1, and Syncrobit Chameleon (SX1302) supported; carrier board may show as generic SX1302/Pi during setup. **Bobcat Miner 300** (Rockchip RK3566 + SX1302 on Armbian) is community-validated with manual SPI/GPIO setup. **WisMesh Node** (RAK6421 Pi HAT + WisBlock SX1262, experimental) is documented on `main` and installs from branch `feat/wismesh-hat` until v0.7.6 merges. MeshCore USB companions auto-detected on `/dev/ttyUSB*` and `/dev/ttyACM*`.
+**Companion firmware from the dashboard.** Flash official Meshtastic or MeshCore USB companion firmware from Configuration → Firmware (GitHub releases via esptool), including installed-version readout before you flash. External flash still works from [meshcore.io/flasher](https://meshcore.io/flasher) or the Meshtastic web flasher when you prefer that path.
+
+**Auto-detect hardware.** RAK Hotspot V2, SenseCap M1, and Syncrobit Chameleon (SX1302) supported; carrier board may show as generic SX1302/Pi during setup. **Bobcat Miner 300** (Rockchip RK3566 + SX1302 on Armbian) is community-validated with manual SPI/GPIO setup. **WisMesh Node** (RAK6421 Pi HAT + WisBlock SX1262, experimental) stays on its own branch `feat/wismesh-hat` (Settings → Updates → Experimental); docs are on `main`, gateway installs stay on Stable. MeshCore USB companions auto-detected on `/dev/ttyUSB*` and `/dev/ttyACM*`.
 
 ---
 
@@ -136,7 +138,7 @@ aarch64 Raspbian 13 (Trixie) with live Meshtastic RX/TX.
 
 The [RAK WisMesh Pi Node](https://store.rakwireless.com/products/wismesh-pi-node) is a Pi HAT with a **WisBlock SX1262** LoRa module (RAK13300 standard or **RAK13302 1W** with PA). Meshpoint drives RF through **meshtasticd** (Portduino), not the SX1302 concentrator path used by Options A–D.
 
-**Status:** User-facing docs are on **`main`** now. The installer, dashboard, and capture bridge are on branch **`feat/wismesh-hat`** until they ship in **v0.7.6**. Gateway users should stay on **`main`**.
+**Status:** User-facing docs are on **`main`**. The installer, dashboard, and capture bridge stay on the long-lived **`feat/wismesh-hat`** branch (not merged into Stable). Gateway users should stay on **`main`**.
 
 ```bash
 cd /opt/meshpoint
@@ -167,7 +169,7 @@ OTG not confirmed on G295).
 
 ### Optional: MeshCore USB Companion
 
-Add a Heltec V3/V4 or T-Beam running [MeshCore USB companion firmware](https://flasher.meshcore.co.uk/) to monitor MeshCore traffic alongside Meshtastic. Plug it into any USB port on the Pi -- the setup wizard auto-detects the device and configures its radio frequency for your region.
+Add a Heltec V3/V4 or T-Beam running [MeshCore USB companion firmware](https://meshcore.io/flasher) to monitor MeshCore traffic alongside Meshtastic. Plug it into any USB port on the Pi -- the setup wizard auto-detects the device and configures its radio frequency for your region. You can also flash from the dashboard under Configuration → Firmware.
 
 > **Full step-by-step guide:** See the [Onboarding Guide](docs/ONBOARDING.md) for detailed instructions covering SD flashing, Chameleon eMMC recovery, assembly, installation, MeshCore setup, and troubleshooting for all hardware options.
 
@@ -270,9 +272,9 @@ The local dashboard shows an orange update indicator when a new version is avail
 
 **First time crossing v0.7.3:** after restart, open `http://<pi-ip>:8080` and complete `/setup` to set an admin password (8 characters minimum). Forgot it later? `sudo meshpoint reset-password` from SSH.
 
-**Already on v0.7.3+ and update often?** `sudo git pull origin main` plus `sudo systemctl restart meshpoint` is usually enough unless the release notes call out new dependencies. When in doubt, run the full block above.
+**Already on v0.7.3+ and update often?** Prefer Settings → Updates → **Apply**, or the full SSH block above. A bare `git pull` + `systemctl restart` skips `pip install` and will miss new Python deps (for v0.7.9 that includes `esptool` for Configuration → Firmware). When release notes call out dependencies, run Apply or `install.sh`.
 
-**From the dashboard (v0.7.4+):** sign in as admin, open Settings → Updates, pick **Stable (main)**, then **Check for updates** and **Apply** (same end state as the SSH block).
+**From the dashboard (v0.7.4+):** sign in as admin, open Settings → Updates, pick **Stable (main)**, then **Check for updates** and **Apply** (runs `pip install -r requirements.txt` then restart; same end state as the SSH block).
 
 See [docs/COMMON-ERRORS.md](docs/COMMON-ERRORS.md#upgrades) if the service fails to start after pulling (missing `bcrypt`, stale `.so` files, spurious reboot prompt).
 
@@ -296,7 +298,7 @@ Start with the doc that matches what you are trying to do.
 - **[Onboarding Guide](docs/ONBOARDING.md):** step-by-step from empty Pi to running Meshpoint
 - **[Hardware Matrix](docs/HARDWARE-MATRIX.md):** RAK V2 vs SenseCap M1 vs Chameleon vs Bobcat vs DIY, WisMesh Node (experimental), MeshCore companion radios, antennas, what's not supported
 - **[Bobcat Miner 300](docs/BOBCAT-300.md):** Rockchip RK3566 + Armbian repurposing (manual SPI/GPIO)
-- **[WisMesh Node (experimental)](docs/plans/WISMESH-BRANCH.md):** RAK6421 HAT, meshtasticd, branch install until v0.7.6
+- **[WisMesh Node (experimental)](docs/plans/WISMESH-BRANCH.md):** RAK6421 HAT, meshtasticd, long-lived `feat/wismesh-hat` branch
 - **[Gateway ↔ Node migration](docs/MIGRATE-GATEWAY-TO-NODE.md):** switch between concentrator Gateway and WisMesh Node platforms
 - **[Configuration Guide](docs/CONFIGURATION.md):** all config options, private channels, relay, upstream, MQTT, radio tuning
 - **[Radio Config Explained](docs/RADIO-CONFIG-EXPLAINED.md):** the "why" behind region, spreading factor, bandwidth, custom slots, Part 15 awareness

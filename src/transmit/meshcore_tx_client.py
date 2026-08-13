@@ -12,6 +12,12 @@ import logging
 from dataclasses import dataclass
 from typing import Optional
 
+from src.transmit.meshcore_channel_sync import MeshcoreChannelSync
+from src.transmit.meshcore_contacts import (
+    MeshcoreContactCache,
+    MeshcoreContactParser,
+)
+
 logger = logging.getLogger(__name__)
 
 # Companion firmware caps the advert name at roughly 32 ASCII bytes; the
@@ -20,20 +26,22 @@ logger = logging.getLogger(__name__)
 # documented variant.
 MAX_COMPANION_NAME_BYTES = 32
 
-# Companion channel slots: 0 = Public (firmware default). User-configured keys
-# use slots 1..N so they match Messages UI channel indices and RX channel_idx.
-MESHCORE_PUBLIC_SLOT_INDEX = 0
-MESHCORE_MAX_DEVICE_SLOTS = 8
-MESHCORE_MAX_USER_CHANNELS = MESHCORE_MAX_DEVICE_SLOTS - 1
-
 
 @dataclass
 class SendResult:
-    """Outcome of a MeshCore send attempt."""
+    """Outcome of a MeshCore send attempt.
+
+    ``timed_out`` is distinct from a plain ``success=False``: a firmware
+    ERROR means the connection is healthy and rejected the request. A
+    timeout means no answer within the deadline (wedged command channel).
+    Callers / TxClient use this to trigger an immediate reconnect.
+    Credit: javastraat/meshpoint b04e91c
+    """
 
     success: bool
     event_type: str = ""
     error: str = ""
+    timed_out: bool = False
 
 
 @dataclass
@@ -63,6 +71,10 @@ class MeshCoreTxClient:
         self._owned_connected = False
         self._source = None
         self._post_command_callback = None
+        # Serialize companion commands: concurrent get_contacts + send
+        # on the shared meshcore handle races into send timeouts.
+        self._cmd_lock = asyncio.Lock()
+        self._contact_cache = MeshcoreContactCache()
 
     @property
     def _mc(self):
@@ -108,6 +120,124 @@ class MeshCoreTxClient:
             except Exception:
                 logger.debug("Post-command callback failed", exc_info=True)
 
+    def _fail_timeout(self, reason: str) -> SendResult:
+        """Mark timeout and kick MeshCore USB reconnect if bound.
+
+        Credit: javastraat/meshpoint b04e91c
+        """
+        # Cooldown, do not wipe: keep stale names and stop contact
+        # fetchers from immediately re-hammering a wedged companion.
+        self._contact_cache.note_soft_fail()
+        trigger = getattr(self._source, "_trigger_reconnect", None)
+        if callable(trigger):
+            trigger(reason)
+        return SendResult(success=False, error=reason, timed_out=True)
+
+    async def _run_tx_command(
+        self,
+        factory,
+        *,
+        success_log: str,
+        timeout_label: str,
+    ) -> SendResult:
+        """Run one companion command under the serial lock.
+
+        Pauses auto message fetching for the command window so the
+        library's background poll cannot steal OK/ERROR events
+        (same pattern as set_radio).
+        """
+        if not self.connected:
+            return SendResult(success=False, error="Not connected")
+        try:
+            async with self._cmd_lock:
+                if not self.connected or self._mc is None:
+                    return SendResult(success=False, error="Not connected")
+                await self._pause_auto_fetch()
+                try:
+                    result = await asyncio.wait_for(factory(), timeout=10.0)
+                finally:
+                    await self._resume_auto_fetch()
+        except asyncio.TimeoutError:
+            return self._fail_timeout(timeout_label)
+        except Exception as exc:
+            logger.exception("%s failed", timeout_label)
+            await self._run_post_command()
+            return SendResult(success=False, error=str(exc))
+
+        if result is None:
+            return self._fail_timeout(timeout_label)
+
+        try:
+            from meshcore import EventType
+        except Exception:
+            EventType = None  # type: ignore[misc, assignment]
+
+        if (
+            EventType is not None
+            and hasattr(result, "type")
+            and result.type == EventType.ERROR
+        ):
+            payload = getattr(result, "payload", None) or {}
+            reason = ""
+            if isinstance(payload, dict):
+                reason = str(
+                    payload.get("reason") or payload.get("error") or ""
+                )
+            soft = reason in ("no_event_received", "timeout", "")
+            if soft:
+                return self._fail_timeout(timeout_label)
+            await self._run_post_command()
+            return SendResult(
+                success=False,
+                event_type="ERROR",
+                error=reason or "companion error",
+            )
+
+        event_type = (
+            result.type.value
+            if hasattr(result.type, "value")
+            else str(result.type)
+        )
+        logger.info("%s: %s", success_log, event_type)
+        await self._run_post_command()
+        return SendResult(success=True, event_type=event_type)
+
+    async def _pause_auto_fetch(self) -> None:
+        mc = self._mc
+        if mc is None:
+            return
+        stop = getattr(mc, "stop_auto_message_fetching", None)
+        if not callable(stop):
+            return
+        try:
+            await stop()
+        except Exception:
+            logger.debug("Could not pause MeshCore auto-fetch", exc_info=True)
+
+    async def _resume_auto_fetch(self) -> None:
+        # Prefer the capture-source restart (rebinds subscriptions) when
+        # bound; otherwise poke the library directly.
+        restart = getattr(self._source, "restart_auto_fetching", None)
+        if callable(restart):
+            try:
+                await restart()
+                return
+            except Exception:
+                logger.debug(
+                    "Could not restart MeshCore auto-fetch via source",
+                    exc_info=True,
+                )
+        mc = self._mc
+        if mc is None:
+            return
+        start = getattr(mc, "start_auto_message_fetching", None)
+        if not callable(start):
+            return
+        try:
+            await start()
+        except Exception:
+            logger.debug("Could not resume MeshCore auto-fetch", exc_info=True)
+
     async def create_connection(
         self,
         port: str,
@@ -147,192 +277,117 @@ class MeshCoreTxClient:
         self, channel: int, text: str
     ) -> SendResult:
         """Send a broadcast message on a MeshCore channel."""
-        if not self.connected:
-            return SendResult(success=False, error="Not connected")
-        try:
-            result = await asyncio.wait_for(
-                self._mc.commands.send_chan_msg(channel, text),
-                timeout=10.0,
-            )
-            event_type = (
-                result.type.value
-                if hasattr(result.type, "value")
-                else str(result.type)
-            )
-            logger.info(
-                "MeshCore channel %d message sent: %s", channel, event_type
-            )
-            await self._run_post_command()
-            return SendResult(success=True, event_type=event_type)
-        except asyncio.TimeoutError:
-            await self._run_post_command()
-            return SendResult(success=False, error="Send timed out")
-        except Exception as exc:
-            logger.exception("MeshCore channel send failed")
-            await self._run_post_command()
-            return SendResult(success=False, error=str(exc))
+        return await self._run_tx_command(
+            lambda: self._mc.commands.send_chan_msg(channel, text),
+            success_log=f"MeshCore channel {channel} message sent",
+            timeout_label="Send timed out",
+        )
 
     async def send_direct_message(
         self, destination, text: str
     ) -> SendResult:
         """Send a direct message to a MeshCore contact."""
-        if not self.connected:
-            return SendResult(success=False, error="Not connected")
-        try:
-            result = await asyncio.wait_for(
-                self._mc.commands.send_msg(destination, text),
-                timeout=10.0,
-            )
-            event_type = (
-                result.type.value
-                if hasattr(result.type, "value")
-                else str(result.type)
-            )
-            logger.info("MeshCore DM sent: %s", event_type)
-            await self._run_post_command()
-            return SendResult(success=True, event_type=event_type)
-        except asyncio.TimeoutError:
-            await self._run_post_command()
-            return SendResult(success=False, error="Send timed out")
-        except Exception as exc:
-            logger.exception("MeshCore DM send failed")
-            await self._run_post_command()
-            return SendResult(success=False, error=str(exc))
+        return await self._run_tx_command(
+            lambda: self._mc.commands.send_msg(destination, text),
+            success_log="MeshCore DM sent",
+            timeout_label="Send timed out",
+        )
 
     async def send_advert(self, flood: bool = False) -> SendResult:
         """Broadcast a node advertisement."""
-        if not self.connected:
-            return SendResult(success=False, error="Not connected")
-        try:
-            result = await asyncio.wait_for(
-                self._mc.commands.send_advert(flood=flood),
-                timeout=10.0,
-            )
-            event_type = (
-                result.type.value
-                if hasattr(result.type, "value")
-                else str(result.type)
-            )
-            logger.info("MeshCore advert sent: %s", event_type)
-            await self._run_post_command()
-            return SendResult(success=True, event_type=event_type)
-        except asyncio.TimeoutError:
-            await self._run_post_command()
-            return SendResult(success=False, error="Advert timed out")
-        except Exception as exc:
-            logger.exception("MeshCore advert send failed")
-            await self._run_post_command()
-            return SendResult(success=False, error=str(exc))
+        return await self._run_tx_command(
+            lambda: self._mc.commands.send_advert(flood=flood),
+            success_log="MeshCore advert sent",
+            timeout_label="Advert timed out",
+        )
 
     async def set_companion_name(self, name: str) -> SendResult:
         """Rename the USB companion via CMD_SET_ADVERT_NAME (0x08).
 
         On OK we mutate the cached ``self_info["name"]`` so the
-        Configuration card, top-bar chip, and packet attribution all
-        reflect the rename without waiting for the next reconnect.
-        ``set_name`` itself only returns OK/ERROR; it does not emit a
-        fresh SELF_INFO, and meshcore 2.3.x exposes no public method to
-        re-poll the device (``self_info`` is seeded once during the
-        ``connect`` handshake's appstart and never auto-refreshed).
-        Updating the dict locally is safe because the firmware just
-        acknowledged the new name via ``command_ok``; the next
-        reconnect will reseed ``self_info`` from the device anyway.
-
-        Validation lives here so route handlers, future CLI callers,
-        and the ``meshcore.companion_name`` yaml-on-connect path all
-        use the same ceiling.
+        dashboard reflects the rename without waiting for reconnect.
         """
+        from src.transmit.meshcore_companion_rename import (
+            MeshcoreCompanionRename,
+        )
+
+        return await MeshcoreCompanionRename().run(
+            mc=self._mc,
+            name=name,
+            cmd_lock=self._cmd_lock,
+            connected=self.connected,
+            fail_timeout=self._fail_timeout,
+            post_command=self._run_post_command,
+        )
+
+    async def set_radio_params(
+        self,
+        freq: float,
+        bw: float,
+        sf: int,
+        cr: int,
+    ) -> SendResult:
+        """Set companion radio params, then recover the capture source.
+
+        Prefer exclusive-port apply when bound to MeshCoreUsbCaptureSource
+        (cold path matches CLI and works for cross-band changes). Fall
+        back to live shared-handle apply only for standalone TX clients.
+        Credit: javastraat/meshpoint 471d572
+        """
+        if self._source is not None:
+            from src.transmit.meshcore_exclusive_radio import (
+                MeshcoreExclusiveRadioApply,
+            )
+
+            freq = round(float(freq), 3)
+            bw = round(float(bw), 1)
+            return await MeshcoreExclusiveRadioApply().apply_via_source(
+                self._source, freq, bw, int(sf), int(cr),
+            )
+
         if not self.connected:
             return SendResult(success=False, error="Not connected")
 
-        cleaned = (name or "").strip()
-        if not cleaned:
-            return SendResult(success=False, error="Name must not be empty")
-        encoded_len = len(cleaned.encode("utf-8"))
-        if encoded_len > MAX_COMPANION_NAME_BYTES:
-            return SendResult(
-                success=False,
-                error=(
-                    f"Name is {encoded_len} bytes (UTF-8); "
-                    f"companion accepts at most {MAX_COMPANION_NAME_BYTES}."
-                ),
-            )
-
-        try:
-            from meshcore import EventType
-        except Exception:
-            return SendResult(success=False, error="meshcore library unavailable")
-
-        try:
-            result = await asyncio.wait_for(
-                self._mc.commands.set_name(cleaned),
-                timeout=10.0,
-            )
-        except asyncio.TimeoutError:
-            await self._run_post_command()
-            return SendResult(success=False, error="set_name timed out")
-        except Exception as exc:
-            logger.exception("MeshCore set_name failed")
-            await self._run_post_command()
-            return SendResult(success=False, error=str(exc))
-
-        if result.type == EventType.ERROR:
-            payload = getattr(result, "payload", None)
-            detail = ""
-            if isinstance(payload, dict):
-                detail = str(payload.get("reason") or payload.get("error") or payload)
-            elif payload is not None:
-                detail = str(payload)
-            error = f"Companion rejected name: {detail}" if detail else "Companion rejected name"
-            await self._run_post_command()
-            return SendResult(success=False, error=error)
-
-        # OK path: refresh self_info so callers see the new name immediately.
-        # The meshcore library does not expose a method to re-poll the
-        # device's identity (self_info is seeded once during connect's
-        # appstart handshake and never automatically refreshed). Since
-        # the firmware just acknowledged the rename via command_ok, we
-        # know the new name is what the device holds: mutate the cached
-        # dict directly so /api/config -> get_radio_info() returns the
-        # new value on the next dashboard refresh. The next reconnect
-        # will reseed self_info from the device anyway.
-        try:
-            cache = getattr(self._mc, "self_info", None)
-            if isinstance(cache, dict):
-                cache["name"] = cleaned
-        except Exception:
-            logger.debug(
-                "set_companion_name: could not update self_info cache; "
-                "dashboard will lag by one reconnect cycle",
-                exc_info=True,
-            )
-
-        event_type = (
-            result.type.value
-            if hasattr(result.type, "value")
-            else str(result.type)
+        from src.transmit.meshcore_radio_apply import (
+            MeshcoreRadioApply,
+            MeshcoreRadioSetCoordinator,
         )
-        logger.info("MeshCore companion renamed to %r (%s)", cleaned, event_type)
-        await self._run_post_command()
-        return SendResult(success=True, event_type=event_type)
+
+        freq = round(float(freq), 3)
+        bw = round(float(bw), 1)
+        sf = int(sf)
+        cr = int(cr)
+        applier = MeshcoreRadioApply()
+
+        def _trigger(reason: str) -> None:
+            trigger = getattr(self._source, "_trigger_reconnect", None)
+            if callable(trigger):
+                trigger(reason)
+
+        return await MeshcoreRadioSetCoordinator().run(
+            apply=lambda f, b, s, c: applier.apply(self._mc, f, b, s, c),
+            trigger_reconnect=_trigger,
+            wait_connected=self._wait_until_connected,
+            get_radio_info=self.get_radio_info,
+            freq=freq,
+            bw=bw,
+            sf=sf,
+            cr=cr,
+        )
+
+    async def _wait_until_connected(self, timeout_seconds: float) -> bool:
+        """Poll live source connect state after a reconnect kick."""
+        deadline = asyncio.get_event_loop().time() + timeout_seconds
+        while asyncio.get_event_loop().time() < deadline:
+            if self.connected:
+                return True
+            await asyncio.sleep(0.5)
+        return self.connected
 
     @staticmethod
     def _normalize_contact_payload(payload) -> list[dict]:
-        """Accept both dict-keyed-by-pubkey and list formats.
-
-        Defensively filters values to dicts only. Some firmware
-        revisions of the MeshCore companion return a payload like
-        ``{"contact_count": 5, ...}`` where some values are ints
-        and some are nested dicts; we only want the nested-dict
-        contact entries. Non-dict values (ints, strings, lists)
-        are silently dropped so a payload-shape change in the
-        companion firmware can never crash get_contacts.
-        """
-        if isinstance(payload, dict):
-            return [v for v in payload.values() if isinstance(v, dict)]
-        if isinstance(payload, list):
-            return [e for e in payload if isinstance(e, dict)]
-        return []
+        """Delegate to MeshcoreContactParser (kept for existing tests)."""
+        return MeshcoreContactParser.normalize_payload(payload)
 
     async def get_radio_info(self) -> Optional[RadioStatus]:
         """Read companion radio parameters from the cached SELF_INFO frame.
@@ -360,142 +415,131 @@ class MeshCoreTxClient:
             logger.exception("Failed to read MeshCore radio info")
             return None
 
-    async def sync_channels(self, channel_keys: dict) -> None:
-        """Sync configured channels to the companion device.
+    async def get_device_info(self) -> Optional[dict]:
+        """Return companion DEVICE_INFO (firmware version / model / build).
 
-        Slot 0 is reserved for Public. Each entry in channel_keys is written
-        to slots 1, 2, … so device channel_idx matches the Messages tab. Extra
-        user slots are cleared. channel_keys maps channel name → hex-encoded
-        16-byte secret (use 32 zero digits for hashtag / no-PSK channels).
+        Prefers the capture-source cache (filled on connect before
+        auto-fetch starts, refreshed by health checks). Falls back to a
+        live ``send_device_query`` under the command lock with auto-fetch
+        paused when the cache is empty.
         """
+        cached = self._cached_device_info()
+        if cached and (cached.get("version") or cached.get("model")):
+            return cached
+
+        from src.transmit.meshcore_device_info import MeshcoreDeviceInfoQuery
+
+        if not self.connected:
+            return cached
+        try:
+            async with self._cmd_lock:
+                if not self.connected or self._mc is None:
+                    return cached
+                await self._pause_auto_fetch()
+                try:
+                    live = await MeshcoreDeviceInfoQuery().run(
+                        mc=self._mc,
+                        cmd_lock=None,
+                        connected=True,
+                    )
+                finally:
+                    await self._resume_auto_fetch()
+            if live:
+                self._store_device_info_cache(live)
+                return live
+        except Exception:
+            logger.exception("MeshCore get_device_info failed")
+        finally:
+            await self._run_post_command()
+        return cached
+
+    def _cached_device_info(self) -> Optional[dict]:
+        source = self._source
+        if source is None:
+            return None
+        info = getattr(source, "last_device_info", None)
+        return info if isinstance(info, dict) else None
+
+    def _store_device_info_cache(self, info: dict) -> None:
+        source = self._source
+        if source is None:
+            return
+        try:
+            source._last_device_info = info
+        except Exception:
+            logger.debug("Could not store MeshCore DEVICE_INFO cache", exc_info=True)
+
+    async def sync_channels(self, channel_keys: dict) -> None:
+        """Sync configured channels to the companion device."""
         if not self.connected:
             logger.debug("sync_channels: not connected, skipping")
             return
-        try:
-            from meshcore import EventType
-        except ImportError:
-            logger.warning("sync_channels: meshcore library unavailable")
-            return
-
-        _MAX_SLOTS = MESHCORE_MAX_DEVICE_SLOTS
-
-        # Read current device slots.
-        device_slots: dict[int, tuple[str, bytes]] = {}
-        for i in range(_MAX_SLOTS):
+        async with self._cmd_lock:
+            if not self.connected or self._mc is None:
+                return
+            await self._pause_auto_fetch()
             try:
-                result = await asyncio.wait_for(
-                    self._mc.commands.get_channel(i), timeout=5.0
-                )
-            except asyncio.TimeoutError:
-                logger.warning("sync_channels: timeout reading slot %d, stopping probe", i)
-                break
-            except Exception:
-                logger.exception("sync_channels: error reading slot %d", i)
-                break
-            if result.type == EventType.ERROR:
-                break
-            p = result.payload
-            device_slots[i] = (
-                p.get("channel_name", ""),
-                p.get("channel_secret", b""),
-            )
+                await MeshcoreChannelSync(
+                    self._mc,
+                    post_command=None,
+                ).sync(channel_keys)
+            finally:
+                await self._resume_auto_fetch()
+            await self._run_post_command()
 
-        desired = list(channel_keys.items())  # [(name, key_hex), …]
-        if len(desired) > MESHCORE_MAX_USER_CHANNELS:
-            logger.warning(
-                "sync_channels: more than %d user channels configured, ignoring extras",
-                MESHCORE_MAX_USER_CHANNELS,
-            )
-            desired = desired[:MESHCORE_MAX_USER_CHANNELS]
-
-        # Write desired channels to slots 1..N (slot 0 = Public, untouched).
-        for user_idx, (name, key_hex) in enumerate(desired):
-            slot = user_idx + 1
-            try:
-                secret = bytes.fromhex(key_hex)
-            except ValueError:
-                logger.warning("sync_channels: invalid hex key for '%s', skipping", name)
-                continue
-            if len(secret) != 16:
-                logger.warning(
-                    "sync_channels: key for '%s' must be 16 bytes, skipping", name
-                )
-                continue
-            dev_name, dev_secret = device_slots.get(slot, ("", b""))
-            if dev_name == name and dev_secret == secret:
-                logger.debug("sync_channels: slot %d already correct (%s)", slot, name)
-                continue
-            try:
-                await asyncio.wait_for(
-                    self._mc.commands.set_channel(slot, name, secret), timeout=5.0
-                )
-                logger.info("sync_channels: set slot %d → %s", slot, name)
-            except Exception:
-                logger.exception("sync_channels: failed to set slot %d (%s)", slot, name)
-
-        # Clear extra user slots (never clear Public slot 0).
-        first_clear = 1 + len(desired)
-        for idx in range(first_clear, _MAX_SLOTS):
-            dev = device_slots.get(idx)
-            if dev is None:
-                break
-            dev_name, _ = dev
-            if not dev_name:
-                continue
-            try:
-                await asyncio.wait_for(
-                    self._mc.commands.set_channel(idx, "", b"\x00" * 16), timeout=5.0
-                )
-                logger.info("sync_channels: cleared slot %d", idx)
-            except Exception:
-                logger.exception("sync_channels: failed to clear slot %d", idx)
-
-        await self._run_post_command()
-        logger.info("sync_channels: done (%d configured)", len(desired))
-
-    async def get_contacts(self) -> list[dict]:
+    async def get_contacts(self, *, force: bool = False) -> list[dict]:
         """Retrieve the companion's contact list.
 
-        Each entry inside the response can shape-shift between
-        firmware versions, so the per-entry parse is wrapped in
-        a defensive isinstance check + try/except so one weird
-        contact never poisons the whole list.
+        Uses a short TTL cache so Messages UI / contact picker can call
+        this without saturating the serial command channel. Live fetches
+        take the same lock as sends so they cannot race a channel TX.
         """
+        if not force:
+            cached = self._contact_cache.get_fresh()
+            if cached is not None:
+                return cached
+
         if not self.connected:
-            return []
+            return self._contact_cache.get_stale()
+
         try:
-            result = await asyncio.wait_for(
-                self._mc.commands.get_contacts(),
-                timeout=10.0,
-            )
-            entries = self._normalize_contact_payload(result.payload)
+            async with self._cmd_lock:
+                if not force:
+                    cached = self._contact_cache.get_fresh()
+                    if cached is not None:
+                        return cached
+                if not self.connected or self._mc is None:
+                    return self._contact_cache.get_stale()
+                result = await asyncio.wait_for(
+                    self._mc.commands.get_contacts(),
+                    timeout=10.0,
+                )
+        except asyncio.TimeoutError:
+            logger.warning("get_contacts timed out waiting for companion")
+            self._contact_cache.note_soft_fail()
+            return self._contact_cache.get_stale()
         except Exception:
             logger.exception("Failed to retrieve MeshCore contacts")
-            return []
+            self._contact_cache.note_soft_fail()
+            return self._contact_cache.get_stale()
 
-        contacts: list[dict] = []
-        for i, entry in enumerate(entries):
-            if not isinstance(entry, dict):
-                continue
-            try:
-                name = (
-                    entry.get("adv_name")
-                    or entry.get("name")
-                    or ""
+        contacts = MeshcoreContactParser.from_command_result(result)
+        soft_fail = result is None or MeshcoreContactParser._is_error_event(
+            result
+        )
+        if soft_fail:
+            # Stamp TTL even on failure so queued callers do not each
+            # burn another live 5s get_contacts on a wedged companion.
+            self._contact_cache.note_soft_fail()
+            stale = self._contact_cache.get_stale()
+            if stale:
+                logger.info(
+                    "get_contacts: soft fail, using stale cache (%d)",
+                    len(stale),
                 )
-                pk = entry.get("public_key", "")
-                if name and pk:
-                    contacts.append({
-                        "index": i,
-                        "name": name,
-                        "public_key": pk,
-                        "last_seen": entry.get("lastmod", 0),
-                    })
-            except Exception:
-                logger.debug(
-                    "get_contacts: skipping malformed entry at index %d",
-                    i, exc_info=True,
-                )
-                continue
+                return stale
+            logger.info("get_contacts: soft fail, empty roster (cooling down)")
+            return []
+        self._contact_cache.store(contacts)
         logger.info("get_contacts: %d contacts parsed", len(contacts))
         return contacts

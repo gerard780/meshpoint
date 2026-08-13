@@ -277,14 +277,16 @@ class MessagingPanel {
         if (!mt.enabled && !mc.connected) {
             banner.style.display = 'block';
             banner.className = 'msg-tx-banner msg-tx-banner--warn';
-            banner.innerHTML = 'TX not configured. <a href="#" onclick="document.querySelector(\'[data-tab=radio]\').click();return false">Open Radio tab</a> to enable.';
+            // Credit: javastraat/meshpoint a9b89eb
+            banner.innerHTML = 'TX not configured. <a href="#/configuration/transmit">Open Transmit settings</a> to enable.';
             return;
         }
 
         if (mt.enabled && !mt.node_id) {
             banner.style.display = 'block';
             banner.className = 'msg-tx-banner msg-tx-banner--warn';
-            banner.innerHTML = 'Node ID not set. <a href="#" onclick="document.querySelector(\'[data-tab=radio]\').click();return false">Set in Radio tab</a>.';
+            // Credit: javastraat/meshpoint a9b89eb
+            banner.innerHTML = 'Node ID not set. <a href="#/configuration/transmit">Set in Transmit settings</a>.';
             return;
         }
 

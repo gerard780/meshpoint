@@ -5,10 +5,8 @@ from __future__ import annotations
 import unittest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from src.transmit.meshcore_tx_client import (
-    MESHCORE_MAX_USER_CHANNELS,
-    MeshCoreTxClient,
-)
+from src.transmit.meshcore_channel_sync import MESHCORE_MAX_USER_CHANNELS
+from src.transmit.meshcore_tx_client import MeshCoreTxClient
 
 
 class TestNormalizeContactPayload(unittest.TestCase):
@@ -343,9 +341,16 @@ class TestSetCompanionName(unittest.IsolatedAsyncioTestCase):
 
         self.assertFalse(result.success)
         self.assertIn("timed out", result.error)
+        self.assertTrue(result.timed_out)
         # On timeout we don't know whether the firmware accepted the
         # name; do not update the cache.
         self.assertEqual(self.mc.self_info["name"], "old-name")
+
+    async def test_error_result_does_not_set_timed_out(self):
+        self.set_name_mock.return_value = self._error_result({"reason": "busy"})
+        result = await self._run("Mesh Lab East")
+        self.assertFalse(result.success)
+        self.assertFalse(result.timed_out)
 
     async def test_ok_path_tolerates_missing_self_info_dict(self):
         # If meshcore ever changes self_info to None or a non-dict,

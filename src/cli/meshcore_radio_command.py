@@ -28,7 +28,14 @@ _LOCAL_CONFIG_PATH = Path("config/local.yaml")
 
 PRESET_CHOICES = list(REGION_PRESETS.keys()) + ["custom"]
 
-_REGION_MAP = {"EU_868": "EU"}
+# Short aliases for the three presets REGION_PRESETS used to expose as
+# US/EU/ANZ. Credit: javastraat/meshpoint f912d6c
+_REGION_MAP = {
+    "US": "USA_CANADA",
+    "EU": "EU_UK_NARROW",
+    "EU_868": "EU_UK_NARROW",
+    "ANZ": "AUSTRALIA_NARROW",
+}
 
 
 def run_meshcore_radio(args: argparse.Namespace) -> None:

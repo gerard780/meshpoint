@@ -295,7 +295,12 @@ class PacketDetailModal {
                 return [p.long_name, p.short_name, p.hw_model].filter(Boolean).join(' · ');
             case 'telemetry': {
                 const parts = [];
-                if (p.battery_level != null) parts.push(`battery ${p.battery_level}%`);
+                if (p.battery_level != null) {
+                    // Credit: javastraat/meshpoint 29368c0
+                    parts.push(p.battery_level === 101
+                        ? '\u{1F50C} battery powered'
+                        : `battery ${p.battery_level}%`);
+                }
                 if (p.voltage != null) parts.push(`${Number(p.voltage).toFixed(2)} V`);
                 if (p.temperature != null) {
                     const t = window.MeshpointDisplayUnits

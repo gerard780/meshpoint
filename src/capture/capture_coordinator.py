@@ -30,9 +30,24 @@ class CaptureCoordinator:
         logger.info("Added capture source: %s", source.name)
 
     async def start(self) -> None:
+        """Start every registered source; one failure must not abort the rest.
+
+        Missing optional deps (``ImportError``) still abort so install gaps
+        surface clearly. Port-busy / handshake soft-fails from a source that
+        does not raise are already non-fatal; this catch covers hard raises
+        from a single source so concentrator / MeshCore can keep running.
+        """
         self._running = True
         for source in self._sources:
-            await source.start()
+            try:
+                await source.start()
+            except ImportError:
+                raise
+            except Exception:
+                logger.exception(
+                    "Capture source %s failed to start; continuing with others",
+                    source.name,
+                )
             task = asyncio.create_task(
                 self._run_source(source),
                 name=f"capture-{source.name}",

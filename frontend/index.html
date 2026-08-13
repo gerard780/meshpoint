@@ -171,6 +171,7 @@
                             <li class="sidebar__subitem"><a href="#/configuration/channels" class="sidebar__link" data-route="configuration/channels"><span class="sidebar__label">Channels</span></a></li>
                             <li class="sidebar__subitem"><a href="#/configuration/meshcore" class="sidebar__link" data-route="configuration/meshcore"><span class="sidebar__label">MeshCore</span></a></li>
                             <li class="sidebar__subitem"><a href="#/configuration/serial" class="sidebar__link" data-route="configuration/serial"><span class="sidebar__label">Serial</span></a></li>
+                            <li class="sidebar__subitem"><a href="#/configuration/firmware" class="sidebar__link" data-route="configuration/firmware"><span class="sidebar__label">Firmware</span></a></li>
                             <li class="sidebar__subitem"><a href="#/configuration/transmit" class="sidebar__link" data-route="configuration/transmit"><span class="sidebar__label">Transmit</span></a></li>
                             <li class="sidebar__subitem"><a href="#/configuration/mqtt" class="sidebar__link" data-route="configuration/mqtt"><span class="sidebar__label">MQTT</span></a></li>
                             <li class="sidebar__subitem"><a href="#/configuration/gps" class="sidebar__link" data-route="configuration/gps"><span class="sidebar__label">GPS</span></a></li>
@@ -491,6 +492,7 @@
             <section class="section" data-section="configuration/channels" style="display:none"><div id="cfg-channels-panel" class="section__placeholder"><h2>Configuration · Channels</h2><p>Skeleton; PSK list + add/remove.</p></div></section>
             <section class="section" data-section="configuration/meshcore" style="display:none"><div id="cfg-meshcore-panel" class="section__placeholder"><h2>Configuration · MeshCore</h2><p>Skeleton; companion channel keys + Send Advert.</p></div></section>
             <section class="section" data-section="configuration/serial" style="display:none"><div id="cfg-serial-panel" class="section__placeholder"><h2>Configuration · Serial</h2><p>Loading…</p></div></section>
+            <section class="section" data-section="configuration/firmware" style="display:none"><div id="cfg-firmware-panel" class="section__placeholder"><h2>Configuration · Firmware</h2><p>Loading…</p></div></section>
             <section class="section" data-section="configuration/transmit" style="display:none"><div id="cfg-transmit-panel" class="section__placeholder"><h2>Configuration · Transmit</h2><p>Skeleton; TX power + duty cycle + relay.</p></div></section>
             <section class="section" data-section="configuration/mqtt" style="display:none"><div id="cfg-mqtt-panel" class="section__placeholder"><h2>Configuration · MQTT</h2><p>Loading…</p></div></section>
             <section class="section" data-section="configuration/gps" style="display:none"><div id="cfg-gps-panel" class="section__placeholder"><h2>Configuration · GPS</h2><p>Loading…</p></div></section>
@@ -721,6 +723,28 @@
         <div id="node-drawer" class="nd-drawer"></div>
     </div>
 
+    <script>
+        // Credit: javastraat/meshpoint 0fe35f9
+        // Dashboard is the only [data-section] visible by default. Other
+        // routes stay display:none until sidebar_controller runs after all
+        // scripts load. Resolve the URL hash here so a reload on e.g.
+        // #/settings/updates does not flash Dashboard first.
+        (function () {
+            try {
+                var route = (location.hash || '').replace(/^#\/?/, '').trim() || 'dashboard';
+                var sections = document.querySelectorAll('[data-section]');
+                var matched = false;
+                sections.forEach(function (el) {
+                    if (el.dataset.section === route) matched = true;
+                });
+                if (!matched) return;
+                sections.forEach(function (el) {
+                    el.style.display = el.dataset.section === route ? '' : 'none';
+                });
+            } catch (e) {}
+        })();
+    </script>
+
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
     <script src="js/websocket_client.js"></script>
@@ -728,8 +752,10 @@
     <script src="js/meshpoint_display_units.js"></script>
     <script src="js/meshpoint_node_favorites.js"></script>
     <script src="js/node_cards_sort.js"></script>
+    <script src="js/meshtastic_hw_names.js"></script>
     <script src="js/node_cards.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+    <script src="js/stats_chart_host.js"></script>
     <script src="js/node_metrics_chart.js"></script>
     <script src="js/node_drawer.js"></script>
     <script src="js/packet_detail_modal.js"></script>
@@ -771,8 +797,12 @@
     <script src="vendor/qrcode/qrcode.min.js"></script>
     <script src="js/configuration/quick_deploy_card.js"></script>
     <script src="js/configuration/channels_card.js"></script>
+    <script src="js/configuration/meshcore_radio_settings.js"></script>
     <script src="js/configuration/meshcore_card.js"></script>
+    <script src="js/configuration/serial_radio_controls.js"></script>
     <script src="js/configuration/serial_card.js"></script>
+    <script src="js/configuration/meshcore_firmware_card.js"></script>
+    <script src="js/configuration/meshtastic_firmware_card.js"></script>
     <script src="js/configuration/transmit_card.js"></script>
     <script src="js/configuration/mqtt_card.js"></script>
     <script src="js/configuration/gps_skyplot.js"></script>

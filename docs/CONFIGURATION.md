@@ -157,6 +157,16 @@ See the [Onboarding Guide](ONBOARDING.md#changing-meshcore-radio-frequency) for 
 
 ---
 
+## Firmware flash (Configuration → Firmware)
+
+Flash official **Meshtastic** or **MeshCore** companion firmware to a USB-serial
+board from the dashboard (GitHub release → board → port → esptool stream).
+Admin session required. Needs `esptool` in the Meshpoint venv via
+`requirements.txt` / `scripts/install.sh` (do not use the Debian system
+package). **Erase everything** defaults off so
+same-stack upgrades keep identity/settings; enable it for blank boards or
+stack swaps. See `docs/COMMON-ERRORS.md` if flash fails with esptool missing.
+
 ## Capture Sources
 
 ```yaml

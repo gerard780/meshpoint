@@ -290,7 +290,10 @@ async def list_serial_ports(
     _claims: SessionClaims = Depends(require_admin),
 ):
     """Connected USB-serial devices for the Configuration port picker."""
-    from src.hal.usb_classifier import list_serial_ports_with_stable_paths
+    from src.hal.usb_classifier import (
+        list_serial_ports_with_stable_paths,
+        serial_port_held_hint,
+    )
 
     ports = list_serial_ports_with_stable_paths()
     return {
@@ -303,6 +306,8 @@ async def list_serial_ports(
                 "description": p.description,
                 "vid": f"{p.vid:04x}" if p.vid is not None else None,
                 "pid": f"{p.pid:04x}" if p.pid is not None else None,
+                "port_class": p.port_class.value,
+                "held_hint": serial_port_held_hint(p.port_class),
             }
             for p in ports
         ]

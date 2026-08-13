@@ -41,6 +41,10 @@ class SerialRadioHandshake:
             "frequency_offset": 0.0,
             "override_frequency": 0.0,
             "channel_table": {},
+            "bluetooth_enabled": None,
+            "bluetooth_mode": None,
+            "node_info_broadcast_secs": None,
+            "telemetry_device_update_interval": None,
         }
         try:
             from meshtastic.protobuf import config_pb2
@@ -93,7 +97,48 @@ class SerialRadioHandshake:
                 "Could not read primary channel name from serial interface",
                 exc_info=True,
             )
+        SerialRadioHandshake._read_bluetooth(interface, info)
+        SerialRadioHandshake._read_broadcast_intervals(interface, info)
         return info
+
+    @staticmethod
+    def _read_bluetooth(interface, info: dict) -> None:
+        try:
+            from meshtastic.protobuf import config_pb2
+
+            bluetooth = interface.localNode.localConfig.bluetooth
+            info["bluetooth_enabled"] = bool(bluetooth.enabled)
+            info["bluetooth_mode"] = (
+                config_pb2.Config.BluetoothConfig.PairingMode.Name(
+                    bluetooth.mode
+                )
+            )
+        except Exception:
+            logger.debug(
+                "Could not read Bluetooth config from serial interface",
+                exc_info=True,
+            )
+
+    @staticmethod
+    def _read_broadcast_intervals(interface, info: dict) -> None:
+        try:
+            info["node_info_broadcast_secs"] = int(
+                interface.localNode.localConfig.device.node_info_broadcast_secs
+            )
+        except Exception:
+            logger.debug(
+                "Could not read node_info_broadcast_secs from serial",
+                exc_info=True,
+            )
+        try:
+            info["telemetry_device_update_interval"] = int(
+                interface.localNode.moduleConfig.telemetry.device_update_interval
+            )
+        except Exception:
+            logger.debug(
+                "Could not read telemetry device_update_interval from serial",
+                exc_info=True,
+            )
 
     @staticmethod
     def read_primary_channel_name(interface) -> Optional[str]:

@@ -255,6 +255,33 @@ banner, so this only bites users running install.sh on v0.7.0 once.
 
 ## Install and pip
 
+### Configuration → Firmware: `esptool` not found / flash fails immediately
+
+**Cause:** The dashboard flash path shells out to `esptool` from the Meshpoint
+venv. RC pulls that only ran `git pull` / Apply without refreshing
+`requirements.txt` (or skipped `install.sh`) may not have it. Do **not**
+install the Debian/trixie system `esptool` package: it can miss ESP32-S3.
+
+**Fix:** Pull current `feat/v0.7.9` / `main`, then install into the venv and
+restart:
+
+```bash
+sudo /opt/meshpoint/venv/bin/pip install -r /opt/meshpoint/requirements.txt
+sudo systemctl restart meshpoint
+```
+
+Or re-run `sudo /opt/meshpoint/scripts/install.sh` (always ensures
+`esptool>=4.7.0,<5` in the venv).
+
+Then open **Configuration → Firmware**, pick board/port from the dropdowns,
+and flash again. Leave **Erase everything** unchecked for in-place upgrades
+of the same stack.
+
+If the UI said "reconnected" but **Installed** still shows the old companion
+version, the flash failed (often missing esptool or the old `write-flash`
+verb on esptool 4.7). Current firmware uses `write_flash` and only reports
+reconnect after a successful esptool exit.
+
 ### `error: externally-managed-environment`
 
 **Cause:** Raspberry Pi OS Bookworm and later use PEP 668 externally-managed
@@ -828,6 +855,40 @@ the other browser will get bumped.
 
 ---
 
+## Meshtastic USB serial
+
+### Serial port open failed but the dashboard and concentrator still work
+
+**Cause:** The Meshtastic USB capture source could not open its configured
+port (busy, wrong path, held by `gpsd`, or no radio on that path). Before
+v0.7.9 this raised during startup and aborted the whole FastAPI lifespan,
+so the concentrator and MeshCore sources died with it.
+
+**Fix:** On current firmware the serial source soft-fails: it logs a WARN,
+leaves serial idle, and retries in the background. Concentrator RX/TX and
+other sources keep running. Check:
+
+```bash
+sudo journalctl -u meshpoint --since "5 min ago" | grep -iE 'serial|Failed to open'
+```
+
+Confirm Configuration → Serial points at a Meshtastic USB device (prefer a
+`/dev/serial/by-path/…` entry), not a GPS receiver. If `gpsd` holds the
+port, stop gpsd for that device or pick a different USB port for the radio.
+
+### GPS receiver picked as Meshtastic serial port
+
+**Cause:** A u-blox (or similar) USB GPS appears in the same `/dev/ttyACM*`
+list as Heltec / T-Beam radios. Saving it under Configuration → Serial makes
+Meshtastic capture try to open a GPS port that `gpsd` often already holds.
+
+**Fix:** On the Serial card, ports classified as GPS show a **[GPS]** tag and
+an amber warning. Prefer `/dev/serial/by-path/…` for the Meshtastic radio.
+Leave GPS for Configuration → GPS / `gpsd`. After correcting the pin, save
+and restart.
+
+---
+
 ## MeshCore companion
 
 ### Dashboard says not connected but MeshCore packets appear in logs
@@ -863,7 +924,7 @@ was hot-plugged after the service started.
 
 1. Confirm the device is detected: `ls /dev/ttyUSB* /dev/ttyACM* 2>/dev/null`
 2. Confirm USB companion firmware (not BLE): re-flash from
-   [flasher.meshcore.co.uk](https://flasher.meshcore.co.uk/) and pick the
+   [meshcore.io/flasher](https://meshcore.io/flasher) and pick the
    `companion_radio_usb` variant.
 3. Confirm region: `meshpoint meshcore-radio` to see the current setting,
    or run `sudo meshpoint setup` to reconfigure end-to-end.
@@ -1039,7 +1100,7 @@ the service can't write to (look for the WARN: `Renamed companion to
 ### Heltec V4 v4.2/v4.3 fails to handshake even after a fresh flash
 
 **Cause:** The stock web flasher at
-[meshcore.io/flasher](https://flasher.meshcore.co.uk/) sometimes ships a
+[meshcore.io/flasher](https://meshcore.io/flasher) sometimes ships a
 non-merged image for the v4.2 and v4.3 hardware revisions of the Heltec
 WiFi LoRa 32 V4. The board enumerates over USB and accepts CLI commands
 once, but the next handshake attempt times out. From Meshpoint's side this

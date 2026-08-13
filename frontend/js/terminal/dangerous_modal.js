@@ -95,3 +95,21 @@ class DangerousModal {
 }
 
 window.DangerousModal = DangerousModal;
+
+/**
+ * App-wide confirm helper wrapping DangerousModal. Returns Promise<boolean>.
+ * Credit: javastraat/meshpoint (firmware flash confirm path).
+ */
+window.confirmModal = (opts) => {
+    try {
+        if (!window.confirmModal._instance) {
+            window.confirmModal._instance = new DangerousModal();
+        }
+        return window.confirmModal._instance.confirm(opts || {});
+    } catch (_e) {
+        const { label, description } = opts || {};
+        return Promise.resolve(
+            window.confirm([label, description].filter(Boolean).join('\n\n')),
+        );
+    }
+};

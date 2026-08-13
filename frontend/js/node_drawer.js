@@ -147,7 +147,7 @@ class NodeDrawer {
 
     _buildInfoSection(n) {
         const rows = [];
-        if (n.hardware_model) rows.push(['Hardware', n.hardware_model]);
+        if (n.hardware_model) rows.push(['Hardware', this._hardwareName(n.hardware_model)]);
         if (n.role != null) rows.push(['Role', this._roleName(n.role)]);
         rows.push(['Protocol', (n.protocol || 'meshtastic').toUpperCase()]);
         const band = this._bandLabel(n.latest_capture_source);
@@ -295,7 +295,12 @@ class NodeDrawer {
         const air = n.latest_air_util;
 
         if (v != null) rows.push(['Voltage', `${v.toFixed(2)} V`]);
-        if (b != null && b > 0) rows.push(['Battery', `${b}%`]);
+        // Credit: javastraat/meshpoint 29368c0
+        if (b === 101) {
+            rows.push(['Battery', '\u{1F50C} Powered']);
+        } else if (b != null && b > 0) {
+            rows.push(['Battery', `${b}%`]);
+        }
         if (ch != null) rows.push(['Channel Util', `${ch.toFixed(1)}%`]);
         if (air != null) rows.push(['Air Util TX', `${air.toFixed(1)}%`]);
 
@@ -428,6 +433,15 @@ class NodeDrawer {
         };
         if (typeof role === 'number') return names[role] || `ROLE_${role}`;
         return String(role).toUpperCase();
+    }
+
+    // Credit: javastraat/meshpoint 39910a0
+    _hardwareName(model) {
+        const num = Number(model);
+        if (!isNaN(num) && typeof HW_NAMES !== 'undefined') {
+            return HW_NAMES[num] || String(model);
+        }
+        return String(model);
     }
 
     /** Band from labelled capture_source (serial_433, meshcore_usb_868). */

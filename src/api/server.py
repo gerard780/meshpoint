@@ -45,6 +45,8 @@ from src.api.routes import (
     identity_routes,
     messages,
     meshcore_config_routes,
+    meshcore_firmware_routes,
+    meshtastic_firmware_routes,
     mqtt_config_routes,
     nodeinfo_routes,
     position_broadcast_routes,
@@ -54,6 +56,7 @@ from src.api.routes import (
     public_radar_routes,
     metrics_routes,
     rf_routes,
+    serial_config_routes,
     stats_routes,
     system_config_routes,
     system_metrics,
@@ -292,6 +295,9 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.include_router(gps_status.router, dependencies=protected)
     app.include_router(system_config_routes.router, dependencies=protected)
     app.include_router(meshcore_config_routes.router, dependencies=protected)
+    app.include_router(meshcore_firmware_routes.router, dependencies=protected)
+    app.include_router(serial_config_routes.router, dependencies=protected)
+    app.include_router(meshtastic_firmware_routes.router, dependencies=protected)
     app.include_router(config_routes.router, dependencies=protected)
     app.include_router(stats_routes.router, dependencies=protected)
     app.include_router(rf_routes.router, dependencies=protected)
@@ -849,10 +855,19 @@ def _inject_tx_gain_into_source(coord: PipelineCoordinator) -> None:
 
 def _find_meshcore_source(coord: PipelineCoordinator):
     """Find the MeshCore USB capture source if it exists."""
-    for src in coord.capture_coordinator._sources:
-        if src.name == "meshcore_usb":
-            return src
-    return None
+    sources = _find_meshcore_sources(coord)
+    return sources[0] if sources else None
+
+
+def _find_meshcore_sources(coord: PipelineCoordinator) -> list:
+    """MeshCore USB capture sources (for firmware flash stop/restart)."""
+    from src.capture.meshcore_usb_source import MeshcoreUsbCaptureSource
+
+    return [
+        src
+        for src in coord.capture_coordinator._sources
+        if isinstance(src, MeshcoreUsbCaptureSource)
+    ]
 
 
 def _find_serial_sources(coord: PipelineCoordinator) -> list:
@@ -1012,6 +1027,8 @@ def _setup_message_interception(
 
     mc_name_cache: dict[str, str] = {}
     mc_pubkey_canon: dict[str, str] = {}
+    _mc_refresh_state = {"last": 0.0}
+    _MC_REFRESH_MIN_INTERVAL_S = 60.0
 
     from src.api.channel_hash_resolver import ChannelHashResolver
 
@@ -1036,6 +1053,12 @@ def _setup_message_interception(
         if not meshcore_tx or not meshcore_tx.connected:
             logger.debug("MC contact refresh skipped: not connected")
             return
+        import time as _time
+
+        now = _time.monotonic()
+        if now - _mc_refresh_state["last"] < _MC_REFRESH_MIN_INTERVAL_S:
+            return
+        _mc_refresh_state["last"] = now
         try:
             contacts = await meshcore_tx.get_contacts()
             for c in contacts:
@@ -1375,6 +1398,19 @@ def _init_routes(
     gps_status.init_routes(location_source=coord.location_source)
     system_config_routes.init_routes(config=config)
     meshcore_config_routes.init_routes(config=config, tx_service=tx_service)
+    meshcore_firmware_routes.init_routes(
+        config=config,
+        meshcore_sources=_find_meshcore_sources(coord),
+        tx_service=tx_service,
+    )
+    serial_config_routes.init_routes(
+        config=config,
+        serial_sources=_find_serial_sources(coord),
+    )
+    meshtastic_firmware_routes.init_routes(
+        config=config,
+        serial_sources=_find_serial_sources(coord),
+    )
 
 
 def _init_dangerous_registry(coord: PipelineCoordinator) -> None:

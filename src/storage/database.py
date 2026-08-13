@@ -67,6 +67,8 @@ CREATE INDEX IF NOT EXISTS idx_packets_timestamp ON packets(timestamp);
 CREATE INDEX IF NOT EXISTS idx_packets_source ON packets(source_id);
 CREATE INDEX IF NOT EXISTS idx_packets_protocol ON packets(protocol);
 CREATE INDEX IF NOT EXISTS idx_packets_type ON packets(packet_type);
+-- Credit: javastraat/meshpoint 625f6cc — join/lookup by packet_id.
+CREATE INDEX IF NOT EXISTS idx_packets_packet_id ON packets(packet_id, protocol);
 CREATE INDEX IF NOT EXISTS idx_telemetry_node ON telemetry(node_id);
 CREATE INDEX IF NOT EXISTS idx_telemetry_timestamp ON telemetry(timestamp);
 
@@ -105,6 +107,9 @@ class DatabaseManager:
         Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
         self._connection = await aiosqlite.connect(self._db_path)
         self._connection.row_factory = aiosqlite.Row
+        # Credit: javastraat/meshpoint 625f6cc — readers (Messages) vs writers.
+        await self._connection.execute("PRAGMA journal_mode=WAL")
+        await self._connection.execute("PRAGMA synchronous=NORMAL")
         await self._connection.executescript(SCHEMA_SQL)
         await self._run_migrations()
         await self._connection.commit()
