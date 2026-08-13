@@ -409,9 +409,17 @@ def _touch_node_from_packet(
     # battery/voltage/temperature chips at all.
     telemetry_json = None
     if packet_type == "telemetry" and payload:
+        # `uptime_seconds` is included even though nothing reads it yet on
+        # the Flutter side -- dashboard.html's own node drawer already has
+        # an "Uptime" row wired to this exact key (device_metrics), it's
+        # just been silently empty for the same reason everything else
+        # here was.
         telemetry = {
             k: payload.get(k)
-            for k in ("battery_level", "voltage", "channel_utilization", "air_util_tx", "temperature", "humidity")
+            for k in (
+                "battery_level", "voltage", "channel_utilization", "air_util_tx",
+                "uptime_seconds", "temperature", "humidity", "barometric_pressure",
+            )
             if payload.get(k) is not None
         }
         if telemetry:

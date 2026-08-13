@@ -1717,6 +1717,11 @@ function openNodeDrawer(n) {
             { label: 'Air util TX', value: telemetry.air_util_tx != null ? `${round1(telemetry.air_util_tx)}%` : null },
             { label: 'Uptime', value: telemetry.uptime_seconds != null ? `${Math.round(telemetry.uptime_seconds / 3600)}h` : null },
         ]) : ''}
+        ${telemetry ? ndSection('Environment', [
+            { label: 'Temperature', value: telemetry.temperature != null ? `${round1(telemetry.temperature)}&deg;C` : null },
+            { label: 'Humidity', value: telemetry.humidity != null ? `${round1(telemetry.humidity)}%` : null },
+            { label: 'Pressure', value: telemetry.barometric_pressure != null ? `${round1(telemetry.barometric_pressure)} hPa` : null },
+        ]) : ''}
         <div class="nd-section">
             <div class="nd-section__title">Recent Packets</div>
             ${recentPackets.length
