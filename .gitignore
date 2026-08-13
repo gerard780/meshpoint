@@ -6,6 +6,7 @@ dist/
 build/
 *.egg
 .eggs/
+*/settings.json
 
 # Virtual environments
 venv/
@@ -61,6 +62,7 @@ scripts/_*
 
 # Ruff cache
 .ruff_cache/
+.claude/
 
 # WiFi/OTA credentials for the pocsag_companion Arduino sketch -- never commit
 extra/pocsag_companion/secrets.h
