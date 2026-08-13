@@ -272,9 +272,9 @@ The local dashboard shows an orange update indicator when a new version is avail
 
 **First time crossing v0.7.3:** after restart, open `http://<pi-ip>:8080` and complete `/setup` to set an admin password (8 characters minimum). Forgot it later? `sudo meshpoint reset-password` from SSH.
 
-**Already on v0.7.3+ and update often?** `sudo git pull origin main` plus `sudo systemctl restart meshpoint` is usually enough unless the release notes call out new dependencies. When in doubt, run the full block above.
+**Already on v0.7.3+ and update often?** Prefer Settings → Updates → **Apply**, or the full SSH block above. A bare `git pull` + `systemctl restart` skips `pip install` and will miss new Python deps (for v0.7.9 that includes `esptool` for Configuration → Firmware). When release notes call out dependencies, run Apply or `install.sh`.
 
-**From the dashboard (v0.7.4+):** sign in as admin, open Settings → Updates, pick **Stable (main)**, then **Check for updates** and **Apply** (same end state as the SSH block).
+**From the dashboard (v0.7.4+):** sign in as admin, open Settings → Updates, pick **Stable (main)**, then **Check for updates** and **Apply** (runs `pip install -r requirements.txt` then restart; same end state as the SSH block).
 
 See [docs/COMMON-ERRORS.md](docs/COMMON-ERRORS.md#upgrades) if the service fails to start after pulling (missing `bcrypt`, stale `.so` files, spurious reboot prompt).
 
