@@ -32,7 +32,7 @@ identity).
 | **#2** | MeshCore/serial live-radio rewrite | 🔲 To port | Large | `src/transmit/meshcore_*.py`, `src/capture/serial_*.py` (new cluster) |
 | **#3** | Flash reports success even when esptool fails | 🔲 Real bug | Small | `meshtastic_firmware_routes.py:439-461`, `meshcore_firmware_routes.py` |
 | **#4** | Reconnecting capture source not stopped before flash | ✅ Fixed | Small | `meshtastic_firmware_routes.py:423`, `meshcore_firmware_routes.py:447` |
-| **#5** | Port matching is exact-string, not alias-aware | 🔲 Real bug | Small | `meshtastic_firmware_routes.py:385`, `meshcore_firmware_routes.py:408` |
+| **#5** | Port matching is exact-string, not alias-aware | ✅ Fixed | Small | `meshtastic_firmware_routes.py:385`, `meshcore_firmware_routes.py:408` |
 | **#6** | MeshCore name lookup hits live USB bus, not SQLite | 🔲 Real bug | Small | `src/api/message_name_resolver.py` |
 | — | Their release/docs/RC-channel commits (7) | ⏭️ Skip | — | `README.md`, `docs/plans/*`, merge commits |
 
@@ -182,7 +182,7 @@ verbatim, in both of our firmware route files.
       loop for the same port. Fix: `released = source is not None` (always
       stop when a source is matched, regardless of `.connected`).
 
-- [ ] **#5** Port matching is exact-string-only, not alias-aware
+- [x] **#5** FIXED. Port matching is exact-string-only, not alias-aware
       (`9a0425f`). Confirmed at `meshtastic_firmware_routes.py:385`
       (`if d.serial_port == port`) and `meshcore_firmware_routes.py:408`
       (`if c.serial_port == port`). `port` comes from the browser's

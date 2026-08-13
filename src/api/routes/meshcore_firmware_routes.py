@@ -335,6 +335,28 @@ async def _stream_subprocess(cmd: list[str]) -> AsyncIterator[bytes]:
     })
 
 
+def _port_aliases(port: str) -> set[str]:
+    """All known path aliases for a connected USB-serial device.
+
+    A configured companion's ``serial_port`` in ``local.yaml`` may have
+    been pinned under a different alias (e.g. a plain ``/dev/ttyUSB0``
+    set before ``by-path``/``by-id`` symlinks existed on this box) than
+    whatever the port picker's current ``stable_path`` resolves to for
+    the same physical device. Matching on that one exact string silently
+    misses the running source -- it never gets stopped, and esptool then
+    fights it for the port. Resolving every alias here means the match
+    below only needs one of them to line up.
+    """
+    from src.hal.usb_classifier import list_serial_ports_with_stable_paths
+
+    aliases = {port}
+    for dev in list_serial_ports_with_stable_paths():
+        values = {dev.device, dev.stable_path, dev.by_id, dev.by_path}
+        if port in values:
+            aliases.update(v for v in values if v)
+    return aliases
+
+
 class FlashRequest(BaseModel):
     board: str
     port: str
@@ -404,8 +426,9 @@ async def flash_meshcore_stream(
     label = ""
     source = None
     if _config is not None:
+        aliases = _port_aliases(port)
         for c in _config.capture.meshcore_usb:
-            if c.serial_port == port:
+            if c.serial_port and c.serial_port in aliases:
                 label = c.label or ""
                 source = _resolve_meshcore_source(label)
                 break
