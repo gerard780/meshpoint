@@ -49,7 +49,7 @@ flash (see [Syncrobit Chameleon guide](SYNCROBIT-CHAMELEON.md)).
 | **USB-C power supply** (5V 3A) | Power | Official Pi PSU recommended |
 | **LoRa antenna** (906 MHz) | RX + TX | 10 dBi gain recommended for US915 band |
 | **Ethernet cable or WiFi** | Network connectivity | Needed for cloud uplink |
-| **Optional: MeshCore USB companion** | MeshCore traffic monitor | Heltec V3/V4 or T-Beam with [USB companion firmware](https://flasher.meshcore.co.uk/) |
+| **Optional: MeshCore USB companion** | MeshCore traffic monitor | Heltec V3/V4 or T-Beam with [USB companion firmware](https://meshcore.io/flasher) |
 
 ### Supported Pre-Built Units
 
@@ -235,7 +235,7 @@ A Heltec or T-Beam board flashed with **USB Serial Companion** firmware. Support
 
 ### Step 1: Flash USB Companion Firmware
 
-1. Go to [flasher.meshcore.co.uk](https://flasher.meshcore.co.uk/) in a Chrome or Edge browser
+1. Go to [meshcore.io/flasher](https://meshcore.io/flasher) in a Chrome or Edge browser
 2. Select your device model
 3. Choose the **`companion_radio_usb`** firmware variant (not BLE)
 4. Connect the device via USB and click Flash

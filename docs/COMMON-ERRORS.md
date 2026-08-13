@@ -924,7 +924,7 @@ was hot-plugged after the service started.
 
 1. Confirm the device is detected: `ls /dev/ttyUSB* /dev/ttyACM* 2>/dev/null`
 2. Confirm USB companion firmware (not BLE): re-flash from
-   [flasher.meshcore.co.uk](https://flasher.meshcore.co.uk/) and pick the
+   [meshcore.io/flasher](https://meshcore.io/flasher) and pick the
    `companion_radio_usb` variant.
 3. Confirm region: `meshpoint meshcore-radio` to see the current setting,
    or run `sudo meshpoint setup` to reconfigure end-to-end.
@@ -1100,7 +1100,7 @@ the service can't write to (look for the WARN: `Renamed companion to
 ### Heltec V4 v4.2/v4.3 fails to handshake even after a fresh flash
 
 **Cause:** The stock web flasher at
-[meshcore.io/flasher](https://flasher.meshcore.co.uk/) sometimes ships a
+[meshcore.io/flasher](https://meshcore.io/flasher) sometimes ships a
 non-merged image for the v4.2 and v4.3 hardware revisions of the Heltec
 WiFi LoRa 32 V4. The board enumerates over USB and accepts CLI commands
 once, but the next handshake attempt times out. From Meshpoint's side this
