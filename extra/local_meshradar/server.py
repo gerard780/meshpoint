@@ -589,7 +589,7 @@ class _BrowserSocket:
 
 
 def _websocket_accept(ws_key: str) -> str:
-    digest = hashlib.sha1((ws_key + "258EAFA5-E914-47DA-925EC9AF").encode("ascii")).digest()
+    digest = hashlib.sha1((ws_key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode("ascii")).digest()
     return base64.b64encode(digest).decode("ascii")
 
 
