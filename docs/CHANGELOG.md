@@ -4,7 +4,7 @@
 
 ### v0.7.9 (August 2026)
 
-Firmware flash for Meshtastic/MeshCore companions, serial footgun fixes, MeshCore live radio + messaging harden, dashboard hygiene ports, and companion-app bearer login. Edge-only, pure Python. **Upgrade:** Settings → Updates → **Stable**, or the full SSH block in `docs/COMMON-ERRORS.md` (`git fetch`, `checkout main`, `pull`, `scripts/install.sh`, `restart`). Witness-tested on RAK V2 (USB smoke: flash MC+MT, installed versions, MeshCore presets, serial live modem, busy-serial soft-fail, MeshCore messaging). Settings → Updates RC picker now points at **v0.7.10** on `feat/v0.7.10`.
+Firmware flash for Meshtastic/MeshCore companions, serial footgun fixes, MeshCore live radio + messaging harden, dashboard hygiene ports, and companion-app bearer login. Edge-only, pure Python. **Upgrade:** Settings → Updates → **Stable**, or the full SSH block in `docs/COMMON-ERRORS.md` (`git fetch`, `checkout main`, `pull`, `scripts/install.sh`, `restart`). Witness-tested on RAK V2 (USB smoke: flash MC+MT, installed versions, MeshCore presets, serial live modem, busy-serial soft-fail, MeshCore messaging). Settings → Updates RC picker now points at **v0.8.0** on `feat/v0.8.0`.
 
 #### Auth
 
