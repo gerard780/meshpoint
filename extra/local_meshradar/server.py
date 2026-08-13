@@ -383,13 +383,40 @@ def _touch_node_from_packet(
     node_id = source_id[1:] if source_id.startswith("!") else source_id
     now = _now()
     ts = timestamp or now
-    payload = decoded_payload if packet_type == "nodeinfo" and decoded_payload else {}
-    long_name = payload.get("long_name")
-    short_name = payload.get("short_name")
-    hardware_model = payload.get("hw_model") or payload.get("hardware_model")
-    role = payload.get("role")
-    public_key = payload.get("public_key")
+    payload = decoded_payload or {}
+    if packet_type == "nodeinfo":
+        long_name = payload.get("long_name")
+        short_name = payload.get("short_name")
+        hardware_model = payload.get("hw_model") or payload.get("hardware_model")
+        role = payload.get("role")
+        public_key = payload.get("public_key")
+    else:
+        long_name = short_name = hardware_model = role = public_key = None
     display_name = long_name or short_name or f"!{node_id}"
+
+    # Same field names the real decoder's TELEMETRY handling produces
+    # (src/decode/portnum_handlers.py's _decode_telemetry) and this app's
+    # own Flutter client reads off `latest_telemetry` -- battery_level/
+    # voltage/channel_utilization/air_util_tx/temperature/humidity. Only
+    # a genuine telemetry packet ever supplies these; every other packet
+    # type leaves this None so the COALESCE below preserves whatever
+    # telemetry was last known instead of wiping it out on this node's
+    # next chat/position packet. Previously this branch didn't exist at
+    # all -- packet-triggered node touches never wrote telemetry, only
+    # the ~9-minute heartbeat roster did, so a node whose heartbeat
+    # entry happened to arrive without telemetry (or hasn't reported
+    # since local_meshradar started) showed signal/hardware but no
+    # battery/voltage/temperature chips at all.
+    telemetry_json = None
+    if packet_type == "telemetry" and payload:
+        telemetry = {
+            k: payload.get(k)
+            for k in ("battery_level", "voltage", "channel_utilization", "air_util_tx", "temperature", "humidity")
+            if payload.get(k) is not None
+        }
+        if telemetry:
+            telemetry_json = json.dumps(telemetry)
+
     conn.execute(
         """
         INSERT INTO nodes (
@@ -397,7 +424,7 @@ def _touch_node_from_packet(
             hardware_model, role, public_key,
             last_heard, first_seen, packet_count, display_name,
             has_position, latest_signal_json, latest_telemetry_json, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 0, ?, NULL, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, 0, ?, ?, ?)
         ON CONFLICT(device_id, node_id) DO UPDATE SET
             long_name = COALESCE(NULLIF(excluded.long_name, ''), nodes.long_name),
             short_name = COALESCE(NULLIF(excluded.short_name, ''), nodes.short_name),
@@ -410,12 +437,14 @@ def _touch_node_from_packet(
             last_heard = MAX(excluded.last_heard, nodes.last_heard),
             packet_count = nodes.packet_count + 1,
             latest_signal_json = excluded.latest_signal_json,
+            latest_telemetry_json = COALESCE(excluded.latest_telemetry_json, nodes.latest_telemetry_json),
             updated_at = excluded.updated_at
         """,
         (
             device_id, node_id, protocol, long_name, short_name,
             hardware_model, role, public_key, ts, ts,
             display_name, json.dumps(signal) if signal else None,
+            telemetry_json,
             now,
         ),
     )
