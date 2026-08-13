@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import time
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -12,17 +11,6 @@ if TYPE_CHECKING:
     from src.transmit.meshcore_tx_client import MeshCoreTxClient
 
 logger = logging.getLogger(__name__)
-
-# How long a fetched MeshCore contact list stays good for. get_contacts()
-# is a live USB round trip to the physical companion (up to a 10s
-# timeout) -- resolving names for a conversation list or a 50-message
-# chat page calls into this once per item, so without a cache a single
-# page load can trigger dozens of hardware round trips back to back
-# (confirmed live: "10 sec to load the channels... 15 sec to load the
-# chats"). A short cache bounds it to roughly one round trip per page
-# load instead, while still refreshing often enough that a newly
-# adverted contact shows up quickly.
-_CONTACTS_CACHE_TTL_S = 10.0
 
 
 class MessageNameResolver:
@@ -37,8 +25,6 @@ class MessageNameResolver:
         self._node_repo = node_repo
         self._meshcore_tx = meshcore_tx
         self._packet_repo = packet_repo
-        self._contacts_cache: list[dict] = []
-        self._contacts_cache_at: float = 0.0
 
     async def resolve(
         self,
@@ -83,25 +69,31 @@ class MessageNameResolver:
             logger.debug("Meshtastic name lookup failed for %s", node_id, exc_info=True)
         return ""
 
-    async def _cached_contacts(self) -> list[dict]:
-        now = time.monotonic()
-        if now - self._contacts_cache_at > _CONTACTS_CACHE_TTL_S:
-            self._contacts_cache = await self._meshcore_tx.get_contacts()
-            self._contacts_cache_at = now
-        return self._contacts_cache
-
     async def _lookup_meshcore(self, node_id: str) -> str:
-        if not self._meshcore_tx or not self._meshcore_tx.connected:
+        """Resolve MeshCore display names from SQLite only.
+
+        Do not call live ``get_contacts()`` here. Opening the Messages
+        tab resolves every conversation's name; each companion fetch
+        holds the serial command channel for a live USB round trip (up
+        to a 10s timeout), and can race an actual outgoing send into a
+        "Send timed out" reconnect loop.
+        ``sync_meshcore_contacts_to_nodes()`` (src/api/meshcore_contacts.py)
+        already keeps `long_name`/`short_name` on `nodes` rows current
+        from the same contact list, so there's no need to hit the bus
+        again just to display a name.
+        """
+        if not self._node_repo or node_id.startswith("broadcast:"):
             return ""
         try:
-            mc_contacts = await self._cached_contacts()
-            nid_lower = node_id.lower()
-            for contact in mc_contacts:
-                pk = contact.get("public_key", "").lower()
-                name = contact.get("name", "")
-                if not name or self._is_hex_only(name):
+            for candidate in (node_id, node_id.upper(), node_id.lower()):
+                node = await self._node_repo.get_by_id(candidate)
+                if not node:
                     continue
-                if pk.startswith(nid_lower) or nid_lower.startswith(pk[:8]):
+                n = node if isinstance(node, dict) else node.to_dict()
+                if n.get("protocol") and n.get("protocol") != "meshcore":
+                    continue
+                name = n.get("long_name") or n.get("short_name") or ""
+                if name and not self._is_hex_only(name):
                     return name
         except Exception:
             logger.debug("MeshCore name lookup failed for %s", node_id, exc_info=True)

@@ -127,6 +127,23 @@ class TestMessageNameResolver(unittest.TestCase):
         name = _run(self.resolver.resolve("a1b2c3d4", "meshtastic", ""))
         self.assertEqual(name, "TestNode")
 
+    def test_meshcore_name_resolves_from_sqlite_without_a_live_bus(self):
+        """`self.resolver` (setUp) is built with no `meshcore_tx` at all --
+        proves MeshCore name resolution no longer requires a live
+        connection to the companion. sync_meshcore_contacts_to_nodes()
+        (src/api/meshcore_contacts.py) is what actually keeps `long_name`
+        current on these rows; this only has to prove the resolver reads
+        it instead of calling the live bus."""
+        _run(self.node_repo.upsert(
+            Node(
+                node_id="deadbeef",
+                long_name="MeshCore Node",
+                protocol="meshcore",
+            )
+        ))
+        name = _run(self.resolver.resolve("deadbeef", "meshcore", ""))
+        self.assertEqual(name, "MeshCore Node")
+
 
 if __name__ == "__main__":
     unittest.main()

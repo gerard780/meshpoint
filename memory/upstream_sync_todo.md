@@ -33,7 +33,7 @@ identity).
 | **#3** | Flash reports success even when esptool fails | 🔲 Real bug | Small | `meshtastic_firmware_routes.py:439-461`, `meshcore_firmware_routes.py` |
 | **#4** | Reconnecting capture source not stopped before flash | ✅ Fixed | Small | `meshtastic_firmware_routes.py:423`, `meshcore_firmware_routes.py:447` |
 | **#5** | Port matching is exact-string, not alias-aware | ✅ Fixed | Small | `meshtastic_firmware_routes.py:385`, `meshcore_firmware_routes.py:408` |
-| **#6** | MeshCore name lookup hits live USB bus, not SQLite | 🔲 Real bug | Small | `src/api/message_name_resolver.py` |
+| **#6** | MeshCore name lookup hits live USB bus, not SQLite | ✅ Fixed | Small | `src/api/message_name_resolver.py` |
 | — | Their release/docs/RC-channel commits (7) | ⏭️ Skip | — | `README.md`, `docs/plans/*`, merge commits |
 
 ## Confirmed — already have equivalent, no action needed
@@ -207,7 +207,7 @@ verbatim, in both of our firmware route files.
       already filters to `p.vid is not None` before the port list ever
       reaches the frontend.
 
-- [ ] **#6** MeshCore message-name resolution hits the live USB bus on every
+- [x] **#6** FIXED. MeshCore message-name resolution hits the live USB bus on every
       lookup, not SQLite (`c12da51`, `f6afe0f`). Confirmed: our
       `src/api/message_name_resolver.py`'s `_lookup_meshcore()` calls
       `self._meshcore_tx.get_contacts()` — a live companion round trip, up
