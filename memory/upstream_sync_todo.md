@@ -28,8 +28,12 @@ identity).
 | — | Stats-tab / stats-reporter fixes | ✅ Ahead of upstream | — | `stats_tab.js`, `stats_reporter.py` |
 | — | `database.py` WAL + packet_id index | ✅ Have it | — | credited to us |
 | — | URL-hash-before-scripts flash fix | ✅ Have it | — | `index.html` |
-| **#1** | esptool venv-symlink resolver | 🔲 To port | Small | `src/api/firmware/esptool_binary.py` (new) |
-| **#2** | MeshCore/serial live-radio rewrite | 🔲 To port | Large | `src/transmit/meshcore_*.py`, `src/capture/serial_*.py` (new cluster) |
+| **#1** | esptool venv-symlink resolver | ⏭️ Skipped — works today, any failure is loud not silent | — | `src/api/firmware/esptool_binary.py` (upstream-only) |
+| — | MeshCore radio preset apply, rename, channel sync, contacts, device info | ✅ Already have it, already has UI | — | `meshcore_usb_source.py`, `meshcore_tx_client.py`, `meshcore_card.js` |
+| **#2a** | Contact picker (`/api/messages/contacts`) hits live USB bus, no cache | 🔲 Real bug | Small | `src/api/routes/messages.py:246` |
+| **#2b** | `set_radio_params()` never verifies the preset actually stuck after reconnect | 🔲 Real gap | Small-medium | `meshcore_usb_source.py:564`, `meshcore_config_routes.py:331` |
+| **#2c** | `CaptureCoordinator.start()` still aborts all sources if one throws | 🔲 Real bug | Small | `src/capture/capture_coordinator.py:32` |
+| **#2d** | Meshtastic serial source has no retry/reconnect loop at all (unlike MeshCore's own, which already works) | 🔲 Real gap | Medium | `src/capture/serial_source.py:445` |
 | **#3** | Flash reports success even when esptool fails | ✅ Fixed (scoped) | Small | `meshtastic_firmware_routes.py:439-461`, `meshcore_firmware_routes.py` |
 | **#4** | Reconnecting capture source not stopped before flash | ✅ Fixed | Small | `meshtastic_firmware_routes.py:423`, `meshcore_firmware_routes.py:447` |
 | **#5** | Port matching is exact-string, not alias-aware | ✅ Fixed | Small | `meshtastic_firmware_routes.py:385`, `meshcore_firmware_routes.py:408` |
@@ -87,56 +91,92 @@ identity).
     whether our two firmware route files duplicate this logic inline and
     would benefit from sharing it too).
 
-- [ ] **#2** MeshCore/serial live-radio rewrite — the one genuinely
-      substantial thing that's fully new, not just reworded. No equivalent
-      found anywhere in our tree under any filename. **Correction from an
-      earlier pass on this file**: I originally split this into two items
-      ("MeshCore radio cluster" and a small separate "soft-fail busy
-      serial" fix) — wrong. `git diff main upstream/main -- src/capture/serial_source.py`
-      is a 654-line rewrite (removed `send_nodeinfo()`/`connected`
-      property/constructor name params; added `SerialRadioHandshake`,
-      `SerialSelfOriginFilter`, reconnect backoff) that the "soft-fail"
-      behavior is actually built on top of — they're the same underlying
-      effort, not separable pieces. Full file list:
-      - `src/transmit/meshcore_radio_apply.py` — apply MeshCore radio
-        presets live (retry-after-reconnect, cross-band timeout recovery).
-      - `src/transmit/meshcore_exclusive_radio.py` — exclusive serial lease
-        while applying config.
-      - `src/transmit/meshcore_channel_sync.py`,
-        `meshcore_companion_rename.py`, `meshcore_contacts.py`,
-        `meshcore_device_info.py` — channel sync, companion rename, contact
-        list, device info (this is also where "show installed companion
-        firmware" — `96c5c71` — lives: `MeshcoreDeviceInfoQuery` +
-        `SerialFirmwareInfoReader`, confirmed via `tests/test_installed_firmware_info.py`).
-      - `src/capture/serial_source.py` (rewritten), `meshcore_dtr.py`,
-        `serial_firmware_info.py`, `serial_self_origin.py`,
-        `serial_radio_handshake.py`, `serial_device_config.py`,
-        `usb_classifier.py` (+12 lines) — supporting capture-layer helpers,
-        including the busy/wrong-port soft-fail + background-retry
-        behavior (previously: a held serial port aborted FastAPI startup
-        entirely) and self-origin packet filtering.
-      - `src/capture/capture_coordinator.py` — the one **cleanly separable**
-        piece: `start()` currently lets one source's exception abort
-        starting every other source. Small (`try`/`except Exception`
-        around each `source.start()`, re-raise `ImportError`), low-risk,
-        portable on its own without the rest of #2 — but note upstream's
-        version of this file also *removed* `sources` property and
-        `all_sources_running()` (used by our status LED?) — check we don't
-        depend on those before touching this file.
-      - `frontend/js/configuration/meshcore_radio_settings.js`,
-        `serial_radio_controls.js`, `serial_card.js` (GPS-port-pick
-        warning) — the dashboard UI panels for all of the above.
-      - Tests: `tests/test_meshcore_radio_apply.py`,
-        `test_meshcore_contacts.py`, `test_meshcore_reconnect.py`,
-        `test_meshcore_radio_presets.py`, `test_serial_device_config.py`,
-        `test_serial_soft_fail.py`, `test_serial_config_routes.py`,
-        `test_usb_stable_ports.py`, `test_installed_firmware_info.py`.
-      This is a real feature addition (live MeshCore radio/channel
-      configuration from the dashboard + serial-source startup
-      robustness), not a quick port — worth its own dedicated session.
-      **Exception**: the `capture_coordinator.py` try/except is small
-      enough to pull as a standalone quick win if wanted, independent of
-      the rest.
+- [ ] **#2** MeshCore/serial live-radio work. **Major correction, second
+      pass**: my original assessment ("no equivalent found anywhere in our
+      tree, a whole feature build") was wrong, and wrong for a specific,
+      avoidable reason — I searched by filename (`find src/transmit
+      -iname "*meshcore*"`) and treated "no file with that exact name" as
+      "no equivalent capability," without ever opening
+      `src/capture/meshcore_usb_source.py`/`src/transmit/meshcore_tx_client.py`
+      to check what they actually contain. Opened them this pass. We
+      already have live radio-preset apply, companion rename, channel
+      sync, contacts, and device info — all wired to real dashboard UI,
+      not just backend stubs. Confirmed by reading the actual code AND
+      finding the frontend calls that use it:
+      - `meshcore_usb_source.py`'s `set_radio_params()` — already reuses
+        the companion's live connection (not a cold-reconnect CLI steal),
+        with retry-on-timeout via `_trigger_reconnect()` (backoff + DTR
+        reset pulse). `PUT /api/config/meshcore/companion-radio`
+        (`meshcore_config_routes.py:331`) → `meshcore_card.js:465`. Real,
+        working, already better UX than the standalone `meshpoint
+        meshcore-radio` CLI per its own docstring.
+      - `set_companion_name()` (rename) — `meshcore_card.js:943-970`,
+        "Companion renamed" toast.
+      - `meshcore_tx_client.py`'s `sync_channels()` —
+        `PUT /api/config/meshcore/channels` → `meshcore_card.js:870`.
+      - `get_contacts()`, `get_device_info()` — both present and wired
+        (contacts also reachable via the Messages tab's contact picker,
+        see the real gap below).
+      So #2 is **not** "build MeshCore live radio config" — that already
+      exists and works. What's actually missing, verified individually,
+      is four separate, much smaller resilience gaps on top of an already-
+      mature feature:
+
+      - [ ] **#2a** `GET /api/messages/contacts` (`src/api/routes/messages.py:246`)
+        calls `_meshcore_tx.get_contacts()` live, every single time the
+        Messages tab's "new conversation" contact picker opens — no
+        caching at all. Same bug class #6 already fixed, but a different
+        endpoint #6 didn't touch (#6 was `message_name_resolver.py`'s
+        per-message name lookups only). Small, same shape as #6: resolve
+        MeshCore contacts from `node_repo` (SQLite) instead, matching how
+        #6 already established that contact enrichment keeps
+        `long_name`/`short_name` current there.
+
+      - [ ] **#2b** `set_radio_params()` triggers a reconnect after
+        applying a preset but never verifies afterward that the new
+        params actually took (matches upstream's `e7a9297` "Retry MeshCore
+        set_radio once after reconnect when preset did not stick" and
+        `bf82ea2`/`dcff8b0`'s cross-band timeout recovery). The route
+        (`meshcore_config_routes.py:331`) fires the command and returns
+        `rebooting: true` immediately, telling the frontend to just show
+        a "reconnecting" state — nothing re-checks the radio's actual
+        state once it's back. Small-medium: needs a post-reconnect
+        read-back-and-compare, with one retry if it didn't stick.
+
+      - [ ] **#2c** `CaptureCoordinator.start()` (`src/capture/capture_coordinator.py:32`)
+        still has no try/except around `await source.start()` — one
+        source's exception aborts starting every other source (concentrator,
+        unrelated companions, everything). Confirmed still unfixed as of
+        this pass. Small, standalone, fully scoped already: wrap in
+        `try/except Exception` (re-raise `ImportError`), log-and-continue.
+        Note upstream's version of this file also removed a `sources`
+        property and `all_sources_running()` — check nothing else here
+        (status LED?) depends on those before touching this file.
+
+      - [ ] **#2d** Meshtastic `SerialCaptureSource.start()`
+        (`src/capture/serial_source.py:445`) has **no retry/background-
+        reconnect logic of its own at all** — a busy/wrong port just
+        raises straight up, permanently, with nothing to pick it back up
+        later short of a manual service restart. This is real and
+        MeshCore-specific code doesn't have this problem: `meshcore_usb_source.py`
+        already has a proven `_reconnect_until_connected()` +
+        `_health_check_loop()` pattern for exactly this. #2d is porting
+        that already-working pattern from our own MeshCore module to our
+        own Meshtastic one, not porting anything from upstream at all.
+        Medium effort — needs care since `SerialCaptureSource` also
+        carries live radio-setter methods (`set_region`/`set_bluetooth`/
+        `set_modem_preset`/etc.) that assume `self._interface` is real;
+        a background retry loop needs those to fail gracefully while
+        disconnected, same as MeshCore's `connected` gating already does.
+
+      Companion rename, channel sync, contacts (data model), device info,
+      and installed-firmware display are **confirmed already built and
+      already have UI** — no further action on those. `#2a`/`#2c` are as
+      small and mechanical as #4-#6 were. `#2b`/`#2d` are real but
+      significantly smaller than the original "whole feature cluster"
+      estimate — a session each, not a whole-cluster rebuild. None of
+      this needs upstream's actual files at all; it's entirely
+      independent work on our own already-existing implementation.
 
 ## High priority — confirmed real bugs, verified against our actual code
 

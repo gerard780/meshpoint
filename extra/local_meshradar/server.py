@@ -209,6 +209,60 @@ def _connect(db_path: str) -> sqlite3.Connection:
     return conn
 
 
+def _backfill_node_telemetry(db_path: str) -> None:
+    """One-time self-heal, run at startup: a node's ``latest_telemetry_json``
+    can be NULL even though a real telemetry packet for it is already
+    sitting in the ``packets`` table -- every telemetry packet ingested
+    before ``_touch_node_from_packet`` learned to actually write this
+    column (see its own docstring) landed with the column still NULL, and
+    nothing ever revisits already-stored packets to fix that up on its
+    own. Without this, a node stays telemetry-less until its *next*
+    telemetry broadcast happens to arrive, which can be a long wait.
+    Cheap (at most a handful of nodes) and idempotent -- only ever
+    touches rows that are still NULL, using whatever's already the most
+    recent stored telemetry packet for that node.
+    """
+    conn = _connect(db_path)
+    try:
+        nodes_needing_it = conn.execute(
+            "SELECT device_id, node_id FROM nodes WHERE latest_telemetry_json IS NULL"
+        ).fetchall()
+        backfilled = 0
+        for row in nodes_needing_it:
+            device_id, node_id = row["device_id"], row["node_id"]
+            packet = conn.execute(
+                """
+                SELECT decoded_payload_json FROM packets
+                WHERE device_id = ? AND packet_type = 'telemetry'
+                  AND source_id IN (?, ?)
+                ORDER BY received_at DESC LIMIT 1
+                """,
+                (device_id, node_id, f"!{node_id}"),
+            ).fetchone()
+            if packet is None or not packet["decoded_payload_json"]:
+                continue
+            try:
+                payload = json.loads(packet["decoded_payload_json"])
+            except (TypeError, json.JSONDecodeError):
+                continue
+            telemetry = {k: payload.get(k) for k in _TELEMETRY_FIELDS if payload.get(k) is not None}
+            if not telemetry:
+                continue
+            conn.execute(
+                "UPDATE nodes SET latest_telemetry_json = ? WHERE device_id = ? AND node_id = ?",
+                (json.dumps(telemetry), device_id, node_id),
+            )
+            backfilled += 1
+        if backfilled:
+            conn.commit()
+            logger.info(
+                "backfilled latest_telemetry_json for %d node(s) from already-stored telemetry packets",
+                backfilled,
+            )
+    finally:
+        conn.close()
+
+
 # ── message handlers ───────────────────────────────────────────────
 
 def handle_register(db_path: str, message: dict) -> Optional[dict]:
@@ -344,6 +398,18 @@ def handle_packet(db_path: str, message: dict) -> Optional[dict]:
     }
 
 
+# Same field names the real decoder's TELEMETRY handling produces
+# (src/decode/portnum_handlers.py's _decode_telemetry) and this app's own
+# Flutter client / dashboard.html's node drawer read off `latest_telemetry`.
+# Shared by _touch_node_from_packet (the live-ingest path) and
+# _backfill_node_telemetry (the startup self-heal below), so the two never
+# drift apart on which fields count as "telemetry."
+_TELEMETRY_FIELDS = (
+    "battery_level", "voltage", "channel_utilization", "air_util_tx",
+    "uptime_seconds", "temperature", "humidity", "barometric_pressure",
+)
+
+
 def _touch_node_from_packet(
     conn: sqlite3.Connection, device_id: str, source_id: str | None,
     protocol: str | None, packet_type: str | None, decoded_payload: dict | None,
@@ -414,14 +480,7 @@ def _touch_node_from_packet(
         # an "Uptime" row wired to this exact key (device_metrics), it's
         # just been silently empty for the same reason everything else
         # here was.
-        telemetry = {
-            k: payload.get(k)
-            for k in (
-                "battery_level", "voltage", "channel_utilization", "air_util_tx",
-                "uptime_seconds", "temperature", "humidity", "barometric_pressure",
-            )
-            if payload.get(k) is not None
-        }
+        telemetry = {k: payload.get(k) for k in _TELEMETRY_FIELDS if payload.get(k) is not None}
         if telemetry:
             telemetry_json = json.dumps(telemetry)
 
@@ -1081,6 +1140,7 @@ def main() -> None:
     )
 
     init_db(args.db)
+    _backfill_node_telemetry(args.db)
 
     http_thread = threading.Thread(
         target=run_http_server,
