@@ -499,7 +499,31 @@ async def flash_meshcore_stream(
                     success = bool((event.get("result") or {}).get("success"))
 
             if released:
-                if req.flavor == "ble":
+                if not success:
+                    # Board firmware was NOT updated (whatever flavor was
+                    # attempted) -- the old firmware is still in place, so
+                    # restore the previous capture source rather than
+                    # unconditionally reporting a reboot/reconnect (or a
+                    # BLE-only "won't reconnect, that's expected") that
+                    # doesn't reflect what actually happened.
+                    yield _ndjson({
+                        "type": "line", "stream": "stderr",
+                        "text": (
+                            "Flash failed (esptool exited non-zero). Board firmware "
+                            "was not updated. Restoring USB capture on the previous build…"
+                        ),
+                    })
+                    await source.start()
+                    yield _ndjson({
+                        "type": "line", "stream": "stdout",
+                        "text": (
+                            f"{source.name} restored on {port}."
+                            if source.connected
+                            else f"{source.name} did NOT come back -- "
+                                 "a service restart may be needed."
+                        ),
+                    })
+                elif req.flavor == "ble":
                     # BLE firmware doesn't speak the companion USB serial
                     # protocol at all -- trying to reconnect would just
                     # time out and read as a failure, so don't pretend

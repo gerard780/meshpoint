@@ -474,21 +474,43 @@ async def flash_meshtastic_stream(
                     success = bool((event.get("result") or {}).get("success"))
 
             if released:
-                yield _ndjson({
-                    "type": "line", "stream": "stdout",
-                    "text": "Waiting for the board to finish rebooting…",
-                })
-                await asyncio.sleep(3.0)
-                await source.start()
-                yield _ndjson({
-                    "type": "line", "stream": "stdout",
-                    "text": (
-                        f"{source.name} reconnected on {port}."
-                        if source.connected
-                        else f"{source.name} did NOT reconnect -- "
-                             "a service restart may be needed."
-                    ),
-                })
+                if not success:
+                    # Board firmware was NOT updated -- restore the
+                    # previous capture source rather than unconditionally
+                    # reporting a reboot/reconnect that never happened.
+                    yield _ndjson({
+                        "type": "line", "stream": "stderr",
+                        "text": (
+                            "Flash failed (esptool exited non-zero). Board firmware "
+                            "was not updated. Restoring USB capture on the previous build…"
+                        ),
+                    })
+                    await source.start()
+                    yield _ndjson({
+                        "type": "line", "stream": "stdout",
+                        "text": (
+                            f"{source.name} restored on {port}."
+                            if source.connected
+                            else f"{source.name} did NOT come back -- "
+                                 "a service restart may be needed."
+                        ),
+                    })
+                else:
+                    yield _ndjson({
+                        "type": "line", "stream": "stdout",
+                        "text": "Waiting for the board to finish rebooting…",
+                    })
+                    await asyncio.sleep(3.0)
+                    await source.start()
+                    yield _ndjson({
+                        "type": "line", "stream": "stdout",
+                        "text": (
+                            f"{source.name} reconnected on {port}."
+                            if source.connected
+                            else f"{source.name} did NOT reconnect -- "
+                                 "a service restart may be needed."
+                        ),
+                    })
 
             ctx.set_result("success" if success else "error")
 

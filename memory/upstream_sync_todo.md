@@ -30,7 +30,7 @@ identity).
 | — | URL-hash-before-scripts flash fix | ✅ Have it | — | `index.html` |
 | **#1** | esptool venv-symlink resolver | 🔲 To port | Small | `src/api/firmware/esptool_binary.py` (new) |
 | **#2** | MeshCore/serial live-radio rewrite | 🔲 To port | Large | `src/transmit/meshcore_*.py`, `src/capture/serial_*.py` (new cluster) |
-| **#3** | Flash reports success even when esptool fails | 🔲 Real bug | Small | `meshtastic_firmware_routes.py:439-461`, `meshcore_firmware_routes.py` |
+| **#3** | Flash reports success even when esptool fails | ✅ Fixed (scoped) | Small | `meshtastic_firmware_routes.py:439-461`, `meshcore_firmware_routes.py` |
 | **#4** | Reconnecting capture source not stopped before flash | ✅ Fixed | Small | `meshtastic_firmware_routes.py:423`, `meshcore_firmware_routes.py:447` |
 | **#5** | Port matching is exact-string, not alias-aware | ✅ Fixed | Small | `meshtastic_firmware_routes.py:385`, `meshcore_firmware_routes.py:408` |
 | **#6** | MeshCore name lookup hits live USB bus, not SQLite | ✅ Fixed | Small | `src/api/message_name_resolver.py` |
@@ -145,7 +145,7 @@ Went back and actually read our `meshtastic_firmware_routes.py`/
 instead of leaving these as guesses. All three land — same bug, present
 verbatim, in both of our firmware route files.
 
-- [ ] **#3** No "esptool actually succeeded" check before claiming the
+- [x] **#3** FIXED (scoped down from the original plan). No "esptool actually succeeded" check before claiming the
       flash worked (`525883c`). Confirmed at
       `meshtastic_firmware_routes.py:439-461` and the equivalent block in
       `meshcore_firmware_routes.py`: `success` is captured from the
@@ -165,11 +165,24 @@ verbatim, in both of our firmware route files.
       FastAPI actually runs under) would hit exactly this: `write-flash`
       doesn't exist on 4.x (only `write_flash`, underscore), esptool exits
       non-zero, and our UI reports success anyway.
-  - Fix shape: check `success` before the reconnect-messaging block (own
-    branch for the failure case, matching upstream's "Flash failed... USB
-    capture restored" messaging); either detect the installed esptool's
-    real subcommand spelling or vendor upstream's `WRITE_FLASH_SUBCOMMAND`
-    + `EspToolBinaryResolver.missing_install_hint()` approach.
+  - **Done, scoped down**: added the `success` check with its own failure
+    branch (matching upstream's "Flash failed... restoring USB capture"
+    messaging) in both `meshtastic_firmware_routes.py` and
+    `meshcore_firmware_routes.py` (the latter also needed the BLE-flavor
+    branch reordered so a failed BLE attempt still tries to restore the
+    still-in-place old firmware instead of assuming BLE-firmware-shaped
+    non-reconnect). Deliberately did **not** solve the `write-flash`/
+    `write_flash` esptool-version question here -- `_stream_subprocess`
+    already correctly captures any non-zero exit (wrong subcommand or
+    otherwise) as `success=False`, so the honest-fail-UI fix covers that
+    failure mode too without needing esptool-version detection. That
+    detection work (if ever needed) naturally belongs with #1's resolver
+    instead. Syntax-checked (`py_compile`); no existing test file to run
+    (`tests/test_firmware_flash_routes.py` doesn't exist here) --
+    live-verify by actually flashing while something else holds the port
+    (or by naming a wrong `--chip`/temporarily breaking the cmd) to force
+    a real esptool failure and confirm the UI now says "Flash failed",
+    not "reconnected."
 
 - [x] **#4** FIXED. A capture source mid-reconnect-loop doesn't get stopped before
       flashing (`39bd92f`). Confirmed at both
@@ -223,6 +236,12 @@ verbatim, in both of our firmware route files.
       enrichment already writes `long_name`/`short_name` onto `nodes` rows
       elsewhere, so there's no need to hit the live bus just to display a
       name. Small, self-contained, cleanly separable from #2.
+      **Live-confirmed** on the real Pi (`rakv2-meshpoint`), in the real
+      venv, not just simulated locally: added
+      `test_meshcore_name_resolves_from_sqlite_without_a_live_bus` to
+      `tests/test_message_name_resolver.py` and ran
+      `/opt/meshpoint/venv/bin/python -m unittest tests.test_message_name_resolver -v`
+      — 5/5 pass, including the new one.
 
 ## Verification pass complete
 
