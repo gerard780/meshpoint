@@ -211,21 +211,32 @@ def _connect(db_path: str) -> sqlite3.Connection:
 
 def _backfill_node_telemetry(db_path: str) -> None:
     """One-time self-heal, run at startup: a node's ``latest_telemetry_json``
-    can be NULL even though a real telemetry packet for it is already
+    can be missing even though a real telemetry packet for it is already
     sitting in the ``packets`` table -- every telemetry packet ingested
     before ``_touch_node_from_packet`` learned to actually write this
-    column (see its own docstring) landed with the column still NULL, and
-    nothing ever revisits already-stored packets to fix that up on its
-    own. Without this, a node stays telemetry-less until its *next*
+    column (see its own docstring) landed with the column still empty,
+    and nothing ever revisits already-stored packets to fix that up on
+    its own. Without this, a node stays telemetry-less until its *next*
     telemetry broadcast happens to arrive, which can be a long wait.
-    Cheap (at most a handful of nodes) and idempotent -- only ever
-    touches rows that are still NULL, using whatever's already the most
-    recent stored telemetry packet for that node.
+
+    "Missing" means real SQL NULL *or* the 4-char string ``'null'`` --
+    ``_upsert_node()`` (the heartbeat roster path) used to bind
+    ``json.dumps(None)`` unconditionally whenever a heartbeat entry
+    didn't carry telemetry (the common case), which is that literal
+    string, not NULL. Every node already affected by that bug -- before
+    it was fixed alongside this backfill -- has the string sitting in
+    its row today, which a plain ``IS NULL`` check silently skips
+    entirely. Confirmed live: a real affected node's raw column value
+    was exactly ``'null'``, not NULL, which is why an earlier version of
+    this function found nothing to do.
+
+    Cheap (at most a handful of nodes) and idempotent -- using whatever's
+    already the most recent stored telemetry packet for that node.
     """
     conn = _connect(db_path)
     try:
         nodes_needing_it = conn.execute(
-            "SELECT device_id, node_id FROM nodes WHERE latest_telemetry_json IS NULL"
+            "SELECT device_id, node_id FROM nodes WHERE latest_telemetry_json IS NULL OR latest_telemetry_json = 'null'"
         ).fetchall()
         backfilled = 0
         for row in nodes_needing_it:
@@ -559,7 +570,7 @@ def _upsert_node(conn: sqlite3.Connection, device_id: str, node: dict, updated_a
             ),
             has_position=excluded.has_position,
             latest_signal_json=excluded.latest_signal_json,
-            latest_telemetry_json=excluded.latest_telemetry_json,
+            latest_telemetry_json=COALESCE(excluded.latest_telemetry_json, nodes.latest_telemetry_json),
             updated_at=excluded.updated_at
         """,
         (
@@ -571,7 +582,16 @@ def _upsert_node(conn: sqlite3.Connection, device_id: str, node: dict, updated_a
             node.get("packet_count"), node.get("display_name"),
             node.get("has_position"),
             json.dumps(node.get("latest_signal")),
-            json.dumps(node.get("latest_telemetry")),
+            # json.dumps(None) is the 4-char STRING "null", not real SQL
+            # NULL -- binding that (as this used to, unconditionally)
+            # defeats the COALESCE just added above and wipes out
+            # whatever telemetry _touch_node_from_packet's own COALESCE'd
+            # write already correctly stored, the next time a heartbeat
+            # for this node happens not to carry telemetry (the common
+            # case -- heartbeat.nodes[] entries are identity deltas, not
+            # full enriched rows). Bind real NULL instead so COALESCE
+            # actually has something to fall back past.
+            json.dumps(node["latest_telemetry"]) if node.get("latest_telemetry") else None,
             updated_at,
         ),
     )
