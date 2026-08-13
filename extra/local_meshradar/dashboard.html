@@ -1589,14 +1589,65 @@ function renderPacketFeed() {
     const el = document.getElementById('packets');
     if (!packets.length) { el.innerHTML = '<p class="empty">Nothing yet.</p>'; return; }
 
-    el.innerHTML = '<div class="packet-feed">' + packets.map((p, i) => {
+    // Same broadcast can legitimately be a separate row per capture --
+    // heard by two meshpoints, or relayed across two different mesh
+    // paths to the same one -- each with its own device_id/RSSI/hops.
+    // Collapse those into one card (best-RSSI capture as the headline
+    // row, a receiver-pill per capture underneath) instead of showing
+    // near-identical rows back to back. A packet with no packet_id never
+    // merges with anything (each gets its own never-repeating key).
+    let noIdCounter = 0;
+    const byPacketId = {};
+    const order = [];
+    for (const p of packets) {
+        const key = p.packet_id || `__no_id_${noIdCounter++}`;
+        if (!byPacketId[key]) { byPacketId[key] = []; order.push(key); }
+        byPacketId[key].push(p);
+    }
+    const groups = order.map((key) => {
+        const members = byPacketId[key].slice().sort((a, b) => (b.rssi ?? -999) - (a.rssi ?? -999));
+        return { key, members, representative: members[0] };
+    });
+
+    el.innerHTML = '<div class="packet-feed">' + groups.map((g, i) => {
+        const p = g.representative;
         const color = protocolColor(p.protocol);
-        const via = deviceNameById[p.device_id] || p.device_id;
         const freq = p.frequency_mhz != null ? `${p.frequency_mhz} MHz` : '';
         const sf = p.spreading_factor != null ? `SF${p.spreading_factor}` : '';
         const rssiPart = p.rssi != null ? `${round1(p.rssi)}${signalBarsHtml(p.rssi)}` : '';
+
+        const expandedDeviceId = expandedPacketPill.get(g.key);
+        const receiverPills = g.members.length > 1 ? `
+            <div class="receiver-pills">
+                ${g.members.map((m) => {
+                    const isActive = m.device_id === expandedDeviceId;
+                    const via = deviceNameById[m.device_id] || m.device_id;
+                    const rssiLabel = m.rssi != null ? `${round1(m.rssi)} dBm` : '';
+                    return `
+                        <span class="receiver-pill ${isActive ? 'active' : ''}" data-packet-key="${esc(g.key)}" data-device-id="${esc(m.device_id)}">
+                            ${esc(via)} ${esc(rssiLabel)}
+                            ${isActive ? '<span class="receiver-pill__toggle">&#9650;</span>' : ''}
+                        </span>`;
+                }).join('')}
+            </div>` : '';
+        const expandedMember = g.members.find((m) => m.device_id === expandedDeviceId);
+        const expandedRow = expandedMember ? `
+            <div class="badge-row">
+                <span class="badge">${esc(deviceNameById[expandedMember.device_id] || expandedMember.device_id)}</span>
+                ${expandedMember.rssi != null ? `<span class="badge">${round1(expandedMember.rssi)} dBm</span>` : ''}
+                ${expandedMember.snr != null ? `<span class="badge">SNR ${round1(expandedMember.snr)} dB</span>` : ''}
+                ${expandedMember.hop_count != null ? `<span class="badge">${expandedMember.hop_count} hops</span>` : ''}
+            </div>` : '';
+        // Single-capture packets (the common case, and always true against
+        // a real single meshpoint) keep the exact plain "via" text they
+        // always had -- pills only ever replace it when there's something
+        // real to disambiguate.
+        const viaLine = g.members.length > 1
+            ? ''
+            : `<span class="via">${esc(deviceNameById[p.device_id] || p.device_id)}</span>`;
+
         return `
-            <div class="packet-card" data-packet-index="${i}">
+            <div class="packet-card" data-group-index="${i}">
                 <div class="packet-card__head">
                     <span>
                         <span style="color:${color}">${esc((p.protocol || '').toUpperCase())}</span>
@@ -1606,9 +1657,11 @@ function renderPacketFeed() {
                     <span>${rssiPart}</span>
                 </div>
                 <div class="packet-card__detail">${esc(packetDetails(p))}</div>
+                ${receiverPills}
+                ${expandedRow}
                 <div class="packet-card__foot">
                     <span>${absTime(p.received_at)}</span>
-                    <span class="via">${esc(via)}</span>
+                    ${viaLine}
                     <span>${[freq, sf].filter(Boolean).join(' · ')}</span>
                     <span class="badges">
                         <span class="pill" style="color:${color}; border-color:${color}">${esc((p.protocol || '').toUpperCase())}</span>
@@ -1620,11 +1673,25 @@ function renderPacketFeed() {
 
     el.querySelectorAll('.packet-card').forEach((card) => {
         card.addEventListener('click', () => {
-            const p = packets[Number(card.dataset.packetIndex)];
-            if (p) openPacketModal(p);
+            const g = groups[Number(card.dataset.groupIndex)];
+            if (g) openPacketModal(g.representative, g.members);
+        });
+    });
+    el.querySelectorAll('.receiver-pill').forEach((pill) => {
+        pill.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const key = pill.dataset.packetKey;
+            const deviceId = pill.dataset.deviceId;
+            if (expandedPacketPill.get(key) === deviceId) expandedPacketPill.delete(key);
+            else expandedPacketPill.set(key, deviceId);
+            renderPacketFeed();
         });
     });
 }
+
+// Packet-feed equivalent of `expandedReceiverPill` (nodes) -- packet_id ->
+// the device_id whose own capture row is currently expanded on that card.
+let expandedPacketPill = new Map();
 
 ['packet-filter-type', 'packet-filter-protocol', 'packet-filter-device'].forEach((id) => {
     document.getElementById(id).addEventListener('change', (e) => {
@@ -1774,9 +1841,23 @@ function pdmLayer(title, rows) {
         </div>`;
 }
 
-function openPacketModal(p) {
+function openPacketModal(p, members = []) {
     const payload = p.decoded_payload;
     const via = deviceNameById[p.device_id] || p.device_id;
+    // Sorted best-signal-first, matching the card's own receiver-pill
+    // order -- empty (layer hidden) unless this packet was actually
+    // heard more than once, same "no change for a real single meshpoint"
+    // rule the node drawer's own "Heard via" already follows.
+    const capturedByRows = members.length > 1
+        ? members.slice().sort((a, b) => (b.rssi ?? -999) - (a.rssi ?? -999)).map((m) => ({
+            label: esc(deviceNameById[m.device_id] || m.device_id),
+            value: [
+                m.rssi != null ? `${round1(m.rssi)} dBm` : null,
+                m.snr != null ? `SNR ${round1(m.snr)} dB` : null,
+                m.hop_count != null ? `${m.hop_count} hops` : null,
+            ].filter(Boolean).join(' &middot; ') || null,
+        }))
+        : [];
 
     const modal = document.getElementById('pdm-modal');
     modal.innerHTML = `
@@ -1787,6 +1868,7 @@ function openPacketModal(p) {
             </div>
             <button class="pdm-close" id="pdm-close-btn">&times;</button>
         </div>
+        ${pdmLayer('Captured by', capturedByRows)}
         ${pdmLayer('RF', [
             { label: 'Frequency', value: p.frequency_mhz != null ? `${round1(p.frequency_mhz)} MHz` : null },
             { label: 'Modem', value: [p.spreading_factor != null ? `SF${p.spreading_factor}` : null,
