@@ -25,6 +25,7 @@ identity).
 | — | Firmware-flash cards/routes (existence) | ✅ Have it | — | `*_firmware_routes.py`, `*_firmware_card.js` |
 | **#7** | GPS-receiver port picker warning (Configuration → Serial) | ✅ Fixed | Small | `usb_classifier.py`, `serial_card.js` |
 | **#8** | "Installed" firmware version callout (Configuration → Firmware) | ✅ Fixed | Small-medium | `*_firmware_routes.py`, `*_firmware_card.js` |
+| **#9** | MeshCore DM contact-refresh has no throttle at all, hammers the bus on every incoming DM | 🔲 Found 2026-08-14, not yet ported | Small | `src/api/server.py:_refresh_mc_contacts` |
 | — | `serial_config_routes.py` | ✅ Have it (bigger) | — | 457 vs 141 lines |
 | — | `stats_chart_host.js` | ✅ Have it | — | credited to us |
 | — | Stats-tab / stats-reporter fixes | ✅ Ahead of upstream | — | `stats_tab.js`, `stats_reporter.py` |
@@ -192,6 +193,93 @@ identity).
         tests, already existing, exercises `send_set_radio_params`
         directly) to confirm the `no_event_received` reclassification
         didn't break anything already covered there — all 37 still pass.
+
+        **Superseded, 2026-08-14, by a49ef60's exclusive-lease approach**
+        (found on a second recheck of the compare, after #7/#8 landed).
+        The shared-handle design directly above — trust a clean success,
+        verify+retry-once over the source's own connection on a timeout
+        — is exactly what upstream *originally* shipped too (their own
+        `e7a9297`/`bf82ea2`/`dcff8b0`, what this fork ported). But their
+        own later real-hardware testing found it still insufficient:
+        `a49ef60`'s commit message states plainly, "Live shared-handle
+        set_radio failed for USA/Canada with no_event_received while
+        cold exclusive access worked on the test Pi." They replaced it
+        with: detach the capture source entirely (cancel its health/
+        reconnect tasks, close its live connection), open a brand-new
+        EXCLUSIVE connection, set the radio, reboot, cold-reconnect,
+        verify, then reattach the source's own reconnect machinery —
+        matching the standalone `meshpoint meshcore-radio` CLI's cold
+        path instead of reusing the live connection at all. This now
+        runs on *every* `set_radio_params()` call once bound to a
+        source, not just as a timeout fallback — there's no way to know
+        in advance which changes will hit the ambiguous no-response case.
+        **Ported as the new primary path**, replacing the shared-handle
+        design above entirely (this fork's own architecture differs from
+        upstream's: `set_radio_params()` is a method on
+        `MeshcoreUsbCaptureSource` itself, not a separate `MeshCoreTxClient`
+        bound to one "primary" source via `self._source` — the port
+        keeps upstream's real detach/cold-connect/verify/reattach logic
+        but drops the `getattr(source, ...)` indirection layer that
+        exists only because of that structural difference). New
+        `src/capture/meshcore_dtr.py` (`pulse_dtr_reset()`, extracted
+        from the existing private `_pulse_dtr_reset` instance method so
+        both the source's own reconnect loop and this new exclusive
+        cold-path can use it without a bound instance). `_wait_connected()`/
+        `_verify_radio_params_after_reconnect()` (the old shared-handle
+        verify machinery) deleted as dead code once nothing called them
+        anymore. Reused `send_set_radio_params()`/`read_radio_status()`
+        as-is on the fresh exclusive connections rather than
+        reimplementing their validation/timeout-reclassification/parsing
+        logic a second time.
+        **Real trade-off, deliberately not hidden**: unlike the old
+        shared-handle path (near-instant on the common same-band case),
+        this now ALWAYS pays the full detach → cold-connect → set →
+        reboot-wait (8s) → cold-reconnect → verify sequence, typically
+        ~15-20s, since there's no way to know ahead of time whether a
+        given change needs the recovery path or not. Confirmed this
+        fits the existing UI contract without any frontend change needed
+        — `meshcore_card.js`'s save button already shows a disabled
+        pending state and its own copy already says "this can take up
+        to a minute."
+        Real test added (`tests/test_meshcore_exclusive_radio_apply.py`,
+        replacing the now-obsolete `test_meshcore_radio_params_verify.py`
+        which tested behavior that no longer exists — deleted) — stubs
+        the `meshcore` package into `sys.modules` (not installed on this
+        Mac, needed since the new code does `from meshcore import
+        MeshCore` internally) — 7/7 pass: not-connected short-circuits
+        without touching the port; a clean success detaches, cold-
+        applies, verifies, and reattaches (asserted exactly 2 cold
+        connections — apply + verify — and a real reconnect task
+        scheduled after); a timeout with a matching post-reconnect
+        readback still succeeds; a timeout with a mismatched readback
+        reports failure; a clean rejection (e.g. out-of-range) never
+        attempts reboot/verify at all; an initial cold-connect handshake
+        failure still reattaches (via the `finally` in `set_radio_params()`);
+        a verify-phase reconnect that never comes back reports a timed-
+        out failure instead of hanging. One real test-harness bug caught
+        and fixed along the way: the reattach step schedules a real
+        background reconnect task, which without cancelling pending
+        tasks after each test would retry forever on real multi-second
+        backoff sleeps once the test's own mocked connect patches had
+        already gone out of scope — fixed by cancelling pending tasks in
+        the test's `_run()` helper instead of awaiting them to
+        completion, same fix shape `test_serial_source_reconnect.py`
+        already used for the same class of problem.
+        Also re-ran `tests/test_meshcore_tx_client.py` (44 tests, since
+        `send_set_radio_params()`/`read_radio_status()` are reused
+        unchanged by the new exclusive path) — all still pass, confirms
+        nothing broke in the function this now leans on more heavily.
+        `tests/test_meshcore_usb.py` (general reconnect/lifecycle) and
+        `tests/test_meshcore_companion_radio_route.py` (the
+        `/companion-radio` route, unaffected — still only reads
+        `result.success`/`result.error`, same `SendResult` contract as
+        before) both need `Crypto`/`fastapi` respectively, neither
+        installed on this Mac — syntax-checked only, confirmed neither
+        references the removed methods by name. **Not yet live-verified
+        on real hardware** — this is the single most important item to
+        verify live, since it's specifically meant to fix a cross-band
+        (EU→USA/Canada) failure that could only ever be confirmed on
+        real MeshCore companion hardware in the first place.
 
       - [x] **#2c** FIXED. `CaptureCoordinator.start()` (`src/capture/capture_coordinator.py:32`)
         had no try/except around `await source.start()` — one source's
@@ -396,14 +484,56 @@ bump/changelog/README/RC-channel commits, merge commits.
 
 ## Status
 
-All real gaps found in this pass (#2a–#2d, #3, #4, #5, #6, #7, #8) are now
-fixed — each as a clean reimplementation matching this fork's own
-conventions, not a merge/cherry-pick (709 commits of independent history
-on our side made a real merge impractical). Only #1 (esptool venv-symlink
-resolver) remains un-ported, deliberately: the current hardcoded-PATH
-lookup fails loudly, not silently, when it's wrong.
+All real gaps found so far (#2a–#2d, #3, #4, #5, #6, #7, #8) are fixed —
+each as a clean reimplementation matching this fork's own conventions,
+not a merge/cherry-pick (709 commits of independent history on our side
+made a real merge impractical). #1 (esptool venv-symlink resolver)
+remains un-ported, deliberately: the current hardcoded-PATH lookup fails
+loudly, not silently, when it's wrong. **#9 was found on the 2026-08-14
+recheck but not yet ported** — user chose to prioritize #2b's
+supersession first; #9 is independent and still open, small effort.
 #2b/#2d needed real research into upstream's actual commits rather than
-guessed designs — see their entries above for what changed after checking.
+guessed designs — see their entries above for what changed after
+checking; #2b was actually re-opened and re-fixed a second time the same
+day (see its "Superseded" note) after a second, more thorough recheck of
+the same compare found upstream's own fix had moved on further than what
+this fork had ported.
+
+## #9: MeshCore DM contact-refresh has no throttle, found 2026-08-14
+
+Found alongside #2b's supersession, while checking `f6afe0f`/`c12da51`
+(upstream's later MeshCore-messaging hardening, on the same files this
+fork already touched for #2a/#6) — not part of what got ported this
+session, since the user chose the #2b port first. Real, live,
+**independent of anything ported from upstream** — this is a bug in this
+fork's own existing code, just one upstream happened to also hit and fix
+around the same time.
+
+`src/api/server.py`'s `_refresh_mc_contacts()` (inside
+`_setup_message_interception`) calls the live `meshcore_tx.get_contacts()`
+(a ~5-10s USB round trip that holds the companion's serial command
+channel) on **every single incoming MeshCore DM**, completely
+unthrottled — confirmed by reading the actual call site
+(`_save_and_notify()`'s `if is_mc_dm: ... await _refresh_mc_contacts()`,
+no rate-limit/cooldown anywhere around it). If several DMs arrive close
+together (multiple contacts messaging around the same time, or one
+contact sending a quick back-to-back burst), this fires the live bus
+call repeatedly, which is exactly the "bus hammering" / TX-starvation
+bug class this whole audit has been chasing elsewhere (#2a, #6, #2b).
+
+Upstream's own fix for the identical problem (`f6afe0f`'s `server.py`
+hunk) added a 60s minimum interval between refreshes
+(`_MC_REFRESH_MIN_INTERVAL_S`, `time.monotonic()`-gated) — small,
+self-contained, same shape as #7/#8. Worth porting on its own regardless
+of whether the rest of `f6afe0f`/`c12da51`'s much larger command-
+serialization architecture (`_cmd_lock`, a proper `MeshcoreContactCache`
+class with soft-fail cooldown, `_pause_auto_fetch`/`_resume_auto_fetch`
+wrapped around *every* companion command) ever gets ported — this fork
+currently has none of that broader infrastructure at all, confirmed by
+grepping `meshcore_tx_client.py` for `_cmd_lock`/`MeshcoreContactCache`/
+`_pause_auto_fetch` (none found). Whether to adopt that whole
+architecture too, versus just the narrow throttle fix, is worth deciding
+explicitly when this gets picked up rather than assumed.
 
 ## Recheck, 2026-08-14 — found #7 and #8 by reading full diffs, not just messages
 

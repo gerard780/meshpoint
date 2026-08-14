@@ -42,27 +42,27 @@ _MESHCORE_COMMAND_TIMEOUT_SECONDS = 12.0
 _HEALTH_CHECK_TIMEOUT_SECONDS = 15.0
 _RECONNECT_BASE_DELAY_SECONDS = 5
 _RECONNECT_MAX_DELAY_SECONDS = 60
-_DTR_RESET_PULSE_SECONDS = 0.1
-# How long set_radio_params() waits for the post-timeout reconnect before
-# giving up on *verifying* the change stuck -- not how long the source
-# keeps trying overall. _reconnect() itself has no such cap (it backs
-# off forever so the source always eventually self-heals); this only
-# bounds how long the HTTP request that triggered the change stays open,
-# and only applies when the set_radio command itself timed out (see
-# set_radio_params()'s docstring for why a clean success doesn't wait at
-# all). 75s, not a guess -- matches the real value found live: "first
-# reconnect attempt + DTR retry path observed ~30s on a RAK V2", plus
-# margin.
-_RADIO_VERIFY_TIMEOUT_SECONDS = 75.0
-_RADIO_VERIFY_POLL_INTERVAL_SECONDS = 1.0
-# Before retrying set_radio live on the freshly-reconnected link, confirm
-# there's actually still a connection to send it over (a short wait, not
-# the full verify window again -- if it hasn't reconnected by now it
-# isn't about to in the next few seconds either).
-_RADIO_RETRY_CONNECTED_CHECK_SECONDS = 5.0
-# Give the reconnect a moment to fully settle before sending another
-# command on it.
-_RADIO_RETRY_SETTLE_SECONDS = 1.5
+# set_radio_params() applies over an exclusive, temporary connection
+# instead of the source's own shared/live one (see its docstring) --
+# real-hardware testing (matching upstream KMX415/meshpoint's own
+# a49ef60, "Live shared-handle set_radio failed for USA/Canada with
+# no_event_received while cold exclusive access worked") found the
+# shared-handle approach this used to be (send over self._meshcore,
+# verify via the source's own reconnect) could still silently fail on a
+# cross-band change even with a verify-and-retry-once path -- a
+# genuinely separate, exclusive connection for the whole
+# set+reboot+verify sequence is what's actually reliable. A longer
+# handshake timeout than steady-state commands get (_MESHCORE_COMMAND_
+# TIMEOUT_SECONDS): this connection is always cold, right after a DTR
+# reset, so it needs the same slack a fresh boot-up handshake needs.
+_RADIO_EXCLUSIVE_HANDSHAKE_TIMEOUT_SECONDS = 15.0
+# How long to wait after sending reboot() before attempting the
+# post-apply reconnect -- matches the real observed ESP32-S3 boot time
+# this whole recovery path was built around.
+_RADIO_EXCLUSIVE_REBOOT_SETTLE_SECONDS = 8.0
+# Settle time after a DTR pulse, before the next connect attempt --
+# same value the main reconnect loop already uses for the same reason.
+_RADIO_EXCLUSIVE_DTR_SETTLE_SECONDS = 2.0
 # Tolerance for comparing a requested preset against what the radio
 # reports back post-reconnect -- SELF_INFO values round-trip through the
 # firmware's own fixed-point representation, so an exact `==` would
@@ -340,8 +340,10 @@ class MeshcoreUsbCaptureSource(CaptureSource):
                 # _health_check_loop's docstring) before even one plain
                 # attempt has been given a chance.
                 if attempt >= 1 and self._resolved_port:
+                    from src.capture.meshcore_dtr import pulse_dtr_reset
+
                     await asyncio.to_thread(
-                        self._pulse_dtr_reset, self._resolved_port
+                        pulse_dtr_reset, self._resolved_port, self._baud_rate,
                     )
                     # Give the chip a moment to come back from reset.
                     await asyncio.sleep(2.0)
@@ -354,34 +356,6 @@ class MeshcoreUsbCaptureSource(CaptureSource):
                 delay = min(delay * 2, _RECONNECT_MAX_DELAY_SECONDS)
         finally:
             self._reconnect_in_progress = False
-
-    def _pulse_dtr_reset(self, port: str) -> None:
-        """Toggle DTR low to soft-reset an ESP32 companion. Best-effort.
-
-        Runs in a worker thread (called via asyncio.to_thread) because
-        pyserial's open and the DTR sleep are blocking. Safe to fail
-        silently: if the host's serial driver doesn't expose DTR or the
-        port is unavailable, we just skip and let the regular reconnect
-        attempt proceed.
-        """
-        try:
-            import serial  # transitive dep via meshcore lib
-        except ImportError:
-            return
-        try:
-            import time as _time
-            with serial.Serial(port, self._baud_rate, timeout=0.5) as ser:
-                ser.dtr = False
-                _time.sleep(_DTR_RESET_PULSE_SECONDS)
-                ser.dtr = True
-            logger.info(
-                "MeshCore USB pulsed DTR on %s to attempt soft reset",
-                port,
-            )
-        except Exception as exc:
-            logger.debug(
-                "MeshCore USB DTR pulse skipped on %s: %s", port, exc
-            )
 
     async def _health_check_loop(self) -> None:
         """Periodically verify the serial companion is still responding.
@@ -591,121 +565,167 @@ class MeshcoreUsbCaptureSource(CaptureSource):
 
     async def set_radio_params(self, freq: float, bw: float, sf: int, cr: int) -> SendResult:
         """Set THIS companion's radio frequency/bandwidth/SF/CR and reboot
-        it to apply, over its own already-open connection.
+        it to apply, over a temporary EXCLUSIVE connection -- not the
+        source's own shared/live one.
 
-        Unlike the standalone `meshpoint meshcore-radio` CLI (which has
-        to stop the whole meshpoint service, steal the port, and cold-
-        connect within a fixed handshake timeout -- and can fail on
-        ESP32-S3 boards that need longer than that to come back up),
-        this reuses the live connection the source already holds and
-        hands recovery off to the SAME reconnect machinery that
-        already handles unexpected disconnects (_reconnect(): backoff
-        + DTR reset pulse).
+        This used to reuse the live connection (send over self._meshcore,
+        verify-and-retry-once over the source's own reconnect on a
+        timeout). That worked for same-band changes but real-hardware
+        testing found it could still fail with `no_event_received` on a
+        cross-band change (e.g. EU -> USA/Canada) even with that
+        retry -- matching upstream KMX415/meshpoint's own independently-
+        confirmed finding on the same bug ("Live shared-handle set_radio
+        failed for USA/Canada... cold exclusive access worked on the
+        test Pi"). A genuinely separate connection for the whole
+        set+reboot+verify sequence, instead of contending with whatever
+        else the shared connection is doing (auto-fetch polling, the
+        health-check loop), is what's actually reliable.
 
-        A CLEAN success (the firmware acked and is rebooting) is trusted
-        at face value -- trigger reconnect and return immediately,
-        matching config_routes.py's own `rebooting: true` contract (the
-        frontend already shows a "reconnecting" state rather than
-        expecting an instant refresh). No verify wait on this path: it's
-        the common case, and blocking a browser-initiated request for up
-        to `_RADIO_VERIFY_TIMEOUT_SECONDS` on every ordinary radio change
-        would be a real regression for the case that already works fine.
-
-        A TIMEOUT is different -- `send_set_radio_params()` reports one
-        both for a genuine no-response AND for the companion's own
-        `no_event_received`/`timeout` ERROR reason, which is what a
-        cross-band change (e.g. EU -> USA/Canada) does in practice: it
-        silently reboots before it gets a chance to ACK. That's
-        ambiguous -- the params may have already taken even though we
-        never heard back -- so this path waits for the reconnect and
-        reads the radio back to confirm, retrying the set once live on
-        the fresh connection if the first attempt didn't stick.
+        Trade-off worth knowing: unlike the old shared-handle path (which
+        returned near-instantly on the common, same-band case), this
+        ALWAYS pays the full detach -> cold-connect -> set -> reboot-wait
+        -> cold-reconnect -> verify sequence, typically ~15-20s, since
+        there's no way to know in advance whether a given change will
+        hit the ambiguous no-response case or not. The dashboard's own
+        save button already shows a pending state and its own copy
+        already says "this can take up to a minute" (meshcore_card.js),
+        so this fits the existing UI contract rather than needing any
+        frontend change.
         """
         if not self.connected:
             return SendResult(success=False, error="Not connected")
-        result = await send_set_radio_params(self._meshcore, freq, bw, sf, cr)
-        if result.success:
-            self._trigger_reconnect(
-                f"radio set to {freq:.3f} MHz / BW{bw:.1f} / SF{sf} / CR{cr} -- rebooting"
-            )
-            return result
-        if not result.timed_out:
-            return result
 
-        self._trigger_reconnect(result.error or "set_radio timed out")
-        verified = await self._verify_radio_params_after_reconnect(freq, bw, sf, cr)
-        if verified.success:
-            return verified
+        port = await self._detach_for_exclusive_radio_apply()
+        if not port:
+            await self._reattach_after_exclusive_radio_apply()
+            return SendResult(success=False, error="MeshCore serial port not resolved")
 
-        # Only worth a live retry if there's actually a connection to
-        # send it over -- a short check, not the full verify window
-        # again: if it hasn't come back by now it isn't about to in the
-        # next few seconds either.
-        if not await self._wait_connected(_RADIO_RETRY_CONNECTED_CHECK_SECONDS):
-            return verified
+        try:
+            return await self._apply_radio_params_exclusive(port, freq, bw, sf, cr)
+        finally:
+            await self._reattach_after_exclusive_radio_apply()
 
-        logger.warning(
-            "MeshCore companion %r: still on the old preset after reconnect "
-            "(%.3f MHz / BW%.1f / SF%d / CR%d requested) -- retrying once on the live link",
-            self.name, freq, bw, sf, cr,
-        )
-        await asyncio.sleep(_RADIO_RETRY_SETTLE_SECONDS)
-        retry = await send_set_radio_params(self._meshcore, freq, bw, sf, cr)
-        if retry.success:
-            self._trigger_reconnect(
-                f"radio set to {freq:.3f} MHz / BW{bw:.1f} / SF{sf} / CR{cr} -- rebooting (retry)"
-            )
-            return retry
-        if not retry.timed_out:
-            return retry
-        self._trigger_reconnect(retry.error or "set_radio timed out")
-        return await self._verify_radio_params_after_reconnect(freq, bw, sf, cr)
-
-    async def _wait_connected(self, timeout_seconds: float) -> bool:
-        """Poll `self.connected` up to `timeout_seconds`, without ever
-        touching `_reconnect_task` directly -- `_reconnect()` itself
-        backs off forever with no overall give-up point (by design, so
-        the source always eventually self-heals), so awaiting that task
-        here would risk hanging the caller indefinitely if the companion
-        never comes back, and cancelling it to bound that wait would
-        stop the real background recovery too. Giving up here only means
-        this particular call stops waiting -- it does not affect the
-        reconnect loop, which keeps retrying on its own regardless.
+    async def _detach_for_exclusive_radio_apply(self) -> Optional[str]:
+        """Hand the serial port over from this source's own live
+        connection to a cold, exclusive one for the duration of a
+        set_radio_params() call -- see its docstring for why. Cancels
+        the health-check and reconnect tasks (if either happens to be
+        running) and closes self._meshcore, exactly the same shutdown
+        _reconnect() already does before reopening, just without the
+        backoff loop around it.
         """
-        deadline = asyncio.get_event_loop().time() + timeout_seconds
-        while not self.connected:
-            if asyncio.get_event_loop().time() >= deadline:
-                return False
-            await asyncio.sleep(_RADIO_VERIFY_POLL_INTERVAL_SECONDS)
-        return True
+        port = self._resolved_port
+        if not port:
+            return None
+        logger.info(
+            "MeshCore companion %r: detaching %s for exclusive radio config",
+            self.name, port,
+        )
+        for attr in ("_health_task", "_reconnect_task"):
+            task = getattr(self, attr)
+            if task is not None:
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+                setattr(self, attr, None)
+        self._reconnect_in_progress = False
+        await self._disconnect()
+        return port
 
-    async def _verify_radio_params_after_reconnect(
-        self, freq: float, bw: float, sf: int, cr: int,
-    ) -> SendResult:
-        """After a set_radio timeout + triggered reconnect: wait for the
-        companion to come back and confirm its radio now actually
-        matches what was requested."""
-        logger.warning(
-            "MeshCore companion %r: set_radio timed out; waiting for "
-            "reconnect to verify (silent reboot is common on cross-band changes)",
+    async def _reattach_after_exclusive_radio_apply(self) -> None:
+        """Hand the port back to the source's own reconnect machinery --
+        same fallback `start()` already uses for a failed initial
+        connect, so a companion that came back up mid-config settles
+        into the normal health-check loop exactly the same way."""
+        if not self._running:
+            return
+        logger.info(
+            "MeshCore companion %r: reattaching after exclusive radio config",
             self.name,
         )
-        if not await self._wait_connected(_RADIO_VERIFY_TIMEOUT_SECONDS):
+        self._reconnect_task = asyncio.create_task(
+            self._reconnect_until_connected(),
+            name="meshcore-post-radio-config-reconnect",
+        )
+
+    async def _apply_radio_params_exclusive(
+        self, port: str, freq: float, bw: float, sf: int, cr: int,
+    ) -> SendResult:
+        """The actual cold set+reboot+verify sequence, on its own
+        exclusive connection to `port`. Caller must have already
+        detached the source's own connection first (see
+        set_radio_params()) and is responsible for reattaching after.
+        """
+        try:
+            from meshcore import MeshCore
+        except Exception:
+            return SendResult(success=False, error="meshcore library unavailable")
+
+        from src.capture.meshcore_dtr import pulse_dtr_reset
+
+        await asyncio.to_thread(pulse_dtr_reset, port, self._baud_rate)
+        await asyncio.sleep(_RADIO_EXCLUSIVE_DTR_SETTLE_SECONDS)
+
+        mc = await MeshCore.create_serial(
+            port, self._baud_rate,
+            default_timeout=_RADIO_EXCLUSIVE_HANDSHAKE_TIMEOUT_SECONDS,
+        )
+        if mc is None:
             return SendResult(
                 success=False,
-                error=(
-                    "set_radio timed out and the companion did not reconnect "
-                    "in time; wait for it to come back online and retry"
-                ),
+                error="MeshCore handshake failed during exclusive radio set",
+            )
+
+        try:
+            result = await send_set_radio_params(mc, freq, bw, sf, cr)
+        finally:
+            try:
+                await mc.disconnect()
+            except Exception:
+                pass
+
+        if result.success:
+            logger.info(
+                "MeshCore companion %r: exclusive set_radio acked "
+                "(%.3f MHz / BW%.1f / SF%d / CR%d), verifying after reboot",
+                self.name, freq, bw, sf, cr,
+            )
+        elif not result.timed_out:
+            # A clean rejection (e.g. out-of-range params) -- nothing
+            # rebooted, nothing to verify.
+            return result
+
+        await asyncio.sleep(_RADIO_EXCLUSIVE_REBOOT_SETTLE_SECONDS)
+        await asyncio.to_thread(pulse_dtr_reset, port, self._baud_rate)
+        await asyncio.sleep(_RADIO_EXCLUSIVE_DTR_SETTLE_SECONDS)
+
+        mc2 = await MeshCore.create_serial(
+            port, self._baud_rate,
+            default_timeout=_RADIO_EXCLUSIVE_HANDSHAKE_TIMEOUT_SECONDS,
+        )
+        if mc2 is None:
+            return SendResult(
+                success=False,
+                error="set_radio sent but the companion did not come back for verify",
                 timed_out=True,
             )
-        status = await self.get_radio_info()
+
+        try:
+            status = await read_radio_status(mc2)
+        finally:
+            try:
+                await mc2.disconnect()
+            except Exception:
+                pass
+
         if status is None:
             return SendResult(
                 success=False,
                 error=(
-                    "set_radio timed out; companion reconnected but its "
-                    "radio info is unavailable; check the preset and retry"
+                    "set_radio sent; companion reconnected but its radio "
+                    "info is unavailable; check the preset and retry"
                 ),
                 timed_out=True,
             )
@@ -716,7 +736,7 @@ class MeshcoreUsbCaptureSource(CaptureSource):
             and status.coding_rate == cr
         ):
             logger.info(
-                "MeshCore companion %r: set_radio timeout recovered, radio "
+                "MeshCore companion %r: exclusive set_radio verified, radio "
                 "matches %.3f MHz / BW%.1f / SF%d / CR%d",
                 self.name, freq, bw, sf, cr,
             )
@@ -724,7 +744,7 @@ class MeshcoreUsbCaptureSource(CaptureSource):
         return SendResult(
             success=False,
             error=(
-                "set_radio timed out; companion reconnected but its radio is "
+                "set_radio sent; companion's radio is "
                 f"{status.frequency_mhz:.3f} MHz / BW{status.bandwidth_khz:.1f} "
                 f"/ SF{status.spreading_factor} / CR{status.coding_rate} "
                 f"(wanted {freq:.3f} / BW{bw:.1f} / SF{sf} / CR{cr})"
