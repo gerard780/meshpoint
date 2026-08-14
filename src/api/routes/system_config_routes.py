@@ -164,7 +164,10 @@ async def get_serial_ports(_claims: SessionClaims = Depends(require_auth)) -> di
     ``/dev/ttyS0``), which never carry a VID/PID and are never a
     MeshCore/Meshtastic USB stick.
     """
-    from src.hal.usb_classifier import list_serial_ports_with_stable_paths
+    from src.hal.usb_classifier import (
+        list_serial_ports_with_stable_paths,
+        serial_port_held_hint,
+    )
     ports = [p for p in list_serial_ports_with_stable_paths() if p.vid is not None]
     return {
         "ports": [
@@ -176,6 +179,8 @@ async def get_serial_ports(_claims: SessionClaims = Depends(require_auth)) -> di
                 "description": p.description,
                 "vid": f"{p.vid:04x}" if p.vid is not None else None,
                 "pid": f"{p.pid:04x}" if p.pid is not None else None,
+                "port_class": p.port_class.value,
+                "held_hint": serial_port_held_hint(p.port_class),
             }
             for p in ports
         ],

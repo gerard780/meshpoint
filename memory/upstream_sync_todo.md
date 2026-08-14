@@ -23,7 +23,7 @@ identity).
 | — | Bearer-token login (`X-Meshpoint-Client`) | ✅ Have it | — | `auth_routes.py` |
 | — | `meshtastic_hw_names.js` | ✅ Have it | — | credited to us |
 | — | Firmware-flash cards/routes (existence) | ✅ Have it | — | `*_firmware_routes.py`, `*_firmware_card.js` |
-| **#7** | GPS-receiver port picker warning (Configuration → Serial) | ⏭️ Found 2026-08-14, not yet ported | Small | `usb_classifier.py`, `serial_card.js` |
+| **#7** | GPS-receiver port picker warning (Configuration → Serial) | ✅ Fixed | Small | `usb_classifier.py`, `serial_card.js` |
 | **#8** | "Installed" firmware version callout (Configuration → Firmware) | ✅ Fixed | Small-medium | `*_firmware_routes.py`, `*_firmware_card.js` |
 | — | `serial_config_routes.py` | ✅ Have it (bigger) | — | 457 vs 141 lines |
 | — | `stats_chart_host.js` | ✅ Have it | — | credited to us |
@@ -396,14 +396,12 @@ bump/changelog/README/RC-channel commits, merge commits.
 
 ## Status
 
-All real gaps found in this pass (#2a–#2d, #3, #4, #5, #6, #8) are now
+All real gaps found in this pass (#2a–#2d, #3, #4, #5, #6, #7, #8) are now
 fixed — each as a clean reimplementation matching this fork's own
 conventions, not a merge/cherry-pick (709 commits of independent history
-on our side made a real merge impractical). #1 (esptool venv-symlink
-resolver) and #7 (GPS-port picker warning) remain un-ported, both
-deliberately: #1 because the current hardcoded-PATH lookup fails loudly,
-not silently, when it's wrong; #7 found on a later recheck and deferred
-by the user for now (small, self-contained, safe to pick up any time).
+on our side made a real merge impractical). Only #1 (esptool venv-symlink
+resolver) remains un-ported, deliberately: the current hardcoded-PATH
+lookup fails loudly, not silently, when it's wrong.
 #2b/#2d needed real research into upstream's actual commits rather than
 guessed designs — see their entries above for what changed after checking.
 
@@ -482,21 +480,47 @@ second time here):
   stick and a connected MeshCore companion, and that it updates after a
   real flash.
 
-- **[ ] #7 found, not yet ported (user chose to defer this one).** The
-  other half of `602361a` (bundled with #2d in the same upstream commit,
-  but a genuinely separate feature): Configuration → Serial's port picker
-  warns when a selected port looks like a GPS receiver (a `[GPS]` tag in
-  the dropdown, an amber hint under the field, and a confirm-before-save
-  dialog) — useful because `gpsd` often holds a GPS port, so pinning one
-  for Meshtastic serial capture fails in a confusing way (the new #2d
-  background-retry loop would just quietly retry forever against a port
-  that was never going to work). This fork already has all the detection
-  infrastructure needed (`usb_classifier.py`'s `PortClass.GPS_KNOWN`,
-  `UsbPortClassifier`, already used by `should_skip_for_meshcore_probe`) —
-  the gap is purely in not surfacing a `held_hint`/`port_class` field on
-  `StablePortInfo`/`list_serial_ports_with_stable_paths()` and not wiring
-  a warning into `serial_card.js`'s port picker. Small, self-contained,
-  same shape as #8. Pick up whenever asked for specifically.
+- **[x] #7 FIXED, 2026-08-14.** The other half of `602361a` (bundled with
+  #2d in the same upstream commit, but a genuinely separate feature):
+  Configuration → Serial's port picker warns when a selected port looks
+  like a GPS receiver — useful because `gpsd` often holds a GPS port, so
+  pinning one for Meshtastic serial capture fails in a confusing way
+  (the #2d background-retry loop just quietly retries forever against a
+  port that was never going to work, rather than raising once).
+  This fork already had all the detection infrastructure
+  (`usb_classifier.py`'s `PortClass.GPS_KNOWN`, `UsbPortClassifier`,
+  already used by `should_skip_for_meshcore_probe`) — the gap was purely
+  in not surfacing it on the port-picker's own data path:
+  - `StablePortInfo` gained a `port_class` field (default `UNKNOWN`, so
+    every existing caller stayed source-compatible — checked all 9 other
+    call sites of `list_serial_ports_with_stable_paths()`, none construct
+    `StablePortInfo` directly). New `serial_port_held_hint(port_class)`
+    returns the warning text for `GPS_KNOWN`, `None` otherwise.
+  - `GET /api/config/serial-ports` (`system_config_routes.py`) now
+    includes `port_class`/`held_hint` per port.
+  - `serial_card.js`: GPS-classified ports get a `GPS` tag appended in
+    the datalist option label (same join-with-dash pattern the existing
+    "used by ..." suffix already uses); a new amber hint line
+    (`.cfg-field__hint--warn`, reuses the existing `--brand-amber` token)
+    appears under the Serial port field when the currently-typed/picked
+    value resolves to one; saving with a GPS port selected asks for
+    confirmation via the app's existing `window.confirmModal` helper
+    (same `_confirm()`-with-native-fallback pattern already used by
+    `metrics_card.js`) instead of upstream's plain `window.confirm`.
+  - `docs/COMMON-ERRORS.md` gained a new "Meshtastic USB serial" section
+    covering this.
+  Real tests added to the existing `tests/test_usb_classifier.py` (pure
+  stdlib + `pyserial`, no FastAPI needed, ran directly on this Mac) — 4
+  new tests (GPS_KNOWN/UNKNOWN hint text, `port_class` carried through
+  `list_serial_ports_with_stable_paths()` for both a GPS and a non-GPS
+  port) — full suite 19/19 pass, including all pre-existing tests
+  unaffected by the new dataclass field. `py_compile` clean on the
+  backend route change; `node --check` and CSS brace-balance
+  (all files) clean on the frontend changes. CHANGELOG bullet added
+  under `v0.8.0`. **Not yet live-verified on the Pi** — next step is
+  plugging in a real (or simulated-VID) GPS stick and confirming the
+  `[GPS]` tag/warning/confirm dialog actually appear on Configuration →
+  Serial.
 
 - **Checked and ruled out, not a gap**: `2833f8c` ("Treat MeshCore
   get_contacts None/timeout as empty instead of crashing") looked

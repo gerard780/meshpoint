@@ -143,6 +143,7 @@ class StablePortInfo:
     description: str
     vid: Optional[int]
     pid: Optional[int]
+    port_class: PortClass = PortClass.UNKNOWN
 
 
 def list_serial_ports_with_stable_paths() -> list["StablePortInfo"]:
@@ -188,8 +189,30 @@ def list_serial_ports_with_stable_paths() -> list["StablePortInfo"]:
             description=description,
             vid=info.vid,
             pid=info.pid,
+            port_class=info.port_class,
         ))
     return ports
+
+
+def serial_port_held_hint(port_class: PortClass) -> Optional[str]:
+    """Operator-facing warning for a port picker entry that's risky to
+    pin for Meshtastic/MeshCore serial capture -- ``None`` when there's
+    nothing to warn about.
+
+    Currently only covers the one classification that's actually
+    dangerous to mis-pick: a known GPS receiver, which ``gpsd`` commonly
+    holds open, so pinning it for radio capture leaves that capture
+    source unable to ever open the port (retrying forever in the
+    background as of the #2d reconnect-loop fix, rather than failing
+    loudly once -- which makes a wrong pick here easier to miss, not
+    harder, hence the warning).
+    """
+    if port_class is PortClass.GPS_KNOWN:
+        return (
+            "This looks like a GPS receiver; gpsd may hold the port "
+            "and Meshtastic capture will fail until the port is free."
+        )
+    return None
 
 
 def should_skip_for_meshcore_probe(port: str) -> bool:

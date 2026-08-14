@@ -200,6 +200,19 @@
     margin: 0 0 10px;
 }
 
+/* GPS-port-picker warning (Configuration -> Serial's "Serial port" field) --
+ * gpsd commonly holds a GPS receiver open, so pinning one here fails
+ * capture in a confusing way; amber to read as a caution, not an error. */
+.cfg-field__hint--warn {
+    display: block;
+    margin-top: 4px;
+    color: var(--brand-amber, #ffb84d);
+}
+
+.cfg-field__hint--warn:empty {
+    display: none;
+}
+
 .cfg-field__hint code {
     font-family: 'JetBrains Mono', Menlo, monospace;
     font-size: 11px;

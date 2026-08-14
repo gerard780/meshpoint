@@ -849,6 +849,27 @@ the other browser will get bumped.
 
 ---
 
+## Meshtastic USB serial
+
+### GPS receiver picked as a Meshtastic serial port
+
+**Cause:** A u-blox (or similar) USB GPS receiver can appear in the same
+`/dev/ttyACM*`/`/dev/ttyUSB*` list as Heltec/T-Beam radios on
+Configuration → Serial's port picker. Saving it there makes the
+Meshtastic serial capture source try to open a port `gpsd` commonly
+already holds -- it fails to connect, and (since the background
+reconnect fix) quietly keeps retrying forever rather than raising once,
+which can make the wrong pick harder to notice, not easier.
+
+**Fix:** Ports recognized as GPS receivers (confirmed hardware only,
+currently u-blox 7/8 USB sticks) show a **GPS** tag in the port picker's
+dropdown, and an amber warning appears under the field once one is
+selected. Saving with a GPS port selected asks for confirmation first.
+Prefer a `/dev/serial/by-path/…` entry pointing at the actual radio
+instead; leave the GPS receiver for Configuration → GPS / `gpsd`.
+
+---
+
 ## MeshCore companion
 
 ### Dashboard says not connected but MeshCore packets appear in logs

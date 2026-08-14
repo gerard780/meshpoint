@@ -9,6 +9,8 @@ from src.hal.usb_classifier import (
     PortClass,
     PortInfo,
     UsbPortClassifier,
+    list_serial_ports_with_stable_paths,
+    serial_port_held_hint,
     should_skip_for_meshcore_probe,
 )
 
@@ -210,6 +212,59 @@ class TestPortInfoDataclass(unittest.TestCase):
         )
         with self.assertRaises(Exception):
             info.device = "/dev/ttyACM1"  # type: ignore[misc]
+
+
+class TestSerialPortHeldHint(unittest.TestCase):
+    """Operator-facing warning surfaced on the Configuration -> Serial
+    port picker -- gpsd commonly holds a GPS port, so pinning one for
+    Meshtastic serial capture fails in a confusing way (as of the
+    background-reconnect fix, silently retrying forever rather than
+    raising once), hence a warning at pick-time instead of only at
+    connect-failure time."""
+
+    def test_gps_known_returns_a_hint(self) -> None:
+        hint = serial_port_held_hint(PortClass.GPS_KNOWN)
+        self.assertIsInstance(hint, str)
+        self.assertIn("GPS", hint)
+
+    def test_unknown_returns_none(self) -> None:
+        self.assertIsNone(serial_port_held_hint(PortClass.UNKNOWN))
+
+
+class TestListSerialPortsWithStablePathsPortClass(unittest.TestCase):
+    """``list_serial_ports_with_stable_paths`` (the dashboard port
+    picker's actual data source) must carry each port's classification
+    through -- this is what #7's ``held_hint``/``[GPS]`` tag in
+    system_config_routes.py / serial_card.js is keyed off."""
+
+    def test_gps_port_carries_its_classification_through(self) -> None:
+        entries = [
+            _make_comport_entry(
+                "/dev/ttyACM0", vid=0x1546, pid=0x01A7,
+                manufacturer="u-blox AG", product="u-blox 7",
+            ),
+        ]
+        with patch("serial.tools.list_ports.comports", return_value=entries), \
+             patch("src.hal.usb_classifier._BY_ID_DIR", MagicMock(is_dir=lambda: False)), \
+             patch("src.hal.usb_classifier._BY_PATH_DIR", MagicMock(is_dir=lambda: False)):
+            ports = list_serial_ports_with_stable_paths()
+
+        self.assertEqual(len(ports), 1)
+        self.assertEqual(ports[0].port_class, PortClass.GPS_KNOWN)
+
+    def test_non_gps_port_stays_unknown(self) -> None:
+        entries = [
+            _make_comport_entry(
+                "/dev/ttyUSB0", vid=0x10C4, pid=0xEA60,
+                manufacturer="Silicon Labs", product="CP2102",
+            ),
+        ]
+        with patch("serial.tools.list_ports.comports", return_value=entries), \
+             patch("src.hal.usb_classifier._BY_ID_DIR", MagicMock(is_dir=lambda: False)), \
+             patch("src.hal.usb_classifier._BY_PATH_DIR", MagicMock(is_dir=lambda: False)):
+            ports = list_serial_ports_with_stable_paths()
+
+        self.assertEqual(ports[0].port_class, PortClass.UNKNOWN)
 
 
 if __name__ == "__main__":

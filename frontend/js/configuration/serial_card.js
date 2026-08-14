@@ -182,12 +182,22 @@ class SerialConfigCard {
      * connected (nothing to show, not a stale/wrong hint). */
     _updateResolvedPort(input) {
         const resolvedEl = input.parentElement.querySelector('[data-device-port-resolved]');
-        if (!resolvedEl) return;
+        const warnEl = input.parentElement.querySelector('[data-device-port-warn]');
         const value = (input.value || '').trim();
-        const match = value && (this._enumeratedPorts || []).find((p) =>
-            p.stable_path === value || p.by_id === value || p.by_path === value || p.device === value,
-        );
-        resolvedEl.textContent = (match && match.device && match.device !== value) ? `→ ${match.device}` : '';
+        const match = this._matchEnumeratedPort(value);
+        if (resolvedEl) {
+            resolvedEl.textContent = (match && match.device && match.device !== value) ? `→ ${match.device}` : '';
+        }
+        if (warnEl) {
+            if (match && match.port_class === 'gps_known') {
+                warnEl.hidden = false;
+                warnEl.textContent = match.held_hint
+                    || 'This looks like a GPS receiver; gpsd may hold the port.';
+            } else {
+                warnEl.hidden = true;
+                warnEl.textContent = '';
+            }
+        }
     }
 
     /** Native <datalist> popups truncate long labels with no CSS control
@@ -206,8 +216,21 @@ class SerialConfigCard {
         const usedBy = [p.device, p.by_id, p.by_path].filter(Boolean)
             .map((alias) => usage[alias]).find(Boolean);
         const parts = [devName, chip];
+        if (p.port_class === 'gps_known') parts.push('GPS');
         if (usedBy) parts.push(`used by ${usedBy}`);
         return parts.filter(Boolean).join(' — ');
+    }
+
+    /** Finds this pinned value's enumerated port entry, if any -- same
+     * matching (stable_path/by_id/by_path/device, whichever form the
+     * pinned value happens to be in) used by both _updateResolvedPort's
+     * "resolves to ttyUSBn" hint and the GPS-port save confirmation, so
+     * the two never disagree about which physical device a value means. */
+    _matchEnumeratedPort(value) {
+        if (!value) return null;
+        return (this._enumeratedPorts || []).find((p) =>
+            p.stable_path === value || p.by_id === value || p.by_path === value || p.device === value,
+        ) || null;
     }
 
     _addDeviceRow(data = {}) {
@@ -242,6 +265,7 @@ class SerialConfigCard {
                        list="serial-ports-list"
                        data-device-port>
                 <span class="cfg-field__resolved" data-device-port-resolved></span>
+                <span class="cfg-field__hint cfg-field__hint--warn" data-device-port-warn hidden></span>
                 <span class="cfg-field__hint">
                     Pick a connected device below, or type a path. Prefer the
                     /dev/serial/by-path/... entries over plain /dev/ttyUSBn --
@@ -895,17 +919,36 @@ class SerialConfigCard {
 
     async _saveDevices() {
         const status = this._root.querySelector('[data-serial-status]');
-        status.dataset.kind = 'pending';
-        status.textContent = 'Saving…';
 
         const devices = [];
+        let gpsSelected = false;
         this._devicesEl.querySelectorAll('.cfg-companion').forEach((div) => {
+            const serialPort = (div.querySelector('[data-device-port]')?.value || '').trim();
+            const match = this._matchEnumeratedPort(serialPort);
+            if (match && match.port_class === 'gps_known') gpsSelected = true;
             devices.push({
                 label: (div.querySelector('[data-device-label]')?.value || '').trim(),
-                serial_port: (div.querySelector('[data-device-port]')?.value || '').trim() || null,
+                serial_port: serialPort || null,
                 serial_baud: Number(div.querySelector('[data-device-baud]')?.value) || 115200,
             });
         });
+
+        if (gpsSelected) {
+            const ok = await this._confirm({
+                label: 'GPS port selected',
+                description: 'One or more selected serial ports look like a GPS receiver. '
+                    + 'gpsd may hold the port and Meshtastic capture will fail until it\'s '
+                    + 'free. Save anyway?',
+            });
+            if (!ok) {
+                status.dataset.kind = '';
+                status.textContent = 'Save cancelled.';
+                return;
+            }
+        }
+
+        status.dataset.kind = 'pending';
+        status.textContent = 'Saving…';
 
         const result = await this._api.put('/api/config/capture/serial-devices', {
             enable_source: this._root.querySelector('[data-serial-enable]').checked,
@@ -992,6 +1035,17 @@ class SerialConfigCard {
         const el = document.createElement('span');
         el.textContent = str || '';
         return el.innerHTML;
+    }
+
+    /** In-app confirmation dialog (replaces the browser's native
+     * ``window.confirm`` popup). Uses the shared confirmModal helper;
+     * falls back to native confirm if that script failed to load. Same
+     * pattern as metrics_card.js's own identical helper. */
+    _confirm({ label, description }) {
+        if (window.confirmModal) {
+            return window.confirmModal({ label, description });
+        }
+        return Promise.resolve(window.confirm(`${label}\n\n${description}`));
     }
 }
 
