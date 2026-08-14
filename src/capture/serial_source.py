@@ -14,6 +14,20 @@ from src.radio.presets import get_preset
 
 logger = logging.getLogger(__name__)
 
+# A busy/wrong port at startup used to raise straight out of start(),
+# permanently -- CaptureCoordinator.start() (see capture_coordinator.py)
+# now stops that from aborting every OTHER source too, but this source
+# itself still needed its own way to actually recover once the port
+# frees up or the real issue gets fixed, instead of sitting dead until
+# a manual service restart. Same base/max backoff values as
+# meshcore_usb_source.py's own proven reconnect loop, for consistency --
+# not the same DTR-reset-pulse mechanism, though: that's a documented
+# ESP32-S3-companion-specific USB-CDC wedge recovery, confirmed live on
+# that hardware, not something to blindly assume applies to a Meshtastic
+# USB stick's own separate serial stack.
+_RECONNECT_BASE_DELAY_SECONDS = 5
+_RECONNECT_MAX_DELAY_SECONDS = 60
+
 
 class SerialCaptureSource(CaptureSource):
     """Captures packets from a Meshtastic radio connected via USB serial.
@@ -41,6 +55,7 @@ class SerialCaptureSource(CaptureSource):
         self._connected = False
         self._radio_info: dict = {}
         self._queue: asyncio.Queue[RawCapture] = asyncio.Queue(maxsize=500)
+        self._reconnect_task: Optional[asyncio.Task] = None
 
     @property
     def name(self) -> str:
@@ -443,40 +458,43 @@ class SerialCaptureSource(CaptureSource):
         }
 
     async def start(self) -> None:
+        self._running = True
+        if await self._attempt_connect():
+            return
+        logger.warning(
+            "%s: initial connect failed -- retrying in the background "
+            "instead of staying dead until a service restart",
+            self.name,
+        )
+        self._reconnect_task = asyncio.create_task(
+            self._reconnect_until_connected(), name=f"{self.name}-reconnect",
+        )
+
+    def _blocking_connect(self):
+        """The actual open-port + handshake + config read -- real
+        blocking serial I/O (meshtastic-python's StreamInterface.__init__
+        calls waitForConfig() synchronously before returning), run off
+        the event loop via asyncio.to_thread by both the initial connect
+        and every background retry so a wedged/busy port never freezes
+        the whole server -- every other capture source, the dashboard
+        API, all of it -- for however long that takes to time out.
+        """
+        import meshtastic.serial_interface
+
+        if self._port:
+            interface = meshtastic.serial_interface.SerialInterface(devPath=self._port)
+        else:
+            interface = meshtastic.serial_interface.SerialInterface()
+        radio_info = self._read_radio_info(interface)
+        return interface, radio_info
+
+    async def _attempt_connect(self) -> bool:
+        """One connection attempt. Returns True/False instead of raising,
+        so a background retry loop can call this in a loop -- except for
+        ImportError, which still needs to abort the whole app loudly (a
+        missing dependency, not a hardware hiccup worth retrying)."""
         try:
-            import meshtastic.serial_interface
-            from pubsub import pub
-
-            if self._port:
-                self._interface = meshtastic.serial_interface.SerialInterface(
-                    devPath=self._port
-                )
-            else:
-                self._interface = meshtastic.serial_interface.SerialInterface()
-
-            self._radio_info = self._read_radio_info(self._interface)
-            self._connected = True
-            pub.subscribe(self._on_receive, "meshtastic.receive")
-            self._running = True
-            logger.info(
-                "Serial capture started on %s (region=%s channel_num=%s)",
-                self._port or "auto-detect",
-                self._radio_info.get("region"),
-                self._radio_info.get("channel_num"),
-            )
-            if self._desired_long_name or self._desired_short_name:
-                # One-shot at connect only -- no reconnect loop exists for
-                # Serial to re-apply this on (unlike MeshCore's
-                # connected-callback), so a swapped-in replacement stick
-                # picks this up on the next service restart instead.
-                result = self.set_owner(self._desired_long_name, self._desired_short_name)
-                if result["success"]:
-                    logger.info("%s: applied configured identity on connect", self.name)
-                else:
-                    logger.warning(
-                        "%s: failed to apply configured identity on connect: %s",
-                        self.name, result["error"],
-                    )
+            interface, radio_info = await asyncio.to_thread(self._blocking_connect)
         except ImportError:
             logger.error(
                 "meshtastic package not installed. "
@@ -484,8 +502,43 @@ class SerialCaptureSource(CaptureSource):
             )
             raise
         except Exception:
-            logger.exception("Failed to open serial interface")
-            raise
+            logger.debug("%s: connect attempt failed", self.name, exc_info=True)
+            return False
+
+        from pubsub import pub
+
+        self._interface = interface
+        self._radio_info = radio_info
+        self._connected = True
+        pub.subscribe(self._on_receive, "meshtastic.receive")
+        logger.info(
+            "Serial capture started on %s (region=%s channel_num=%s)",
+            self._port or "auto-detect",
+            self._radio_info.get("region"),
+            self._radio_info.get("channel_num"),
+        )
+        if self._desired_long_name or self._desired_short_name:
+            result = self.set_owner(self._desired_long_name, self._desired_short_name)
+            if result["success"]:
+                logger.info("%s: applied configured identity on connect", self.name)
+            else:
+                logger.warning(
+                    "%s: failed to apply configured identity on connect: %s",
+                    self.name, result["error"],
+                )
+        return True
+
+    async def _reconnect_until_connected(self) -> None:
+        delay = _RECONNECT_BASE_DELAY_SECONDS
+        while self._running:
+            logger.info("%s: reconnecting in %ds...", self.name, delay)
+            await asyncio.sleep(delay)
+            if not self._running:
+                return
+            if await self._attempt_connect():
+                logger.info("%s: reconnected successfully", self.name)
+                return
+            delay = min(delay * 2, _RECONNECT_MAX_DELAY_SECONDS)
 
     @staticmethod
     def _read_radio_info(interface) -> dict:
@@ -697,6 +750,13 @@ class SerialCaptureSource(CaptureSource):
     async def stop(self) -> None:
         self._running = False
         self._connected = False
+        if self._reconnect_task and not self._reconnect_task.done():
+            self._reconnect_task.cancel()
+            try:
+                await self._reconnect_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            self._reconnect_task = None
         if self._interface:
             try:
                 self._interface.close()

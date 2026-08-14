@@ -33,7 +33,7 @@ identity).
 | **#2a** | Contact picker (`/api/messages/contacts`) hits live USB bus, no cache | ✅ Fixed | Small | `src/api/routes/messages.py:246` |
 | **#2b** | `set_radio_params()` never verifies the preset actually stuck after reconnect | ✅ Fixed | Small-medium | `meshcore_usb_source.py:564`, `meshcore_tx_client.py:216` |
 | **#2c** | `CaptureCoordinator.start()` still aborts all sources if one throws | ✅ Fixed | Small | `src/capture/capture_coordinator.py:32` |
-| **#2d** | Meshtastic serial source has no retry/reconnect loop at all (unlike MeshCore's own, which already works) | 🔲 Real gap | Medium | `src/capture/serial_source.py:445` |
+| **#2d** | Meshtastic serial source has no retry/reconnect loop at all (unlike MeshCore's own, which already works) | ✅ Fixed | Medium | `src/capture/serial_source.py` |
 | **#3** | Flash reports success even when esptool fails | ✅ Fixed (scoped) | Small | `meshtastic_firmware_routes.py:439-461`, `meshcore_firmware_routes.py` |
 | **#4** | Reconnecting capture source not stopped before flash | ✅ Fixed | Small | `meshtastic_firmware_routes.py:423`, `meshcore_firmware_routes.py:447` |
 | **#5** | Port matching is exact-string, not alias-aware | ✅ Fixed | Small | `meshtastic_firmware_routes.py:385`, `meshcore_firmware_routes.py:408` |
@@ -207,21 +207,64 @@ identity).
         doesn't stop the other two from starting; `ImportError` still
         aborts as intended.
 
-      - [ ] **#2d** Meshtastic `SerialCaptureSource.start()`
-        (`src/capture/serial_source.py:445`) has **no retry/background-
-        reconnect logic of its own at all** — a busy/wrong port just
-        raises straight up, permanently, with nothing to pick it back up
-        later short of a manual service restart. This is real and
-        MeshCore-specific code doesn't have this problem: `meshcore_usb_source.py`
-        already has a proven `_reconnect_until_connected()` +
-        `_health_check_loop()` pattern for exactly this. #2d is porting
-        that already-working pattern from our own MeshCore module to our
-        own Meshtastic one, not porting anything from upstream at all.
-        Medium effort — needs care since `SerialCaptureSource` also
-        carries live radio-setter methods (`set_region`/`set_bluetooth`/
-        `set_modem_preset`/etc.) that assume `self._interface` is real;
-        a background retry loop needs those to fail gracefully while
-        disconnected, same as MeshCore's `connected` gating already does.
+      - [x] **#2d** FIXED (scoped down from the original plan). Meshtastic
+        `SerialCaptureSource.start()` (`src/capture/serial_source.py`) had
+        **no retry/background-reconnect logic of its own at all** — a
+        busy/wrong port raised straight out of `start()`, permanently,
+        with nothing to pick it back up later short of a manual service
+        restart.
+        **Scoped down from MeshCore's full pattern, deliberately**: ported
+        only the "initial connect failed → retry in the background"
+        half of `meshcore_usb_source.py`'s
+        `_reconnect_until_connected()` (same base/max backoff values, 5s
+        → 60s), not its `_health_check_loop()` half or its DTR-reset-pulse
+        recovery. Two reasons: (1) the DTR pulse is documented as a fix
+        for a specific ESP32-S3 companion USB-CDC wedge state, confirmed
+        live on that hardware — nothing suggests a Meshtastic USB stick's
+        separate serial stack has the same failure mode, so copying it
+        would be an unverified assumption dressed up as a port; (2) a
+        live-connection-goes-stale health check is a genuinely separate
+        problem from what this item actually described ("no retry
+        logic... a busy/wrong port just raises... permanently") — that
+        text is about the *startup* failure case specifically, and adding
+        a full ongoing-health-check rebuild on top would have been scope
+        creep beyond a "medium effort" item.
+        Also had to solve a problem MeshCore's own port didn't have:
+        `meshtastic.serial_interface.SerialInterface(...)` is a
+        **blocking** call (`StreamInterface.__init__` synchronously calls
+        `waitForConfig()` before returning) — unlike MeshCore's async
+        connect. A naive retry loop calling that directly from the
+        reconnect task would freeze the *entire* server's event loop
+        (every other capture source, the dashboard API) for however long
+        each failed attempt takes to time out. Fixed by running each
+        connection attempt (`_blocking_connect()`, extracted from the old
+        `start()` body) via `asyncio.to_thread(...)`, both on the initial
+        attempt and every background retry — so a wedged port only blocks
+        its own worker thread, never the event loop.
+        `start()` now: sets `_running = True` unconditionally (mirroring
+        MeshCore's own "is_running != connected" semantics), tries once
+        via the new `_attempt_connect()` helper, and — only if that fails
+        with something other than `ImportError` — schedules
+        `_reconnect_until_connected()` as a background task instead of
+        raising. `ImportError` (missing `meshtastic` package) still
+        propagates and aborts, same as before: a missing dependency isn't
+        something worth silently retrying forever. `stop()` now cancels
+        any in-flight reconnect task cleanly before closing the interface.
+        The existing live radio-setter methods
+        (`set_region`/`set_bluetooth`/`set_modem_preset`/etc.) needed no
+        changes — they already gate on `self._interface is None or not
+        self._connected`, and both stay falsy for the entire time a
+        reconnect is in progress, exactly the state they were already
+        written to handle.
+        Real test added (`tests/test_serial_source_reconnect.py`, pure
+        asyncio/stdlib with `_blocking_connect` mocked out — no real
+        `meshtastic`/`pubsub` hardware dependency, `pubsub` itself is
+        actually installed here so that part runs for real) — 4/4 pass:
+        a clean initial connect schedules no reconnect task; `ImportError`
+        still raises out of `start()`; a flaky port that fails twice then
+        succeeds gets picked up by the background loop without `start()`
+        ever raising or blocking; `stop()` cancels an in-progress
+        reconnect loop cleanly.
 
       Companion rename, channel sync, contacts (data model), device info,
       and installed-firmware display are **confirmed already built and
@@ -349,11 +392,13 @@ either in a numbered item above, in "confirmed no action needed," or in
 `docs/plans/v0.7.9-release.md` (their internal planning doc), version
 bump/changelog/README/RC-channel commits, merge commits.
 
-## Not yet done
+## Status
 
-Nothing has been merged, cherry-picked, or ported yet — this file is the
-result of the investigation only. Next step is picking an item above and
-deciding whether to port it as a clean reimplementation (matching this
-fork's own conventions) or attempt a real `git merge`/cherry-pick, which
-would need real conflict resolution given 709 commits of independent
-history on our side.
+All real gaps found in this pass (#2a–#2d, #3, #4, #5, #6) are now fixed —
+each as a clean reimplementation matching this fork's own conventions, not
+a merge/cherry-pick (709 commits of independent history on our side made a
+real merge impractical). Only #1 (esptool venv-symlink resolver) remains
+un-ported, deliberately: skipped with user agreement since the current
+hardcoded-PATH lookup fails loudly, not silently, when it's wrong.
+#2b/#2d needed real research into upstream's actual commits rather than
+guessed designs — see their entries above for what changed after checking.
