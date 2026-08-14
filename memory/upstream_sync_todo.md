@@ -31,7 +31,7 @@ identity).
 | **#1** | esptool venv-symlink resolver | ⏭️ Skipped — works today, any failure is loud not silent | — | `src/api/firmware/esptool_binary.py` (upstream-only) |
 | — | MeshCore radio preset apply, rename, channel sync, contacts, device info | ✅ Already have it, already has UI | — | `meshcore_usb_source.py`, `meshcore_tx_client.py`, `meshcore_card.js` |
 | **#2a** | Contact picker (`/api/messages/contacts`) hits live USB bus, no cache | ✅ Fixed | Small | `src/api/routes/messages.py:246` |
-| **#2b** | `set_radio_params()` never verifies the preset actually stuck after reconnect | 🔲 Real gap | Small-medium | `meshcore_usb_source.py:564`, `meshcore_config_routes.py:331` |
+| **#2b** | `set_radio_params()` never verifies the preset actually stuck after reconnect | ✅ Fixed | Small-medium | `meshcore_usb_source.py:564`, `meshcore_tx_client.py:216` |
 | **#2c** | `CaptureCoordinator.start()` still aborts all sources if one throws | ✅ Fixed | Small | `src/capture/capture_coordinator.py:32` |
 | **#2d** | Meshtastic serial source has no retry/reconnect loop at all (unlike MeshCore's own, which already works) | 🔲 Real gap | Medium | `src/capture/serial_source.py:445` |
 | **#3** | Flash reports success even when esptool fails | ✅ Fixed (scoped) | Small | `meshtastic_firmware_routes.py:439-461`, `meshcore_firmware_routes.py` |
@@ -145,16 +145,51 @@ identity).
         chain needs more of FastAPI stubbed than's worth it on this
         Mac's no-venv setup. `py_compile` clean.
 
-      - [ ] **#2b** `set_radio_params()` triggers a reconnect after
-        applying a preset but never verifies afterward that the new
-        params actually took (matches upstream's `e7a9297` "Retry MeshCore
-        set_radio once after reconnect when preset did not stick" and
-        `bf82ea2`/`dcff8b0`'s cross-band timeout recovery). The route
-        (`meshcore_config_routes.py:331`) fires the command and returns
-        `rebooting: true` immediately, telling the frontend to just show
-        a "reconnecting" state — nothing re-checks the radio's actual
-        state once it's back. Small-medium: needs a post-reconnect
-        read-back-and-compare, with one retry if it didn't stick.
+      - [x] **#2b** FIXED — and turned out to need real research, not just
+        a guessed design. Went and actually read upstream's real fix
+        (`e7a9297`/`bf82ea2`/`dcff8b0`, `src/transmit/meshcore_radio_apply.py`)
+        instead of working from commit-message summaries alone, on the
+        user's prompt to go check "if he fixed it." Two real corrections
+        that came out of that:
+        1. My first pass verified-and-retried after **every** successful
+           `set_radio_params()` call. Upstream's actual root cause is
+           narrower: a CLEAN success is trusted immediately (trigger
+           reconnect, return — no wait), matching
+           `meshcore_config_routes.py`'s existing `rebooting: true`
+           contract (frontend already shows "reconnecting", not an
+           instant refresh). Only a **timeout** gets the verify+retry
+           treatment — that's the real, specific, live-observed bug
+           ("Cross-band EU to USA/Canada was timing out and coming back
+           still on EU"). Verifying unconditionally would have added a
+           real regression: blocking every ordinary radio change, that
+           already worked fine, for up to a minute.
+        2. Found a more fundamental gap while checking: our own
+           `send_set_radio_params()` (`meshcore_tx_client.py`) treated the
+           companion's `no_event_received`/`timeout` ERROR reason as a
+           **clean rejection**, not a timeout — meaning the exact
+           silent-cross-band-reboot case this whole fix targets would
+           never even have reached the recovery path at all, regardless
+           of what got added in `meshcore_usb_source.py`. Fixed first, per
+           upstream's `dcff8b0`.
+        Also ported: pausing companion auto-fetch before sending
+        `set_radio` so it owns the command channel (`bf82ea2`), and
+        upstream's real live-observed timing constants (75s reconnect-
+        verify window, not a guessed 30s -- "first reconnect attempt + DTR
+        retry path observed ~30s on a RAK V2", so 75s leaves real margin
+        for a second attempt).
+        Real test added (`tests/test_meshcore_radio_params_verify.py`,
+        pure asyncio + mocked `send_set_radio_params`/`_trigger_reconnect`/
+        `get_radio_info`, no aiosqlite/FastAPI dependency) — 6/6 pass:
+        clean success never triggers a verify read-back; clean rejection
+        returns immediately; not-connected short-circuits; a timeout that
+        reconnects with matching params verifies as success with no
+        retry; a timeout that reconnects on the OLD params retries
+        exactly once live and succeeds; never-reconnecting reports
+        failure without hanging (verified with a shrunk timeout, not the
+        real 75s). Also re-ran `tests/test_meshcore_tx_client.py` (37
+        tests, already existing, exercises `send_set_radio_params`
+        directly) to confirm the `no_event_received` reclassification
+        didn't break anything already covered there — all 37 still pass.
 
       - [x] **#2c** FIXED. `CaptureCoordinator.start()` (`src/capture/capture_coordinator.py:32`)
         had no try/except around `await source.start()` — one source's

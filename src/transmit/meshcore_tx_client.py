@@ -205,6 +205,16 @@ async def send_set_radio_params(mc, freq: float, bw: float, sf: int, cr: int) ->
     except Exception:
         return SendResult(success=False, error="meshcore library unavailable")
 
+    # Let set_radio own the command channel instead of contending with
+    # background auto-fetch polling for it -- best-effort, a companion
+    # whose library build doesn't expose this just skips the pause.
+    stop_auto_fetch = getattr(mc, "stop_auto_message_fetching", None)
+    if callable(stop_auto_fetch):
+        try:
+            await stop_auto_fetch()
+        except Exception:
+            logger.debug("Could not pause MeshCore auto-fetch before set_radio", exc_info=True)
+
     try:
         result = await asyncio.wait_for(mc.commands.set_radio(freq, bw, sf, cr), timeout=10.0)
     except asyncio.TimeoutError:
@@ -220,6 +230,18 @@ async def send_set_radio_params(mc, freq: float, bw: float, sf: int, cr: int) ->
             detail = str(payload.get("reason") or payload.get("error") or payload)
         elif payload is not None:
             detail = str(payload)
+        # meshcore_py returns an ERROR event with one of these reasons
+        # when the companion never ACKs within the library's own
+        # command deadline -- common on a cross-band set_radio, which
+        # can silently reboot before it gets a chance to reply. This is
+        # NOT the firmware rejecting the params (a real rejection has
+        # its own distinct reason, e.g. an out-of-range value) -- it's
+        # the same ambiguous "no answer" case an outright asyncio
+        # timeout already is, so callers need the same timed_out=True
+        # signal to know a reconnect+verify is worth attempting instead
+        # of taking this at face value as a clean failure.
+        if detail in ("no_event_received", "timeout"):
+            return SendResult(success=False, error=f"set_radio timed out ({detail})", timed_out=True)
         error = f"Companion rejected radio params: {detail}" if detail else "Companion rejected radio params"
         return SendResult(success=False, error=error)
 
