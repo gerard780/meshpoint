@@ -449,6 +449,7 @@ class NodeCards {
             3: 'ROUTER_CLIENT', 4: 'REPEATER', 5: 'TRACKER',
             6: 'SENSOR', 7: 'TAK', 8: 'CLIENT_HIDDEN',
             9: 'LOST_AND_FOUND', 10: 'TAK_TRACKER',
+            11: 'ROUTER_LATE', 12: 'CLIENT_BASE',
         };
         if (typeof role === 'number') return names[role] || `ROLE_${role}`;
         return String(role).toUpperCase();
