@@ -30,9 +30,30 @@ class CaptureCoordinator:
         logger.info("Added capture source: %s", source.name)
 
     async def start(self) -> None:
+        """Start every registered source; one failure must not abort the
+        rest.
+
+        A held/busy/wrong port (or any other real hardware failure) on
+        one source used to raise straight out of this loop, aborting
+        every source after it in `self._sources` -- an unrelated
+        companion, or even the concentrator itself, wouldn't start
+        either, just because one misconfigured serial device came first.
+        `ImportError` still aborts: a genuinely missing dependency should
+        surface immediately and loudly, not degrade into "silently no
+        packets from this source ever."
+        """
         self._running = True
         for source in self._sources:
-            await source.start()
+            try:
+                await source.start()
+            except ImportError:
+                raise
+            except Exception:
+                logger.exception(
+                    "Capture source %s failed to start; continuing with others",
+                    source.name,
+                )
+                continue
             task = asyncio.create_task(
                 self._run_source(source),
                 name=f"capture-{source.name}",

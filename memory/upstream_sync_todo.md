@@ -32,7 +32,7 @@ identity).
 | — | MeshCore radio preset apply, rename, channel sync, contacts, device info | ✅ Already have it, already has UI | — | `meshcore_usb_source.py`, `meshcore_tx_client.py`, `meshcore_card.js` |
 | **#2a** | Contact picker (`/api/messages/contacts`) hits live USB bus, no cache | ✅ Fixed | Small | `src/api/routes/messages.py:246` |
 | **#2b** | `set_radio_params()` never verifies the preset actually stuck after reconnect | 🔲 Real gap | Small-medium | `meshcore_usb_source.py:564`, `meshcore_config_routes.py:331` |
-| **#2c** | `CaptureCoordinator.start()` still aborts all sources if one throws | 🔲 Real bug | Small | `src/capture/capture_coordinator.py:32` |
+| **#2c** | `CaptureCoordinator.start()` still aborts all sources if one throws | ✅ Fixed | Small | `src/capture/capture_coordinator.py:32` |
 | **#2d** | Meshtastic serial source has no retry/reconnect loop at all (unlike MeshCore's own, which already works) | 🔲 Real gap | Medium | `src/capture/serial_source.py:445` |
 | **#3** | Flash reports success even when esptool fails | ✅ Fixed (scoped) | Small | `meshtastic_firmware_routes.py:439-461`, `meshcore_firmware_routes.py` |
 | **#4** | Reconnecting capture source not stopped before flash | ✅ Fixed | Small | `meshtastic_firmware_routes.py:423`, `meshcore_firmware_routes.py:447` |
@@ -156,15 +156,21 @@ identity).
         state once it's back. Small-medium: needs a post-reconnect
         read-back-and-compare, with one retry if it didn't stick.
 
-      - [ ] **#2c** `CaptureCoordinator.start()` (`src/capture/capture_coordinator.py:32`)
-        still has no try/except around `await source.start()` — one
-        source's exception aborts starting every other source (concentrator,
-        unrelated companions, everything). Confirmed still unfixed as of
-        this pass. Small, standalone, fully scoped already: wrap in
-        `try/except Exception` (re-raise `ImportError`), log-and-continue.
-        Note upstream's version of this file also removed a `sources`
-        property and `all_sources_running()` — check nothing else here
-        (status LED?) depends on those before touching this file.
+      - [x] **#2c** FIXED. `CaptureCoordinator.start()` (`src/capture/capture_coordinator.py:32`)
+        had no try/except around `await source.start()` — one source's
+        exception aborted starting every other source (concentrator,
+        unrelated companions, everything). Wrapped in `try/except`
+        (re-raises `ImportError`, logs and continues on anything else).
+        Checked before touching the file: `.sources` (used by
+        `main.py`/`server.py`'s startup banner) and
+        `.all_sources_running()` (used by `server.py`'s health/status LED)
+        are both real, live-used elsewhere — left both untouched, upstream
+        removing them doesn't apply here. Real test added
+        (`tests/test_capture_coordinator_soft_fail.py`, pure asyncio/stdlib,
+        no aiosqlite/FastAPI dependency so it actually ran on this Mac,
+        not just simulated) — 2/2 pass: one source raising `OSError`
+        doesn't stop the other two from starting; `ImportError` still
+        aborts as intended.
 
       - [ ] **#2d** Meshtastic `SerialCaptureSource.start()`
         (`src/capture/serial_source.py:445`) has **no retry/background-
