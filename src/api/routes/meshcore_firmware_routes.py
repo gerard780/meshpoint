@@ -98,6 +98,36 @@ def _ndjson(payload: dict) -> bytes:
     return (json.dumps(payload, separators=(",", ":")) + "\n").encode("utf-8")
 
 
+@router.get("/installed")
+async def firmware_installed(_claims: SessionClaims = Depends(require_admin)) -> dict:
+    """Firmware version reported by each connected MeshCore USB companion.
+
+    ``get_device_info()`` already exists per companion source (cached
+    after its first DEVICE_INFO round trip on connect -- firmware doesn't
+    change at runtime) -- this just surfaces it per configured companion,
+    same shape as the Meshtastic side's ``/installed``, rather than only
+    a single "primary" companion.
+    """
+    devices = []
+    for src in _meshcore_sources:
+        payload = {
+            "name": src.name,
+            "connected": src.connected,
+            "port": getattr(src, "_resolved_port", None) or getattr(src, "_configured_port", None),
+            "version": "",
+            "model": "",
+            "build": "",
+        }
+        if src.connected:
+            info = await src.get_device_info()
+            if info is not None:
+                payload["version"] = info.firmware_version
+                payload["model"] = info.model
+                payload["build"] = info.build_date
+        devices.append(payload)
+    return {"devices": devices}
+
+
 @router.get("/targets")
 async def firmware_targets(
     tag: str = "", flavor: str = "usb",

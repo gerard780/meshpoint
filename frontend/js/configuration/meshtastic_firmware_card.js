@@ -38,6 +38,11 @@ class MeshtasticFirmwareConfigCard {
                             turn it off to upgrade a board already running Meshtastic without
                             losing its channels and settings.
                         </p>
+                        <div class="cfg-firmware-installed" data-mt-firmware-installed aria-live="polite">
+                            <span class="cfg-firmware-installed__label">Installed</span>
+                            <span class="cfg-firmware-installed__version">Checking…</span>
+                            <span class="cfg-firmware-installed__meta"></span>
+                        </div>
                     </header>
                     <label class="cfg-field cfg-firmware-field">
                         <span class="cfg-field__label">Version</span>
@@ -99,10 +104,74 @@ class MeshtasticFirmwareConfigCard {
         this._loadMtFirmwareReleases();
         this._loadMtFirmwareTargets();
         this._refreshSerialPortsList();
+        this._loadInstalledFirmware();
     }
 
     render(config) {
         this._portUsage = this._buildPortUsageMap(config);
+    }
+
+    /** "Installed" callout in the card header -- the currently-connected
+     * stick's own reported firmware version, read fresh on every mount
+     * and again right after a successful flash (so the callout reflects
+     * the new version instead of the pre-flash one). Shows the first
+     * connected device prominently; a second configured stick (rare, but
+     * possible with multiple Serial devices) only adds a "+N more" hint
+     * rather than a full second row -- this card flashes one board at a
+     * time, so a compact "what's on the boards I already have" summary
+     * is enough context, not a full per-device breakdown. */
+    async _loadInstalledFirmware() {
+        const root = this._root?.querySelector('[data-mt-firmware-installed]');
+        if (!root) return;
+        const versionEl = root.querySelector('.cfg-firmware-installed__version');
+        const metaEl = root.querySelector('.cfg-firmware-installed__meta');
+        if (!versionEl || !metaEl) return;
+        versionEl.textContent = 'Checking…';
+        metaEl.textContent = '';
+        const data = await this._api.get('/api/config/serial/firmware/installed');
+        if (!data) {
+            versionEl.textContent = 'Unavailable';
+            metaEl.textContent = 'Could not query serial sticks';
+            return;
+        }
+        const devices = Array.isArray(data.devices) ? data.devices : [];
+        const connected = devices.filter((d) => d.connected);
+        if (!connected.length) {
+            versionEl.textContent = 'Not connected';
+            metaEl.textContent = '';
+            return;
+        }
+        const primary = connected[0];
+        const version = (primary.version || '').trim() || 'Version not reported';
+        let hw = (primary.hw_model || '').toString().trim();
+        if (hw && typeof HW_NAMES !== 'undefined') {
+            hw = HW_NAMES[hw] || HW_NAMES[String(hw)] || hw;
+        }
+        const port = this._shortPortLabel(primary.port) || primary.name || 'USB';
+        versionEl.textContent = version;
+        const meta = [];
+        if (hw) meta.push(hw);
+        if (port) meta.push(port);
+        if (connected.length > 1) meta.push(`+${connected.length - 1} more`);
+        metaEl.textContent = meta.join(' · ');
+    }
+
+    /** Same short-port-label idea as serial_card.js's own device picker --
+     * prefer the raw ttyUSB0/ttyACM0 name over a long by-path string, for
+     * a compact callout. */
+    _shortPortLabel(port) {
+        if (!port) return '';
+        const raw = String(port);
+        const tty = raw.match(/tty(?:USB|ACM|AMA)\d+/i);
+        if (tty) return tty[0];
+        const base = raw.split('/').pop() || '';
+        if (base.startsWith('tty')) return base;
+        for (const p of this._enumeratedPorts || []) {
+            const aliases = [p.device, p.by_id, p.by_path, p.stable_path].filter(Boolean);
+            if (aliases.includes(raw)) return String(p.device || '').split('/').pop() || 'USB';
+        }
+        if (base.startsWith('platform-') || base.includes('pci-')) return 'USB';
+        return base;
     }
 
     /** Maps every currently-configured serial_port value (across Serial
@@ -393,7 +462,10 @@ class MeshtasticFirmwareConfigCard {
         }
 
         flashBtn.disabled = false;
-        if (success) await this._api.refresh();
+        if (success) {
+            await this._api.refresh();
+            await this._loadInstalledFirmware();
+        }
     }
 
     _esc(str) {

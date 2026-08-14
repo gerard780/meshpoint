@@ -23,6 +23,8 @@ identity).
 | — | Bearer-token login (`X-Meshpoint-Client`) | ✅ Have it | — | `auth_routes.py` |
 | — | `meshtastic_hw_names.js` | ✅ Have it | — | credited to us |
 | — | Firmware-flash cards/routes (existence) | ✅ Have it | — | `*_firmware_routes.py`, `*_firmware_card.js` |
+| **#7** | GPS-receiver port picker warning (Configuration → Serial) | ⏭️ Found 2026-08-14, not yet ported | Small | `usb_classifier.py`, `serial_card.js` |
+| **#8** | "Installed" firmware version callout (Configuration → Firmware) | ✅ Fixed | Small-medium | `*_firmware_routes.py`, `*_firmware_card.js` |
 | — | `serial_config_routes.py` | ✅ Have it (bigger) | — | 457 vs 141 lines |
 | — | `stats_chart_host.js` | ✅ Have it | — | credited to us |
 | — | Stats-tab / stats-reporter fixes | ✅ Ahead of upstream | — | `stats_tab.js`, `stats_reporter.py` |
@@ -394,11 +396,115 @@ bump/changelog/README/RC-channel commits, merge commits.
 
 ## Status
 
-All real gaps found in this pass (#2a–#2d, #3, #4, #5, #6) are now fixed —
-each as a clean reimplementation matching this fork's own conventions, not
-a merge/cherry-pick (709 commits of independent history on our side made a
-real merge impractical). Only #1 (esptool venv-symlink resolver) remains
-un-ported, deliberately: skipped with user agreement since the current
-hardcoded-PATH lookup fails loudly, not silently, when it's wrong.
+All real gaps found in this pass (#2a–#2d, #3, #4, #5, #6, #8) are now
+fixed — each as a clean reimplementation matching this fork's own
+conventions, not a merge/cherry-pick (709 commits of independent history
+on our side made a real merge impractical). #1 (esptool venv-symlink
+resolver) and #7 (GPS-port picker warning) remain un-ported, both
+deliberately: #1 because the current hardcoded-PATH lookup fails loudly,
+not silently, when it's wrong; #7 found on a later recheck and deferred
+by the user for now (small, self-contained, safe to pick up any time).
 #2b/#2d needed real research into upstream's actual commits rather than
 guessed designs — see their entries above for what changed after checking.
+
+## Recheck, 2026-08-14 — found #7 and #8 by reading full diffs, not just messages
+
+User asked to recheck the compare after #2d landed, to confirm nothing was
+missed. `git fetch upstream main` + `git log --oneline main..upstream/main`:
+still the exact same 28 commits as the original pass — nothing new landed
+upstream. Two real things surfaced anyway, both from reading full commit
+diffs instead of trusting a commit-message-level summary from the original
+pass (same methodology lesson as [[code-ahead-of-tracking]], applied a
+second time here):
+
+- **#2c/#2d validated, not just re-confirmed**: `602361a`'s real diff
+  matches this fork's own independent #2d implementation almost exactly —
+  same `asyncio.to_thread`-wrapped blocking connect, same background
+  retry loop shape, even the *same* 5s/60s backoff constants (coincidence,
+  or both sides converging on the obviously-right numbers for this
+  problem — either way, good validation that the independent design was
+  right). `capture_coordinator.py`'s half of that same commit is also a
+  byte-for-byte shape match to this fork's own #2c.
+
+- **[x] #8 FIXED, same day.** `96c5c71` ("Show installed companion
+  firmware on Configuration → Firmware") is **Co-Authored-By this repo's
+  own git identity** — meaning it was probably worked on jointly at some
+  point — but the actual code was never in this repo's tree at all
+  (`src/capture/serial_firmware_info.py` doesn't exist here, no
+  `firmware_version` reference anywhere in either `*_firmware_routes.py`).
+  The original audit's "Firmware-flash cards/routes (existence)" row only
+  checked that the files existed, not full feature parity — same class of
+  mistake the user caught earlier in this whole effort (checking presence,
+  not content). Real, useful gap: no way to see a board's currently-
+  installed firmware version before flashing over it.
+  **Fixed as a lighter-weight adaptation, not a literal port** — this
+  fork already had the underlying data both sides need, upstream's
+  version had to build it from scratch:
+  - Meshtastic: `firmware_version`/`hw_model` are already read into each
+    `SerialCaptureSource`'s own `_radio_info` at connect
+    (`serial_source.py::_read_radio_info`, pre-existing). New
+    `GET /api/config/serial/firmware/installed` just reads
+    `src.get_radio_info()` for each configured source — no new
+    `SerialFirmwareInfoReader` module needed, unlike upstream's from-
+    scratch build.
+  - MeshCore: `get_device_info()` already existed per companion source
+    (cached after its first DEVICE_INFO round trip on connect,
+    pre-existing) — new `GET /api/config/meshcore/firmware/installed`
+    just calls it. Deliberately built to report **every** configured
+    companion (not just one "primary" one the way upstream's route did,
+    which read from `_tx_service._meshcore_tx` instead of per-source) —
+    this fork already supports multiple MeshCore companions
+    (`meshcore_config_routes.py`'s companion list), so the Meshtastic-
+    side route's "list of all configured devices" shape was extended to
+    match on the MeshCore side too instead of copying upstream's single-
+    device assumption.
+  - Frontend: both `*_firmware_card.js` gained an "Installed" callout in
+    the card header (version, hw model/build date, short port name),
+    refreshed on mount and again right after a successful flash — same
+    UX upstream built, adapted to this fork's existing card structure
+    rather than copied wholesale. New `.cfg-firmware-installed*` CSS
+    rules in `configuration.css`, additive alongside the existing
+    `.cfg-firmware-board-field` rule (upstream's diff happened to delete-
+    and-replace that block; kept ours intact and just added alongside).
+  Real test added (`tests/test_firmware_installed_routes.py`) — needs
+  FastAPI to import the route modules so only syntax-checked
+  (`py_compile`) on this Mac per this repo's standing convention; the
+  exact same logic was additionally verified assertion-by-assertion in a
+  throwaway dependency-free script on this Mac (connected source reports
+  its cached version; disconnected source reports empty without touching
+  `get_radio_info()`/`get_device_info()` at all — confirms the MeshCore
+  route never fires an unnecessary live query against a companion that
+  isn't even connected; empty source list returns an empty list) — all
+  assertions passed. `node --check` clean on both edited JS files, CSS
+  brace-balance clean (128/128). CHANGELOG bullet added under `v0.8.0`.
+  **Not yet live-verified on the Pi** — next step is confirming the
+  callout shows a real version/hw-model for both a connected Meshtastic
+  stick and a connected MeshCore companion, and that it updates after a
+  real flash.
+
+- **[ ] #7 found, not yet ported (user chose to defer this one).** The
+  other half of `602361a` (bundled with #2d in the same upstream commit,
+  but a genuinely separate feature): Configuration → Serial's port picker
+  warns when a selected port looks like a GPS receiver (a `[GPS]` tag in
+  the dropdown, an amber hint under the field, and a confirm-before-save
+  dialog) — useful because `gpsd` often holds a GPS port, so pinning one
+  for Meshtastic serial capture fails in a confusing way (the new #2d
+  background-retry loop would just quietly retry forever against a port
+  that was never going to work). This fork already has all the detection
+  infrastructure needed (`usb_classifier.py`'s `PortClass.GPS_KNOWN`,
+  `UsbPortClassifier`, already used by `should_skip_for_meshcore_probe`) —
+  the gap is purely in not surfacing a `held_hint`/`port_class` field on
+  `StablePortInfo`/`list_serial_ports_with_stable_paths()` and not wiring
+  a warning into `serial_card.js`'s port picker. Small, self-contained,
+  same shape as #8. Pick up whenever asked for specifically.
+
+- **Checked and ruled out, not a gap**: `2833f8c` ("Treat MeshCore
+  get_contacts None/timeout as empty instead of crashing") looked
+  adjacent to #2a/#6 at a glance, so it got a full-diff check too. This
+  fork's existing `MeshCoreTxClient.get_contacts()` already wraps the
+  whole `result.payload` dereference (including the `AttributeError` a
+  `None` result from the library's own internal timeout would raise) in
+  a broad `except Exception:` that already returns `[]` — no crash exists
+  in the current code. The only real difference is log verbosity
+  (`.exception()` full traceback vs. upstream's dedicated `.warning()`
+  for the specific None-timeout case) — not worth a change on its own.

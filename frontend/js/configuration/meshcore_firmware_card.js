@@ -37,6 +37,11 @@ class MeshcoreFirmwareConfigCard {
                             running MeshCore without losing its identity, contacts, and
                             channels.
                         </p>
+                        <div class="cfg-firmware-installed" data-mc-firmware-installed aria-live="polite">
+                            <span class="cfg-firmware-installed__label">Installed</span>
+                            <span class="cfg-firmware-installed__version">Checking…</span>
+                            <span class="cfg-firmware-installed__meta"></span>
+                        </div>
                     </header>
                     <label class="cfg-field cfg-firmware-field">
                         <span class="cfg-field__label">Version</span>
@@ -108,10 +113,72 @@ class MeshcoreFirmwareConfigCard {
         this._loadMcFirmwareReleases();
         this._loadMcFirmwareTargets();
         this._refreshSerialPortsList();
+        this._loadInstalledFirmware();
     }
 
     render(config) {
         this._portUsage = this._buildPortUsageMap(config);
+    }
+
+    /** "Installed" callout in the card header -- the connected
+     * companion's own DEVICE_INFO (version/model/build), read fresh on
+     * every mount and again right after a successful flash. Unlike the
+     * Meshtastic card (which can have several configured serial sticks),
+     * MeshCore config today only ever wires one companion into this
+     * route's ``_meshcore_sources``, so this shows the first connected
+     * one without a "+N more" hint. */
+    async _loadInstalledFirmware() {
+        const root = this._root?.querySelector('[data-mc-firmware-installed]');
+        if (!root) return;
+        const versionEl = root.querySelector('.cfg-firmware-installed__version');
+        const metaEl = root.querySelector('.cfg-firmware-installed__meta');
+        if (!versionEl || !metaEl) return;
+        versionEl.textContent = 'Checking…';
+        metaEl.textContent = '';
+        const data = await this._api.get('/api/config/meshcore/firmware/installed');
+        if (!data) {
+            versionEl.textContent = 'Unavailable';
+            metaEl.textContent = 'Could not query companion';
+            return;
+        }
+        const devices = Array.isArray(data.devices) ? data.devices : [];
+        const connected = devices.filter((d) => d.connected);
+        if (!connected.length) {
+            versionEl.textContent = 'Not connected';
+            metaEl.textContent = '';
+            return;
+        }
+        const primary = connected[0];
+        const version = (primary.version || '').trim();
+        const model = (primary.model || '').trim();
+        const build = (primary.build || '').trim();
+        const port = this._shortPortLabel(primary.port);
+        if (!version && !model) {
+            versionEl.textContent = 'Connected';
+            metaEl.textContent = port ? `${port} · version not reported` : 'Version not reported';
+            return;
+        }
+        versionEl.textContent = version || model || 'Connected';
+        const meta = [];
+        if (version && model) meta.push(model);
+        if (build) meta.push(`built ${build}`);
+        if (port) meta.push(port);
+        if (connected.length > 1) meta.push(`+${connected.length - 1} more`);
+        metaEl.textContent = meta.join(' · ');
+    }
+
+    /** Same short-port-label idea as meshtastic_firmware_card.js's own
+     * copy -- prefer the raw ttyUSB0/ttyACM0 name over a long by-path
+     * string, for a compact callout. */
+    _shortPortLabel(port) {
+        if (!port) return '';
+        const raw = String(port);
+        const tty = raw.match(/tty(?:USB|ACM|AMA)\d+/i);
+        if (tty) return tty[0];
+        const base = raw.split('/').pop() || '';
+        if (base.startsWith('tty')) return base;
+        if (base.startsWith('platform-') || base.includes('pci-')) return 'USB';
+        return base;
     }
 
     /** Maps every currently-configured serial_port value (across MeshCore
@@ -419,7 +486,10 @@ class MeshcoreFirmwareConfigCard {
         }
 
         flashBtn.disabled = false;
-        if (success) await this._api.refresh();
+        if (success) {
+            await this._api.refresh();
+            await this._loadInstalledFirmware();
+        }
     }
 
     _esc(str) {

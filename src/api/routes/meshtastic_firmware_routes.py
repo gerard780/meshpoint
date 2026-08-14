@@ -97,6 +97,29 @@ def _ndjson(payload: dict) -> bytes:
     return (json.dumps(payload, separators=(",", ":")) + "\n").encode("utf-8")
 
 
+@router.get("/installed")
+async def firmware_installed(_claims: SessionClaims = Depends(require_admin)) -> dict:
+    """Firmware versions reported by configured Meshtastic USB serial sticks.
+
+    ``firmware_version``/``hw_model`` are already read into each
+    ``SerialCaptureSource``'s own ``_radio_info`` at connect time (see
+    ``serial_source.py::_read_radio_info``) -- this just surfaces that
+    already-cached data, no new live query needed. Empty ``version`` when
+    a source isn't currently connected (e.g. mid-reconnect on a busy port).
+    """
+    devices = []
+    for src in _serial_sources:
+        info = src.get_radio_info() if src.connected else {}
+        devices.append({
+            "name": src.name,
+            "connected": src.connected,
+            "port": getattr(src, "_port", None),
+            "version": info.get("firmware_version") or "",
+            "hw_model": info.get("hw_model"),
+        })
+    return {"devices": devices}
+
+
 def _fetch_json_sync(url: str) -> dict:
     req = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json"})
     with urllib.request.urlopen(req, timeout=15) as resp:

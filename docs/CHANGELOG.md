@@ -65,6 +65,7 @@
 - **Fixed: flashing new firmware no longer falsely reported success when `esptool` actually failed.** The "board finished rebooting and reconnected" messaging used to run unconditionally after a flash attempt, regardless of whether `esptool` actually exited cleanly — a failed flash left the board silently still on its old firmware while the dashboard said otherwise.
 - **Fixed: flashing firmware could fight a capture source that was mid-reconnect for the same serial port.** A source that was actively background-retrying a broken connection (not yet showing as "connected") used to skip the stop-before-flash step entirely, since the check only looked at live connection state, not whether a source was matched to that port at all.
 - **Fixed: the Configuration → Firmware port picker could silently fail to match a companion configured under a different (but equivalent) port alias** — e.g. `local.yaml` pinned to `/dev/ttyUSB0` while the picker now shows a `by-path` symlink for the same physical device. Matching now checks every known alias of a port instead of one exact string.
+- **Configuration → Firmware now shows the currently-installed version before you flash.** Both the Meshtastic and MeshCore cards gained an "Installed" callout in their header — the connected stick/companion's own reported firmware version (and hardware model / build date where available), read on page load and refreshed again right after a successful flash. Previously there was no way to see what a board was already running without leaving the page.
 
 ### v0.7.9 (July 2026)
 
