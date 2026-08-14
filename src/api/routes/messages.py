@@ -7,6 +7,7 @@ messages, contacts, and TX status endpoints for the local dashboard.
 from __future__ import annotations
 
 import logging
+import time
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -242,6 +243,36 @@ async def get_channels(claims: Optional[SessionClaims] = Depends(optional_auth))
     return channels
 
 
+# How long a fetched MeshCore contact list stays good for, for the
+# contact-picker endpoint below. get_contacts() is a live USB round trip
+# to the physical companion (up to a 10s timeout) -- opening the "new
+# conversation" picker used to call it fresh every single time, so
+# clicking it more than once in this window (or a page that re-fetches
+# on focus) could stack multiple ~10s round trips back to back, holding
+# the serial command channel and racing an actual outgoing send into a
+# "Send timed out" reconnect loop -- same bug class already fixed in
+# message_name_resolver.py's per-message name lookups, just a different
+# endpoint that fix never touched. Unlike that fix, this can't just read
+# node_repo instead: sync_meshcore_contacts_to_nodes() only *updates*
+# nodes rows that already exist, so a companion contact with no matching
+# nodes row yet (e.g. paired but never heard as a real mesh packet) would
+# silently vanish from the picker if this stopped calling the live bus
+# at all. A short cache is the fix instead -- bounds it to roughly one
+# round trip per picker-open instead of one per render.
+_CONTACTS_CACHE_TTL_S = 10.0
+_contacts_cache: list[dict] = []
+_contacts_cache_at: float = 0.0
+
+
+async def _cached_meshcore_contacts() -> list[dict]:
+    global _contacts_cache, _contacts_cache_at
+    now = time.monotonic()
+    if now - _contacts_cache_at > _CONTACTS_CACHE_TTL_S:
+        _contacts_cache = await _meshcore_tx.get_contacts()
+        _contacts_cache_at = now
+    return _contacts_cache
+
+
 @router.get("/contacts")
 async def get_contacts():
     contacts = []
@@ -262,7 +293,7 @@ async def get_contacts():
             })
 
     if _meshcore_tx and _meshcore_tx.connected:
-        mc_contacts = await _meshcore_tx.get_contacts()
+        mc_contacts = await _cached_meshcore_contacts()
         for contact in mc_contacts:
             pk = contact.get("public_key", "")
             canonical = pk[:12].lower() if len(pk) >= 12 else pk.lower()

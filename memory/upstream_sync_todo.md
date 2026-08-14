@@ -30,7 +30,7 @@ identity).
 | — | URL-hash-before-scripts flash fix | ✅ Have it | — | `index.html` |
 | **#1** | esptool venv-symlink resolver | ⏭️ Skipped — works today, any failure is loud not silent | — | `src/api/firmware/esptool_binary.py` (upstream-only) |
 | — | MeshCore radio preset apply, rename, channel sync, contacts, device info | ✅ Already have it, already has UI | — | `meshcore_usb_source.py`, `meshcore_tx_client.py`, `meshcore_card.js` |
-| **#2a** | Contact picker (`/api/messages/contacts`) hits live USB bus, no cache | 🔲 Real bug | Small | `src/api/routes/messages.py:246` |
+| **#2a** | Contact picker (`/api/messages/contacts`) hits live USB bus, no cache | ✅ Fixed | Small | `src/api/routes/messages.py:246` |
 | **#2b** | `set_radio_params()` never verifies the preset actually stuck after reconnect | 🔲 Real gap | Small-medium | `meshcore_usb_source.py:564`, `meshcore_config_routes.py:331` |
 | **#2c** | `CaptureCoordinator.start()` still aborts all sources if one throws | 🔲 Real bug | Small | `src/capture/capture_coordinator.py:32` |
 | **#2d** | Meshtastic serial source has no retry/reconnect loop at all (unlike MeshCore's own, which already works) | 🔲 Real gap | Medium | `src/capture/serial_source.py:445` |
@@ -122,15 +122,28 @@ identity).
       is four separate, much smaller resilience gaps on top of an already-
       mature feature:
 
-      - [ ] **#2a** `GET /api/messages/contacts` (`src/api/routes/messages.py:246`)
-        calls `_meshcore_tx.get_contacts()` live, every single time the
-        Messages tab's "new conversation" contact picker opens — no
-        caching at all. Same bug class #6 already fixed, but a different
-        endpoint #6 didn't touch (#6 was `message_name_resolver.py`'s
-        per-message name lookups only). Small, same shape as #6: resolve
-        MeshCore contacts from `node_repo` (SQLite) instead, matching how
-        #6 already established that contact enrichment keeps
-        `long_name`/`short_name` current there.
+      - [x] **#2a** FIXED. `GET /api/messages/contacts` (`src/api/routes/messages.py:246`)
+        called `_meshcore_tx.get_contacts()` live, every single time the
+        Messages tab's "new conversation" contact picker opened — no
+        caching at all. Same bug class #6 already fixed, a different
+        endpoint #6 didn't touch. **Fixed differently than #6, and for a
+        real reason found while implementing it**: #6 could switch
+        entirely to `node_repo` because every MeshCore node it needed a
+        name for already had a `nodes` row. This endpoint can't do the
+        same — `sync_meshcore_contacts_to_nodes()`
+        (`src/api/meshcore_contacts.py`) only *updates* existing `nodes`
+        rows with `protocol='meshcore'`, it never inserts new ones, so a
+        companion contact with no corresponding `nodes` row yet (paired
+        but never heard as a real mesh packet) would have silently
+        vanished from the picker if this had stopped calling the live
+        bus entirely. Added a short (10s) in-memory cache around the
+        live call instead — bounds it to ~1 round trip per picker-open
+        instead of one per render, without dropping contacts the
+        node-repo-only approach would have missed. Verified the caching
+        algorithm in isolation (3 rapid calls -> 1 real bus hit; correctly
+        re-fetches once the TTL expires) since the real module's import
+        chain needs more of FastAPI stubbed than's worth it on this
+        Mac's no-venv setup. `py_compile` clean.
 
       - [ ] **#2b** `set_radio_params()` triggers a reconnect after
         applying a preset but never verifies afterward that the new
