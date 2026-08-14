@@ -51,7 +51,7 @@ Everything is managed from a browser dashboard: full chat with channels and DMs,
 
 ## What's Different in This Fork
 
-This is a customized fork of upstream [KMX415/meshpoint](https://github.com/KMX415/meshpoint), tuned for a SenseCap M1 "mega-sniffer" **and** a browser radio receiver. It tracks upstream (their v0.7.7 — backup/restore, RF Environment, Quick Deploy QR, Prometheus metrics — is merged in full), and on top of everything upstream provides, this version adds:
+This is a customized fork of upstream [KMX415/meshpoint](https://github.com/KMX415/meshpoint), tuned for a SenseCap M1 "mega-sniffer" **and** a browser radio receiver. It tracks upstream (their v0.7.9 — backup/restore, RF Environment, Quick Deploy QR, Prometheus metrics — is merged in full), and on top of everything upstream provides, this version adds:
 
 **RTL-SDR broadcast & utility radio listener** (entirely new)
 - Browser radio receiver on a cheap RTL-SDR dongle — FM broadcast, airband (AM), marine VHF/UHF, PMR446, 2 m / 70 cm ham, SSB (~24–1766 MHz), independent of the SX1302 so LoRa capture keeps running.
