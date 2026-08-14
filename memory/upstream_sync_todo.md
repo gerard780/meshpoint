@@ -25,7 +25,7 @@ identity).
 | — | Firmware-flash cards/routes (existence) | ✅ Have it | — | `*_firmware_routes.py`, `*_firmware_card.js` |
 | **#7** | GPS-receiver port picker warning (Configuration → Serial) | ✅ Fixed | Small | `usb_classifier.py`, `serial_card.js` |
 | **#8** | "Installed" firmware version callout (Configuration → Firmware) | ✅ Fixed | Small-medium | `*_firmware_routes.py`, `*_firmware_card.js` |
-| **#9** | MeshCore DM contact-refresh has no throttle at all, hammers the bus on every incoming DM | 🔲 Found 2026-08-14, not yet ported | Small | `src/api/server.py:_refresh_mc_contacts` |
+| **#9** | MeshCore DM contact-refresh has no throttle at all, hammers the bus on every incoming DM | ✅ Fixed | Small | `src/api/server.py:_refresh_mc_contacts` |
 | — | `serial_config_routes.py` | ✅ Have it (bigger) | — | 457 vs 141 lines |
 | — | `stats_chart_host.js` | ✅ Have it | — | credited to us |
 | — | Stats-tab / stats-reporter fixes | ✅ Ahead of upstream | — | `stats_tab.js`, `stats_reporter.py` |
@@ -484,22 +484,31 @@ bump/changelog/README/RC-channel commits, merge commits.
 
 ## Status
 
-All real gaps found so far (#2a–#2d, #3, #4, #5, #6, #7, #8) are fixed —
-each as a clean reimplementation matching this fork's own conventions,
-not a merge/cherry-pick (709 commits of independent history on our side
-made a real merge impractical). #1 (esptool venv-symlink resolver)
-remains un-ported, deliberately: the current hardcoded-PATH lookup fails
-loudly, not silently, when it's wrong. **#9 was found on the 2026-08-14
-recheck but not yet ported** — user chose to prioritize #2b's
-supersession first; #9 is independent and still open, small effort.
+All real gaps found across every pass (#2a–#2d, #3, #4, #5, #6, #7, #8,
+#9) are now fixed — each as a clean reimplementation matching this
+fork's own conventions, not a merge/cherry-pick (709 commits of
+independent history on our side made a real merge impractical). Only #1
+(esptool venv-symlink resolver) remains un-ported, deliberately: the
+current hardcoded-PATH lookup fails loudly, not silently, when it's
+wrong.
+
 #2b/#2d needed real research into upstream's actual commits rather than
 guessed designs — see their entries above for what changed after
-checking; #2b was actually re-opened and re-fixed a second time the same
-day (see its "Superseded" note) after a second, more thorough recheck of
-the same compare found upstream's own fix had moved on further than what
-this fork had ported.
+checking. #2b was actually re-opened and re-fixed a second time (see its
+"Superseded" note) after a second, more thorough recheck of the same
+compare found upstream's own fix had moved on further than what this
+fork had originally ported. #9 was found the same recheck, independent
+of anything from upstream (a real bug in this fork's own existing code,
+not a porting gap) and fixed the same day.
 
-## #9: MeshCore DM contact-refresh has no throttle, found 2026-08-14
+Three passes over the same 28-commit compare total now (initial audit,
+first recheck → #7/#8, second recheck → #2b superseded + #9) — each
+later pass found real things the earlier one(s) missed by relying on
+commit-message summaries or file-existence checks instead of full
+diffs. That's now the standing approach for any future recheck of this
+compare, not a one-off correction.
+
+## #9: MeshCore DM contact-refresh has no throttle -- FIXED 2026-08-14
 
 Found alongside #2b's supersession, while checking `f6afe0f`/`c12da51`
 (upstream's later MeshCore-messaging hardening, on the same files this
@@ -531,9 +540,39 @@ class with soft-fail cooldown, `_pause_auto_fetch`/`_resume_auto_fetch`
 wrapped around *every* companion command) ever gets ported — this fork
 currently has none of that broader infrastructure at all, confirmed by
 grepping `meshcore_tx_client.py` for `_cmd_lock`/`MeshcoreContactCache`/
-`_pause_auto_fetch` (none found). Whether to adopt that whole
-architecture too, versus just the narrow throttle fix, is worth deciding
-explicitly when this gets picked up rather than assumed.
+`_pause_auto_fetch` (none found).
+
+**Fixed, same day, scoped to just the narrow throttle** (not upstream's
+whole broader `_cmd_lock`/`MeshcoreContactCache`/pause-auto-fetch-around-
+every-command architecture -- that's a much bigger, separate rewrite this
+fork's current `meshcore_tx_client.py` structure doesn't need just to fix
+this specific bug, and nothing else in this audit surfaced a live symptom
+that architecture would additionally fix here). Added
+`_MC_CONTACT_REFRESH_MIN_INTERVAL_SECONDS = 60.0` and a module-level-
+closure `_mc_contact_refresh_state = {"last": 0.0}` dict (same
+`time.monotonic()`-gated pattern upstream's own `f6afe0f` uses) right
+before `_refresh_mc_contacts()`'s existing `if not meshcore_tx or not
+meshcore_tx.connected:` guard -- stamps the timestamp *before* the live
+`get_contacts()` call, not after, so a failing/slow companion doesn't
+get hammered by an immediate retry storm either, matching the same
+"stamp even on failure" reasoning upstream's own `MeshcoreContactCache.
+note_soft_fail()` uses (this fork doesn't have that class, but the
+principle applies at this simpler level too).
+**Verification**: `_refresh_mc_contacts()` is a closure defined inside
+`_setup_message_interception()`, itself deeply embedded in `server.py`
+(needs real `coord`/`message_repo`/`config` objects to even construct,
+and the whole module needs `fastapi`, not installed on this Mac) --  no
+existing test file covers this function at all, and building one just
+for this fix would need a disproportionate amount of fake-dependency
+scaffolding. Instead verified the exact throttle logic (identical
+comparison/stamp/early-return shape) in an isolated throwaway script: a
+burst of 5 simulated DMs within the cooldown window produces exactly 1
+live refresh call; a 6th call after the cooldown expires is allowed
+through. `py_compile` clean on `server.py`. **Not yet verified on the
+real Pi** -- next real check is watching `sudo journalctl -u meshpoint`
+for repeated MeshCore DMs and confirming "MC contact refresh skipped:
+within cooldown" now appears between refreshes instead of a live fetch
+every time.
 
 ## Recheck, 2026-08-14 — found #7 and #8 by reading full diffs, not just messages
 

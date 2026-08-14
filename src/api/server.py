@@ -1484,6 +1484,17 @@ def _setup_message_interception(
 
     mc_name_cache: dict[str, str] = {}
     mc_pubkey_canon: dict[str, str] = {}
+    # _refresh_mc_contacts() below used to fire on every single incoming
+    # MeshCore DM with no throttle at all -- a live get_contacts() round
+    # trip (up to ~10s, holds the companion's serial command channel) on
+    # every DM, which several DMs arriving close together (or one
+    # contact's own quick back-to-back burst) could fire repeatedly,
+    # exactly the bus-hammering/TX-starvation bug class #2a/#6/#2b were
+    # all built to avoid elsewhere -- just missed here. Same fix shape
+    # upstream KMX415/meshpoint independently landed for the identical
+    # problem (f6afe0f).
+    _MC_CONTACT_REFRESH_MIN_INTERVAL_SECONDS = 60.0
+    _mc_contact_refresh_state = {"last": 0.0}
 
     from src.api.channel_hash_resolver import ChannelHashResolver
 
@@ -1513,6 +1524,13 @@ def _setup_message_interception(
         if not meshcore_tx or not meshcore_tx.connected:
             logger.debug("MC contact refresh skipped: not connected")
             return
+        import time as _time
+
+        now = _time.monotonic()
+        if now - _mc_contact_refresh_state["last"] < _MC_CONTACT_REFRESH_MIN_INTERVAL_SECONDS:
+            logger.debug("MC contact refresh skipped: within cooldown")
+            return
+        _mc_contact_refresh_state["last"] = now
         try:
             contacts = await meshcore_tx.get_contacts()
             for c in contacts:
