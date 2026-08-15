@@ -61,7 +61,7 @@ _ASSET_CONTENT_TYPES = {".png": "image/png", ".svg": "image/svg+xml"}
 # via /api/identity and /api/device/status so a client showing a version
 # chip (e.g. the Flutter fleet-manager app's meshpoint card) has something
 # other than a bare "?" to display. Bump by hand on real changes here.
-LOCAL_MESHRADAR_VERSION = "0.8.0"
+LOCAL_MESHRADAR_VERSION = "0.8.1"
 
 # Single hardcoded credential pair -- this tool is meant for a trusted
 # local network (see README's "No auth enforcement" section, which this
