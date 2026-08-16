@@ -1,0 +1,14 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../flutter/meshpoint_app"
+		},
+		{
+			"path": "../basicstation-docker"
+		}
+	],
+	"settings": {}
+}
