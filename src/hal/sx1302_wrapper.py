@@ -280,7 +280,14 @@ class SX1302Wrapper:
                     pkt.rssic, pkt.snr, pkt.size, self._crc_bad_count,
                 )
                 continue
-            elif pkt.status == STAT_NO_CRC:
+            elif pkt.status == STAT_NO_CRC and (
+                pkt.modulation == MOD_FSK or pkt.if_chain == LGW_MULTI_NB
+            ):
+                # Meshtastic's own channel (if_chain == LGW_MULTI_NB, ch8) and
+                # FSK/pager traffic (ch9) are untouched here -- NEVER TOUCH
+                # ch8/ch9 behavior, see project memory. On those, CRC is
+                # always expected by spec/convention, so NO_CRC really is
+                # noise-floor garbage, same as before.
                 self._no_crc_count += 1
                 logger.warning(
                     "RX NO_CRC if=%d sf%d bw=%g rssi=%.1f snr=%.1f size=%d "
@@ -290,6 +297,22 @@ class SX1302Wrapper:
                     pkt.rssic, pkt.snr, pkt.size, self._no_crc_count,
                 )
                 continue
+            elif pkt.status == STAT_NO_CRC:
+                # Real LoRaWAN downlinks (Join-Accept, Data Down, ...) are
+                # legitimately NO_CRC by spec -- LoRaWAN's PHY only puts a
+                # CRC on uplinks, never downlinks, so this is what a genuine
+                # downlink is *expected* to look like on ch0-ch7, not noise.
+                # Falls through to normal packet construction below instead
+                # of being dropped; crc_ok=False still records the status
+                # honestly for whatever decodes it next.
+                self._no_crc_count += 1
+                logger.info(
+                    "RX NO_CRC (real downlink, not noise) if=%d sf%d bw=%g "
+                    "rssi=%.1f snr=%.1f size=%d",
+                    pkt.if_chain, pkt.datarate,
+                    BW_MAP.get(pkt.bandwidth, pkt.bandwidth),
+                    pkt.rssic, pkt.snr, pkt.size,
+                )
             elif pkt.status != STAT_CRC_OK:
                 self._unknown_status_count += 1
                 logger.warning(
@@ -342,13 +365,18 @@ class SX1302Wrapper:
 
     @property
     def no_crc_count(self) -> int:
-        """Total NO_CRC packets dropped since process start.
+        """Total NO_CRC packets seen since process start (dropped or not).
 
-        NO_CRC indicates the chip received a packet but the LoRa header
-        CRC bit was off, or the CRC could not be validated. On a
-        Meshtastic-configured concentrator (CRC always enabled in the
-        outbound LoRa header by spec), NO_CRC at the noise floor is the
-        primary source of phantom node rows in the local SQLite.
+        NO_CRC indicates the chip received a packet but the LoRa header's
+        CRC-present bit was off. On Meshtastic's own channel (ch8) and FSK
+        (ch9/pager), CRC is always expected by spec/convention, so NO_CRC
+        there really is noise-floor garbage -- still dropped, still counted
+        here. On the LoRaWAN multi-SF channels (ch0-7) it's the opposite:
+        real downlinks (Join-Accept, Data Down, ...) are *always* NO_CRC by
+        spec (LoRaWAN's PHY CRC is an uplink-only feature) -- those are no
+        longer dropped (see receive()), but still counted here since this
+        property is "how many NO_CRC packets have we seen," not "how many
+        did we drop."
         """
         return self._no_crc_count
 
