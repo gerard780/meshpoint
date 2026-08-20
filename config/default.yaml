@@ -318,3 +318,7 @@ lorawan:
     "YOUR_DEVICE_EUI_HEX":
       app_key: "YOUR_APP_KEY_HEX"
       nwk_key: "YOUR_NWK_KEY_HEX"
+      payload_fields:
+        - name: temperature_c
+          type: int16_be
+          scale: 0.01

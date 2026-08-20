@@ -344,7 +344,7 @@ class LoRaWANPanel {
             tbody.innerHTML = packets.map((p, i) => `
                 <tr class="lw-pkt-row" data-pkt="${i}">
                     <td class="lw-time">${this._fmtTime(p.timestamp)}</td>
-                    <td>${this._fmtType(p.packet_type)}</td>
+                    <td>${this._fmtType(p.packet_type, p.decrypted)}</td>
                     <td class="lw-id">${p.dev_eui || p.source_id || '--'}</td>
                     <td class="lw-signal ${this._rssiClass(p.rssi)}">${this._fmtRssi(p.rssi)}</td>
                     <td class="lw-signal">${this._fmtSnr(p.snr)}</td>
@@ -363,14 +363,26 @@ class LoRaWANPanel {
         return '--';
     }
 
-    _fmtType(t) {
-        const map = {
-            lorawan_join:        '<span class="lw-badge lw-badge--join">Join</span>',
-            lorawan_join_accept: '<span class="lw-badge lw-badge--join">JoinAccept</span>',
-            lorawan_data:        '<span class="lw-badge lw-badge--data">Data</span>',
-            lorawan_rejoin:      '<span class="lw-badge lw-badge--rejoin">Rejoin</span>',
+    _fmtType(t, decrypted) {
+        const labels = {
+            lorawan_join:        'Join',
+            lorawan_join_accept: 'JoinAccept',
+            lorawan_data:        'Data',
+            lorawan_rejoin:      'Rejoin',
         };
-        return map[t] || `<span class="lw-badge">${t || '--'}</span>`;
+        const typeClasses = {
+            lorawan_join:        'lw-badge--join',
+            lorawan_join_accept: 'lw-badge--join',
+            lorawan_data:        'lw-badge--data',
+            lorawan_rejoin:      'lw-badge--rejoin',
+        };
+        const label = labels[t] || t || '--';
+        // decrypted===false overrides the type color with red, so "still
+        // encrypted" is scannable at a glance without opening every row.
+        // decrypted left undefined (e.g. the Devices tab, which has no
+        // single per-row decrypt status) falls back to the plain type color.
+        const cls = decrypted === false ? 'lw-badge--undecrypted' : (typeClasses[t] || '');
+        return `<span class="lw-badge ${cls}">${label}</span>`;
     }
 
     _fmtTime(ts) {

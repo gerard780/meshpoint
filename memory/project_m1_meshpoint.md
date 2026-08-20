@@ -7401,7 +7401,9 @@ The actual bandplan is negotiated entirely by the **network server** (LNS), not 
               scale: 0.01
     ```
   - Tests: `test_lorawan_payload_formats.py` (9, including the exact `0E56`->`36.7` real-value case), `test_lorawan_keystore.py` payload-fields cases, `test_lorawan_decoder.py::test_data_up_decodes_configured_payload_fields` (full pipeline, real captured value). All 88 LoRaWAN+config-loader+sx1302+concentrator-config tests pass together.
-  - **Not yet deployed/tested live** -- next step is pulling this onto the Pi, adding `payload_fields` to both configured devices in `config/local.yaml`, restarting, and confirming `temperature_c` shows up in the dashboard on the next real uplink. No frontend card yet either (`config.yaml`/curl only, per the earlier note).
+  - **CONFIRMED LIVE (2026-08-20, same session)**: after deploying and adding `payload_fields` to `config/local.yaml`, a real uplink (`DevAddr=260B46A6`) showed `"frm_payload_decrypted": "0E56", "temperature_c": 36.7` directly in the dashboard's packet-detail JSON -- the full feature working end to end in production. No frontend card yet (`config.yaml`/curl only) -- the only piece of the original 2026-08-16 scope still outstanding.
+
+**Status: Phase 2 fully live and working.** LoRaWAN decrypt (Join-Accept -> AppSKey derivation -> FRMPayload decrypt -> declarative application field decode) is a complete, real, deployed feature as of tonight, not just built-but-untested code. Remaining open item, low priority: a `lorawan_keys_card.js` frontend card so keys/fields can be entered through the dashboard instead of hand-editing YAML.
 
 ## `extra/pocsag_companion868` — real POCSAG on 868 MHz, firmware fully validated, GP2009N pager can't receive that high (2026-08-19/20, resolved)
 

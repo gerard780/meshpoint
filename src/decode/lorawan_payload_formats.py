@@ -26,7 +26,7 @@ rule based on FPort alone; only for devices that explicitly configure it.
 from __future__ import annotations
 
 import struct
-from typing import Optional, TypedDict
+from typing import TypedDict
 
 # name -> (struct format char, byte size)
 _FIELD_TYPES: dict[str, tuple[str, int]] = {

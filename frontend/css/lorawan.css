@@ -283,6 +283,12 @@
 .lw-badge--data   { background: rgba(34, 211, 238, 0.15); color: #22d3ee; }
 .lw-badge--rejoin { background: rgba(255, 184, 77, 0.15);  color: var(--brand-amber, #ffb84d); }
 
+/* Overrides the type color above when a packet couldn't be decrypted
+   (no session key for that DevAddr yet, or root keys not configured) --
+   red is the "needs attention" signal across this dashboard, same idea
+   as the RSSI danger color in _rssiClass(). */
+.lw-badge--undecrypted { background: rgba(248, 113, 113, 0.15); color: #f87171; }
+
 /* ── Column widths — MeshCore nodes table ───────────── */
 
 .lw-table--mc-nodes col.col-id   { width: 110px; }
