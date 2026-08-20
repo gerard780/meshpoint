@@ -4,6 +4,12 @@
 
 - **MQTT broker TLS.** Transport TLS (`mqtts`, CA bundle, cert validation) is not implemented on `mqtt_publisher.py` (plain TCP only). Until then use plain port 1883 or a LAN broker without TLS.
 
+### v0.8.1 (August 2026)
+
+- **LoRaWAN: the concentrator now recognizes Join-Accept frames** instead of silently dropping them — first step toward real FRMPayload decrypt (deriving AppSKey from a captured Join-Accept via NwkKey, work in progress). Shows up as a new "JoinAccept" badge on the LoRaWAN page's live table, best-effort tagged with whichever Join-Request's DevEUI was seen in the previous 10 seconds. Still shown undecrypted — no key store exists yet.
+- **Fixed: the EU868 channel plan had no way to actually receive a Join-Accept even if the code above needed one** — 869.525 MHz (where TTN's RX2 downlink lands) was covered only by the Meshtastic service channel, hardcoded to SF11, while TTN's default RX2 uses SF9. A previously-disabled multi-SF channel now covers SF7-12 at that same frequency, alongside Meshtastic's channel, without disturbing it.
+- **Fixed: a packet on that same 869.525 MHz frequency could get misrouted to the Meshtastic decoder instead of LoRaWAN** now that two different channels share it — routing now also checks bandwidth (Meshtastic's channel is 250 kHz; the new LoRaWAN one is 125 kHz), not frequency alone.
+
 ### v0.8.0 (August 2026)
 
 - **Changes since v0.7.9.** See the v0.7.9 section of this changelog for the full pager buildout (firmware, dashboard, ACKs) and LoRaWAN/DAPNET work.

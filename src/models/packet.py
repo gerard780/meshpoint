@@ -34,6 +34,7 @@ class PacketType(str, Enum):
     MAP_REPORT = "map_report"
     ENCRYPTED = "encrypted"
     LORAWAN_JOIN = "lorawan_join"
+    LORAWAN_JOIN_ACCEPT = "lorawan_join_accept"
     LORAWAN_DATA = "lorawan_data"
     LORAWAN_REJOIN = "lorawan_rejoin"
     NEIGHBOUR_ADVERT = "neighbour_advert"

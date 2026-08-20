@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, AsyncIterator, Optional
 
 from src.capture.base import CaptureSource
 from src.hal.concentrator_config import ConcentratorChannelPlan
-from src.hal.sx1302_wrapper import BW_MAP, SX1302Wrapper
+from src.hal.sx1302_wrapper import BW_250KHZ, BW_MAP, SX1302Wrapper
 from src.models.packet import Protocol, RawCapture
 from src.models.signal import SignalMetrics
 
@@ -23,12 +23,14 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Frequency (Hz) used by Meshtastic on EU868.  Packets on this frequency
-# are routed to the Meshtastic decoder; everything else is treated as LoRaWAN.
-# Only the ch8 service channel (869.525 MHz) can decode Meshtastic -- ch0-ch7
-# multi-SF channels share a single board-wide LoRaWAN sync word, so no other
-# frequency will ever carry a Meshtastic-decoded packet (see eu868_lorawan()
-# in concentrator_config.py).
+# Frequency (Hz) used by Meshtastic on EU868.  Packets on this frequency AND
+# at ch8's 250 kHz bandwidth are routed to the Meshtastic decoder; everything
+# else is treated as LoRaWAN. Frequency alone stopped being a unique key once
+# ch5 (added for LoRaWAN Join-Accept/RX2 capture, see eu868_lorawan() in
+# concentrator_config.py) started sharing this exact same 869.525 MHz center
+# frequency as a 125 kHz multi-SF channel -- ch5 and ch8 are genuinely
+# different IF chains/demodulators at the same frequency, distinguished by
+# bandwidth (125 vs 250 kHz), not by frequency alone anymore.
 _MESHTASTIC_EU868_FREQS_HZ: frozenset[int] = frozenset({
     869_525_000,
 })
@@ -230,6 +232,7 @@ class ConcentratorCaptureSource(CaptureSource):
                 protocol_hint = (
                     Protocol.MESHTASTIC
                     if pkt.frequency_hz in _MESHTASTIC_EU868_FREQS_HZ
+                    and pkt.bandwidth == BW_250KHZ
                     else Protocol.LORAWAN
                 )
 

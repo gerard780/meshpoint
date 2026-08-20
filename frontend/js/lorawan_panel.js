@@ -365,9 +365,10 @@ class LoRaWANPanel {
 
     _fmtType(t) {
         const map = {
-            lorawan_join:   '<span class="lw-badge lw-badge--join">Join</span>',
-            lorawan_data:   '<span class="lw-badge lw-badge--data">Data</span>',
-            lorawan_rejoin: '<span class="lw-badge lw-badge--rejoin">Rejoin</span>',
+            lorawan_join:        '<span class="lw-badge lw-badge--join">Join</span>',
+            lorawan_join_accept: '<span class="lw-badge lw-badge--join">JoinAccept</span>',
+            lorawan_data:        '<span class="lw-badge lw-badge--data">Data</span>',
+            lorawan_rejoin:      '<span class="lw-badge lw-badge--rejoin">Rejoin</span>',
         };
         return map[t] || `<span class="lw-badge">${t || '--'}</span>`;
     }

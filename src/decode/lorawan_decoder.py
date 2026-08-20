@@ -1,22 +1,38 @@
 """LoRaWAN 1.0/1.1 MAC frame decoder.
 
-Parses raw LoRaWAN uplink frames received from the SX1302 concentrator and
-returns a Packet with the decoded fields.  Payload decryption requires the
-session keys (AppSKey / NwkSKey) which are not known to a passive listener,
-so FRMPayload is kept as hex in decoded_payload and the packet is marked
+Parses raw LoRaWAN frames received from the SX1302 concentrator and returns
+a Packet with the decoded fields.  Payload decryption requires the session
+keys (AppSKey / NwkSKey) which are not known to a passive listener, so
+FRMPayload is kept as hex in decoded_payload and the packet is marked
 decrypted=False.
 
-Supported MType values (uplinks only — downlinks are not heard over-the-air
-by an uplink-listening concentrator):
-  000  Join-Request
-  010  Unconfirmed Data Up
-  100  Confirmed Data Up
-  110  Rejoin-Request (LoRaWAN 1.1)
+Supported MType values:
+  000  Join-Request     (uplink)
+  001  Join-Accept      (downlink -- see below)
+  010  Unconfirmed Data Up (uplink)
+  100  Confirmed Data Up   (uplink)
+  110  Rejoin-Request (LoRaWAN 1.1, uplink)
+
+Join-Accept is a network-server-originated downlink, not something an
+uplink-listening concentrator should normally expect to hear at all --
+but there's no LoRa-PHY reason it couldn't, if the RX1/RX2 frequency+SF
+the real serving gateway replies on happens to be inside this
+concentrator's own monitored channel plan (uplink and downlink share the
+same sync word; the uplink/downlink distinction only exists at the MAC
+layer, after MHDR is already decoded). Recognized here so that's
+findable empirically rather than assumed either way -- see project
+memory ("LoRaWAN key store + payload decrypt") for why this matters:
+deriving a session's real AppSKey for FRMPayload decrypt requires
+NwkKey-decrypting a real captured Join-Accept. Kept undecrypted (no
+NwkKey lookup here yet) -- this module stays a stateless parser; that
+lookup and the AES decrypt/key-derivation happen one layer up, in
+whatever wires in a configured key store.
 """
 from __future__ import annotations
 
 import logging
 import struct
+import time
 from typing import Optional
 
 from src.models.packet import Packet, PacketType, Protocol
@@ -39,6 +55,12 @@ _MIN_JOIN_REQUEST = 23   # MHDR(1) + AppEUI(8) + DevEUI(8) + DevNonce(2) + MIC(4
 _MIN_DATA_FRAME   = 12   # MHDR(1) + DevAddr(4) + FCtrl(1) + FCnt(2) + MIC(4)
 _MIN_REJOIN_0_2   = 19   # MHDR(1) + Type(1) + NetID(3) + DevEUI(8) + RJcount(2) + MIC(4)
 _MIN_REJOIN_1    = 23   # MHDR(1) + Type(1) + JoinEUI(8) + DevEUI(8) + RJcount(2) + MIC(4)
+# Join-Accept: MHDR(1) + AES-encrypted block, where the encrypted plaintext
+# is JoinNonce(3)+NetID(3)+DevAddr(4)+DLSettings(1)+RxDelay(1)[+CFList(16)]+MIC(4)
+# -- 16 bytes without CFList, 32 with, so the frame on the wire is 17 or 33
+# bytes total. Both are valid; anything else isn't a real Join-Accept.
+_JOIN_ACCEPT_LEN_NO_CFLIST = 17
+_JOIN_ACCEPT_LEN_WITH_CFLIST = 33
 
 
 def _eui_str(raw: bytes) -> str:
@@ -50,8 +72,23 @@ def _hex(raw: bytes) -> str:
     return raw.hex().upper()
 
 
+_JOIN_ACCEPT_CORRELATE_WINDOW_S = 10.0  # RX1/RX2 land within ~1-2s of the
+# Join-Request in practice; 10s gives generous margin for a slow gateway
+# without risking matching a stale, unrelated request from way earlier.
+
+
 class LoRaWANDecoder:
-    """Stateless LoRaWAN MAC frame parser."""
+    """LoRaWAN MAC frame parser. Mostly stateless, with one exception: it
+    remembers the most recent Join-Request's DevEUI/DevNonce/time so a
+    Join-Accept arriving shortly after can be tagged as "likely this
+    device's" -- there's no DevEUI in a Join-Accept's own (still
+    encrypted) bytes to identify it by otherwise. Best-effort only (two
+    devices could join within the same window) -- real attribution needs
+    an actual NwkKey decrypt, done one layer up, not here.
+    """
+
+    def __init__(self) -> None:
+        self._last_join_request: Optional[dict] = None
 
     def decode(
         self,
@@ -72,13 +109,18 @@ class LoRaWANDecoder:
 
         if mtype == _MTYPE_JOIN_REQUEST:
             return self._decode_join_request(raw_bytes, signal)
+        if mtype == _MTYPE_JOIN_ACCEPT:
+            return self._decode_join_accept(raw_bytes, signal)
         if mtype in (_MTYPE_UNCONF_DATA_UP, _MTYPE_CONF_DATA_UP):
             return self._decode_data_up(raw_bytes, mtype, signal)
         if mtype == _MTYPE_REJOIN_REQUEST:
             return self._decode_rejoin(raw_bytes, signal)
 
-        # Join-Accept and downlinks are not seen by an uplink concentrator
-        logger.debug("LoRaWAN: MType=0x%02X not an uplink or join-request", mtype)
+        # Other downlinks (Unconfirmed/Confirmed Data Down) aren't expected
+        # to be heard by an uplink-oriented concentrator and aren't useful
+        # here even if they were (no MAC-command handling downstream) --
+        # unlike Join-Accept, there's nothing this app would do with one.
+        logger.debug("LoRaWAN: MType=0x%02X not handled", mtype)
         return None
 
     # ── Join-Request ────────────────────────────────────────────────────────
@@ -105,6 +147,13 @@ class LoRaWANDecoder:
             dev_eui_str, app_eui_str, dev_nonce,
         )
 
+        self._last_join_request = {
+            "dev_eui": dev_eui_str,
+            "app_eui": app_eui_str,
+            "dev_nonce": dev_nonce,
+            "at": time.monotonic(),
+        }
+
         return Packet(
             packet_id=f"join:{dev_nonce:04X}:{_hex(dev_eui)}",
             source_id=dev_eui_str,
@@ -119,6 +168,53 @@ class LoRaWANDecoder:
                 "mic": mic,
             },
             decrypted=True,
+            signal=signal,
+            capture_source="concentrator",
+        )
+
+    # ── Join-Accept ──────────────────────────────────────────────────────────
+
+    def _decode_join_accept(
+        self,
+        raw: bytes,
+        signal: Optional[SignalMetrics],
+    ) -> Optional[Packet]:
+        if len(raw) not in (_JOIN_ACCEPT_LEN_NO_CFLIST, _JOIN_ACCEPT_LEN_WITH_CFLIST):
+            logger.debug(
+                "LoRaWAN: MType=JoinAccept but wrong length (%d bytes, "
+                "expected %d or %d) -- not a real Join-Accept",
+                len(raw), _JOIN_ACCEPT_LEN_NO_CFLIST, _JOIN_ACCEPT_LEN_WITH_CFLIST,
+            )
+            return None
+
+        encrypted = raw[1:]
+        has_cflist = len(raw) == _JOIN_ACCEPT_LEN_WITH_CFLIST
+
+        likely_dev_eui = None
+        if self._last_join_request is not None:
+            age = time.monotonic() - self._last_join_request["at"]
+            if age <= _JOIN_ACCEPT_CORRELATE_WINDOW_S:
+                likely_dev_eui = self._last_join_request["dev_eui"]
+
+        logger.info(
+            "LoRaWAN Join-Accept: %d bytes (cflist=%s), likely for DevEUI=%s "
+            "-- real fields need an NwkKey decrypt, not done here",
+            len(raw), has_cflist, likely_dev_eui or "unknown",
+        )
+
+        return Packet(
+            packet_id=f"joinaccept:{_hex(encrypted[:4])}",
+            source_id="network-server",
+            destination_id=likely_dev_eui or "unknown",
+            protocol=Protocol.LORAWAN,
+            packet_type=PacketType.LORAWAN_JOIN_ACCEPT,
+            decoded_payload={
+                "mtype": "JoinAccept",
+                "likely_dev_eui": likely_dev_eui,
+                "has_cflist": has_cflist,
+                "encrypted_payload": _hex(encrypted),
+            },
+            decrypted=False,  # needs NwkKey to even parse the real fields, let alone verify
             signal=signal,
             capture_source="concentrator",
         )
