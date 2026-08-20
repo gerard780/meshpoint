@@ -904,6 +904,7 @@ def _apply_yaml(cfg: AppConfig, path: Path) -> None:
 
     section_map = {
         "radio": cfg.radio,
+        "lorawan": cfg.lorawan,
         "meshtastic": cfg.meshtastic,
         "meshcore": cfg.meshcore,
         "capture": cfg.capture,

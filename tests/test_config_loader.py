@@ -356,6 +356,42 @@ class LoadConfigIntegrationTest(unittest.TestCase):
         self.assertEqual(cfg.button.hold_time_s, 5.0)
         self.assertEqual(cfg.button.gpio_pin, 27)  # untouched default
 
+    def test_lorawan_section_is_applied_without_warning(self):
+        # Same regression class as fan/led/button: section_map must list
+        # it. Missed once for real (v0.8.1) -- AppConfig.lorawan existed
+        # but section_map didn't mention it, so local.yaml's lorawan:
+        # block was silently ignored (logged as an unknown key) even
+        # though the dataclass field was right there.
+        tmp = tempfile.NamedTemporaryFile(
+            mode="w", suffix=".yaml", delete=False, encoding="utf-8"
+        )
+        tmp.write(
+            "lorawan:\n"
+            "  devices:\n"
+            "    \"70:B3:D5:7E:D0:07:8B:FD\":\n"
+            "      app_key: \"AA\"\n"
+            "      nwk_key: \"BB\"\n"
+        )
+        tmp.close()
+        path = Path(tmp.name)
+        self.addCleanup(lambda: path.unlink(missing_ok=True))
+
+        old = os.environ.get("CONCENTRATOR_CONFIG")
+        os.environ["CONCENTRATOR_CONFIG"] = str(path)
+        try:
+            with self.assertNoLogs("src.config", level="WARNING"):
+                cfg = load_config()
+        finally:
+            if old is None:
+                os.environ.pop("CONCENTRATOR_CONFIG", None)
+            else:
+                os.environ["CONCENTRATOR_CONFIG"] = old
+
+        self.assertEqual(
+            cfg.lorawan.devices["70:B3:D5:7E:D0:07:8B:FD"],
+            {"app_key": "AA", "nwk_key": "BB"},
+        )
+
     def test_repeater_poll_section_is_applied(self):
         # section_map + the repeaters list coercion both exercised.
         tmp = tempfile.NamedTemporaryFile(

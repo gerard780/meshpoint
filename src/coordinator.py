@@ -678,6 +678,7 @@ class PipelineCoordinator:
                 self._lorawan_keystore.add_device(
                     dev_eui, keys["app_key"], keys["nwk_key"]
                 )
+                logger.info("LoRaWAN: root keys loaded for DevEUI=%s", dev_eui)
             except (KeyError, ValueError):
                 logger.exception("LoRaWAN: skipping malformed device config for %s", dev_eui)
 
