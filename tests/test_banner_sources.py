@@ -30,8 +30,11 @@ class _Src:
 
 class BannerSourceLinesTest(unittest.TestCase):
     def test_concentrator_summary_shows_both_protocols(self):
+        # x6 867.9-869.5, not x5 867.9-868.7 -- v0.8.1 added ch5 (869.525
+        # MHz multi-SF) for LoRaWAN Join-Accept/RX2 capture, see project
+        # memory ("LoRaWAN key store + payload decrypt").
         desc = _describe_concentrator(_eu868_config())
-        self.assertIn("LoRaWAN x5 867.9-868.7 MHz", desc)
+        self.assertIn("LoRaWAN x6 867.9-869.5 MHz", desc)
         self.assertIn("Meshtastic 869.525 MHz SF11", desc)
         self.assertIn("(EU_868)", desc)
 
