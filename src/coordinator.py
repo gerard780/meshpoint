@@ -676,7 +676,8 @@ class PipelineCoordinator:
         for dev_eui, keys in self._config.lorawan.devices.items():
             try:
                 self._lorawan_keystore.add_device(
-                    dev_eui, keys["app_key"], keys["nwk_key"]
+                    dev_eui, keys["app_key"], keys["nwk_key"],
+                    payload_fields=keys.get("payload_fields"),
                 )
                 logger.info("LoRaWAN: root keys loaded for DevEUI=%s", dev_eui)
             except (KeyError, ValueError):

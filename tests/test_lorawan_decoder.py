@@ -181,6 +181,43 @@ class TestKeystoreIntegration(unittest.TestCase):
             packet.decoded_payload["frm_payload_decrypted"], plaintext.hex().upper()
         )
 
+    def test_data_up_decodes_configured_payload_fields(self):
+        """Full pipeline, including the declarative payload_fields decode
+        -- the actual feature this project used to read 36.7C off a real
+        device. Uses the real int16_be/scale=0.01 shape and the exact
+        captured value from that live test."""
+        keystore = LoRaWANKeyStore()
+        keystore.add_device(
+            self.dev_eui_str, self.app_key.hex(), self.nwk_key.hex(),
+            payload_fields=[{"name": "temperature_c", "type": "int16_be", "scale": 0.01}],
+        )
+        decoder = LoRaWANDecoder(keystore)
+
+        dev_addr = 0x260BA627
+        join_nonce = bytes([0x01, 0x02, 0x03])
+        decoder.decode(self._join_request_frame())
+        decoder.decode(self._join_accept_frame(dev_addr, join_nonce))
+
+        app_skey = keystore.session_key_for(dev_addr)
+        fcnt = 1
+        plaintext = bytes.fromhex("0E56")  # real captured value -> 36.7 C
+        ciphertext = decrypt_frm_payload(app_skey, plaintext, dev_addr, fcnt, uplink=True)
+
+        frame = (
+            bytes([0x40])
+            + dev_addr.to_bytes(4, "little")
+            + bytes([0x00])
+            + fcnt.to_bytes(2, "little")
+            + bytes([0x02])
+            + ciphertext
+            + bytes(4)
+        )
+
+        packet = decoder.decode(frame)
+
+        self.assertTrue(packet.decrypted)
+        self.assertEqual(packet.decoded_payload["temperature_c"], 36.7)
+
     def test_data_up_stays_undecrypted_without_a_session_key(self):
         decoder = LoRaWANDecoder(LoRaWANKeyStore())  # no devices configured
         dev_addr = 0x11223344

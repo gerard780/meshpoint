@@ -43,16 +43,36 @@ class TestLoRaWANKeyStore(unittest.TestCase):
         self.assertIsNone(store.session_key_for(0x260BA627))
 
         app_skey = bytes(range(16))
-        store.set_session_key(0x260BA627, app_skey)
+        store.set_session_key(0x260BA627, app_skey, "70:B3:D5:7E:D0:07:8B:FD")
 
         self.assertEqual(store.session_key_for(0x260BA627), app_skey)
 
     def test_rejoin_overwrites_previous_session_key(self):
         store = LoRaWANKeyStore()
-        store.set_session_key(1, bytes(16))
-        store.set_session_key(1, bytes(range(16)))
+        store.set_session_key(1, bytes(16), "70:B3:D5:7E:D0:07:8B:FD")
+        store.set_session_key(1, bytes(range(16)), "70:B3:D5:7E:D0:07:8B:FD")
 
         self.assertEqual(store.session_key_for(1), bytes(range(16)))
+
+    def test_payload_fields_looked_up_via_dev_addr(self):
+        store = LoRaWANKeyStore()
+        dev_eui = "70:B3:D5:7E:D0:07:8B:FD"
+        fields = [{"name": "temperature_c", "type": "int16_be", "scale": 0.01}]
+        store.add_device(dev_eui, "10" * 16, "20" * 16, payload_fields=fields)
+
+        self.assertIsNone(store.payload_fields_for_addr(0x260BA627))  # not joined yet
+
+        store.set_session_key(0x260BA627, bytes(16), dev_eui)
+
+        self.assertEqual(store.payload_fields_for_addr(0x260BA627), fields)
+
+    def test_no_payload_fields_configured_returns_none(self):
+        store = LoRaWANKeyStore()
+        dev_eui = "70:B3:D5:7E:D0:07:8B:FD"
+        store.add_device(dev_eui, "10" * 16, "20" * 16)  # no payload_fields
+        store.set_session_key(0x260BA627, bytes(16), dev_eui)
+
+        self.assertIsNone(store.payload_fields_for_addr(0x260BA627))
 
 
 if __name__ == "__main__":

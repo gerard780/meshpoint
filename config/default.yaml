@@ -313,3 +313,8 @@ update_check:              # background check for a newer version on GitHub
   # How often (minutes) to check. Floored at 5 minutes -- each check
   # is a real `git fetch`, not a cheap request.
   interval_minutes: 60
+lorawan:
+  devices:
+    "YOUR_DEVICE_EUI_HEX":
+      app_key: "YOUR_APP_KEY_HEX"
+      nwk_key: "YOUR_NWK_KEY_HEX"

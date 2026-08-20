@@ -41,6 +41,7 @@ from src.decode.lorawan_crypto import (
     derive_app_skey,
 )
 from src.decode.lorawan_keystore import LoRaWANKeyStore
+from src.decode.lorawan_payload_formats import decode_payload
 from src.models.packet import Packet, PacketType, Protocol
 from src.models.signal import SignalMetrics
 
@@ -245,7 +246,7 @@ class LoRaWANDecoder:
                         join_request["app_eui_raw"],
                         join_request["dev_nonce"],
                     )
-                    self._keystore.set_session_key(fields["dev_addr"], app_skey)
+                    self._keystore.set_session_key(fields["dev_addr"], app_skey, likely_dev_eui)
                     decrypted = True
                     payload.update({
                         "dev_addr": f"{fields['dev_addr']:08X}",
@@ -356,6 +357,15 @@ class LoRaWANDecoder:
                 )
                 decoded_payload["frm_payload_decrypted"] = _hex(plaintext)
                 decrypted = True
+
+                # Opt-in per device (never a blanket FPort-based guess) --
+                # see lorawan_payload_formats.py's own docstring for why.
+                payload_fields = self._keystore.payload_fields_for_addr(dev_addr)
+                if payload_fields:
+                    app_fields = decode_payload(payload_fields, plaintext)
+                    if app_fields:
+                        decoded_payload.update(app_fields)
+
                 logger.info(
                     "LoRaWAN Data Up DECRYPTED: DevAddr=%s FCnt=%d -- %d bytes",
                     dev_addr_str, fcnt, len(plaintext),

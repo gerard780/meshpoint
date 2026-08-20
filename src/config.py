@@ -107,13 +107,21 @@ class RadioConfig:
 class LoRaWANConfig:
     # DevEUI (colon-formatted, e.g. "70:B3:D5:7E:D0:07:8B:FD", matching
     # lorawan_decoder.py's own _eui_str() output) -> {"app_key": hex32,
-    # "nwk_key": hex32} -- the OTAA root keys from TTN Console's device
-    # registration page (NOT the derived per-session AppSKey, which
-    # changes on every rejoin and is never configured directly here --
-    # see lorawan_keystore.py for why: it's derived live from each
-    # device's own captured Join-Accept instead). Same shape/precedent
-    # as meshtastic.channel_keys/meshcore.channel_keys below.
-    devices: dict[str, dict[str, str]] = field(default_factory=dict)
+    # "nwk_key": hex32, "payload_fields": [...]} -- app_key/nwk_key are
+    # the OTAA root keys from TTN Console's device registration page (NOT
+    # the derived per-session AppSKey, which changes on every rejoin and
+    # is never configured directly here -- see lorawan_keystore.py for
+    # why: it's derived live from each device's own captured Join-Accept
+    # instead). payload_fields is optional -- this device's own
+    # declarative FRMPayload field list (see lorawan_payload_formats.py),
+    # e.g.:
+    #   payload_fields:
+    #     - name: temperature_c
+    #       type: int16_be
+    #       scale: 0.01
+    # Same shape/precedent as meshtastic.channel_keys/meshcore.channel_keys
+    # below, other than payload_fields being a list, not a string.
+    devices: dict[str, dict] = field(default_factory=dict)
 
 
 @dataclass

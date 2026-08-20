@@ -9,6 +9,11 @@ lorawan_keystore.py/lorawan_crypto.py) and is never configured directly
 OTAA join happens over the air and gets captured, unlike
 Meshtastic/Meshcore's channel keys which apply immediately.
 
+Also carries each device's own optional declarative payload_fields (see
+lorawan_payload_formats.py) -- a user-defined, non-code field list (type/
+offset/scale), not an arbitrary-code formatter, so it's safe to accept
+and persist straight from the API without a sandboxing story.
+
 Same "list of entries, replace wholesale" PUT shape as
 config_routes.py's own update_channels()/update_meshcore_channels(), and
 the same "return real key material in GET, no server-side masking"
@@ -27,6 +32,7 @@ from src.api.auth.dependencies import require_admin
 from src.api.auth.jwt_session import SessionClaims
 from src.config import AppConfig, save_section_to_yaml
 from src.decode.lorawan_keystore import LoRaWANKeyStore
+from src.decode.lorawan_payload_formats import KNOWN_FIELD_TYPES
 
 logger = logging.getLogger(__name__)
 
@@ -59,10 +65,28 @@ def _validate_hex_key(value: str, field_name: str) -> str:
     return value.upper()
 
 
+class PayloadFieldEntry(BaseModel):
+    name: str
+    type: str
+    offset: int | None = None
+    scale: float = 1.0
+
+    @field_validator("type")
+    @classmethod
+    def _validate_type(cls, v: str) -> str:
+        if v not in KNOWN_FIELD_TYPES:
+            raise ValueError(f"type must be one of {sorted(KNOWN_FIELD_TYPES)}")
+        return v
+
+
 class LoRaWANDeviceEntry(BaseModel):
     dev_eui: str
     app_key: str
     nwk_key: str
+    # Opt-in application payload decode -- this device's own known
+    # FRMPayload shape. Never inferred/guessed from FPort alone; see
+    # lorawan_payload_formats.py's own docstring for why.
+    payload_fields: list[PayloadFieldEntry] = []
 
     @field_validator("app_key")
     @classmethod
@@ -86,9 +110,15 @@ async def get_lorawan_config():
 
     return {
         "devices": [
-            {"dev_eui": dev_eui, "app_key": keys.get("app_key", ""), "nwk_key": keys.get("nwk_key", "")}
+            {
+                "dev_eui": dev_eui,
+                "app_key": keys.get("app_key", ""),
+                "nwk_key": keys.get("nwk_key", ""),
+                "payload_fields": keys.get("payload_fields", []),
+            }
             for dev_eui, keys in _config.lorawan.devices.items()
-        ]
+        ],
+        "known_field_types": sorted(KNOWN_FIELD_TYPES),
     }
 
 
@@ -104,10 +134,12 @@ async def update_lorawan_config(
     if _config is None:
         raise HTTPException(503, "Config not loaded")
 
-    devices = {
-        entry.dev_eui.upper(): {"app_key": entry.app_key, "nwk_key": entry.nwk_key}
-        for entry in req.devices
-    }
+    devices = {}
+    for entry in req.devices:
+        entry_dict = {"app_key": entry.app_key, "nwk_key": entry.nwk_key}
+        if entry.payload_fields:
+            entry_dict["payload_fields"] = [f.model_dump() for f in entry.payload_fields]
+        devices[entry.dev_eui.upper()] = entry_dict
 
     _config.lorawan.devices = devices
     try:
@@ -118,7 +150,10 @@ async def update_lorawan_config(
     if _keystore is not None:
         for dev_eui, keys in devices.items():
             try:
-                _keystore.add_device(dev_eui, keys["app_key"], keys["nwk_key"])
+                _keystore.add_device(
+                    dev_eui, keys["app_key"], keys["nwk_key"],
+                    payload_fields=keys.get("payload_fields"),
+                )
             except ValueError as exc:
                 raise HTTPException(400, f"{dev_eui}: {exc}")
 
