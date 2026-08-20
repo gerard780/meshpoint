@@ -10,6 +10,7 @@ from src.analytics.stats_reporter import StatsReporter
 from src.capture.capture_coordinator import CaptureCoordinator
 from src.config import AppConfig
 from src.decode.crypto_service import CryptoService
+from src.decode.lorawan_keystore import LoRaWANKeyStore
 from src.decode.packet_router import PacketRouter
 from src.decode.stray_frame_log import StrayFrameLog
 from src.hal.location import LocationSource, build_location_source
@@ -44,7 +45,8 @@ class PipelineCoordinator:
 
         self._db = DatabaseManager(config.storage.database_path)
         self._crypto = CryptoService(config.meshtastic.default_key_b64)
-        self._router = PacketRouter(self._crypto)
+        self._lorawan_keystore = LoRaWANKeyStore()
+        self._router = PacketRouter(self._crypto, self._lorawan_keystore)
         self._stray_frames = StrayFrameLog()
         self._capture = CaptureCoordinator()
         relay_cfg = config.relay
@@ -101,6 +103,10 @@ class PipelineCoordinator:
         if self._telemetry_repo is None:
             raise RuntimeError("Pipeline not started")
         return self._telemetry_repo
+
+    @property
+    def lorawan_keystore(self) -> LoRaWANKeyStore:
+        return self._lorawan_keystore
 
     @property
     def capture_coordinator(self) -> CaptureCoordinator:
@@ -667,6 +673,13 @@ class PipelineCoordinator:
         for name, key in self._config.meshcore.channel_keys.items():
             key_b64 = base64.b64encode(binascii.unhexlify(key)).decode()
             self._crypto.add_channel_key(name, key_b64)
+        for dev_eui, keys in self._config.lorawan.devices.items():
+            try:
+                self._lorawan_keystore.add_device(
+                    dev_eui, keys["app_key"], keys["nwk_key"]
+                )
+            except (KeyError, ValueError):
+                logger.exception("LoRaWAN: skipping malformed device config for %s", dev_eui)
 
     def _setup_location_banner(self) -> None:
         """One-line startup banner matching the RELAY/MQTT/PIPELINE rows."""

@@ -104,6 +104,19 @@ class RadioConfig:
 
 
 @dataclass
+class LoRaWANConfig:
+    # DevEUI (colon-formatted, e.g. "70:B3:D5:7E:D0:07:8B:FD", matching
+    # lorawan_decoder.py's own _eui_str() output) -> {"app_key": hex32,
+    # "nwk_key": hex32} -- the OTAA root keys from TTN Console's device
+    # registration page (NOT the derived per-session AppSKey, which
+    # changes on every rejoin and is never configured directly here --
+    # see lorawan_keystore.py for why: it's derived live from each
+    # device's own captured Join-Accept instead). Same shape/precedent
+    # as meshtastic.channel_keys/meshcore.channel_keys below.
+    devices: dict[str, dict[str, str]] = field(default_factory=dict)
+
+
+@dataclass
 class MeshtasticConfig:
     default_key_b64: str = "AQ=="
     primary_channel_name: str = "LongFast"
@@ -772,6 +785,7 @@ class ReticulumConfig:
 @dataclass
 class AppConfig:
     radio: RadioConfig = field(default_factory=RadioConfig)
+    lorawan: LoRaWANConfig = field(default_factory=LoRaWANConfig)
     meshtastic: MeshtasticConfig = field(default_factory=MeshtasticConfig)
     meshcore: MeshcoreConfig = field(default_factory=MeshcoreConfig)
     capture: CaptureConfig = field(default_factory=CaptureConfig)

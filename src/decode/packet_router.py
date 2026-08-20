@@ -5,6 +5,7 @@ from typing import Optional
 
 from src.decode.crypto_service import CryptoService
 from src.decode.lorawan_decoder import LoRaWANDecoder
+from src.decode.lorawan_keystore import LoRaWANKeyStore
 from src.decode.meshtastic_decoder import MeshtasticDecoder
 from src.decode.meshcore_decoder import MeshcoreDecoder
 from src.models.packet import Packet, Protocol
@@ -24,10 +25,10 @@ class PacketRouter:
       then fall back to Meshcore
     """
 
-    def __init__(self, crypto: CryptoService):
+    def __init__(self, crypto: CryptoService, lorawan_keystore: Optional[LoRaWANKeyStore] = None):
         self._meshtastic = MeshtasticDecoder(crypto)
         self._meshcore = MeshcoreDecoder(crypto)
-        self._lorawan = LoRaWANDecoder()
+        self._lorawan = LoRaWANDecoder(lorawan_keystore)
 
     @property
     def meshtastic_decoder(self) -> MeshtasticDecoder:

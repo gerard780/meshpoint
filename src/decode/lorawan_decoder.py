@@ -35,6 +35,12 @@ import struct
 import time
 from typing import Optional
 
+from src.decode.lorawan_crypto import (
+    decrypt_frm_payload,
+    decrypt_join_accept,
+    derive_app_skey,
+)
+from src.decode.lorawan_keystore import LoRaWANKeyStore
 from src.models.packet import Packet, PacketType, Protocol
 from src.models.signal import SignalMetrics
 
@@ -78,17 +84,28 @@ _JOIN_ACCEPT_CORRELATE_WINDOW_S = 10.0  # RX1/RX2 land within ~1-2s of the
 
 
 class LoRaWANDecoder:
-    """LoRaWAN MAC frame parser. Mostly stateless, with one exception: it
-    remembers the most recent Join-Request's DevEUI/DevNonce/time so a
-    Join-Accept arriving shortly after can be tagged as "likely this
-    device's" -- there's no DevEUI in a Join-Accept's own (still
-    encrypted) bytes to identify it by otherwise. Best-effort only (two
-    devices could join within the same window) -- real attribution needs
-    an actual NwkKey decrypt, done one layer up, not here.
+    """LoRaWAN MAC frame parser. Mostly stateless, with two exceptions:
+
+    - It remembers the most recent Join-Request's DevEUI/DevNonce/time so
+      a Join-Accept arriving shortly after can be tagged as "likely this
+      device's" -- there's no DevEUI in a Join-Accept's own (still
+      encrypted) bytes to identify it by otherwise. Best-effort only (two
+      devices could join within the same window) -- real attribution
+      happens for real once decrypt succeeds (matching DevEUI is then
+      known with certainty, not just "likely").
+    - An optional ``keystore`` (see lorawan_keystore.py) gives it real
+      decrypt capability: Join-Accept gets NwkKey-decrypted and AppSKey
+      derived if this DevEUI's root keys are configured; Data Up's
+      FRMPayload gets decrypted if this DevAddr already has a session
+      AppSKey (from a previously-seen Join-Accept). Same constructor
+      pattern as MeshtasticDecoder/MeshcoreDecoder taking a CryptoService
+      -- keystore=None (the default) keeps this exactly as
+      recognize-only, matching all behavior before v0.8.1's Phase 2.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, keystore: Optional[LoRaWANKeyStore] = None) -> None:
         self._last_join_request: Optional[dict] = None
+        self._keystore = keystore
 
     def decode(
         self,
@@ -150,6 +167,8 @@ class LoRaWANDecoder:
         self._last_join_request = {
             "dev_eui": dev_eui_str,
             "app_eui": app_eui_str,
+            "app_eui_raw": app_eui,  # raw on-the-wire bytes -- derive_app_skey()
+                                      # needs these, not the reversed/colon _eui_str()
             "dev_nonce": dev_nonce,
             "at": time.monotonic(),
         }
@@ -191,16 +210,64 @@ class LoRaWANDecoder:
         has_cflist = len(raw) == _JOIN_ACCEPT_LEN_WITH_CFLIST
 
         likely_dev_eui = None
+        join_request = None
         if self._last_join_request is not None:
             age = time.monotonic() - self._last_join_request["at"]
             if age <= _JOIN_ACCEPT_CORRELATE_WINDOW_S:
                 likely_dev_eui = self._last_join_request["dev_eui"]
+                join_request = self._last_join_request
 
-        logger.info(
-            "LoRaWAN Join-Accept: %d bytes (cflist=%s), likely for DevEUI=%s "
-            "-- real fields need an NwkKey decrypt, not done here",
-            len(raw), has_cflist, likely_dev_eui or "unknown",
-        )
+        payload: dict = {
+            "mtype": "JoinAccept",
+            "likely_dev_eui": likely_dev_eui,
+            "has_cflist": has_cflist,
+            "encrypted_payload": _hex(encrypted),
+        }
+        decrypted = False
+
+        # Only attempt decrypt if this Join-Accept is (best-effort) tied to a
+        # specific device AND that device's root keys are configured. No MIC
+        # verification happens here (matches the v1 scope in project memory)
+        # -- a wrong best-effort correlation (two devices joining in the same
+        # ~10s window) would silently decrypt with the wrong NwkKey and
+        # produce plausible-looking but wrong fields, not an error. Real
+        # attribution only exists once FRMPayload decrypt on real traffic
+        # confirms the derived AppSKey actually works.
+        if self._keystore is not None and join_request is not None:
+            root_keys = self._keystore.root_keys_for(likely_dev_eui)
+            if root_keys is not None:
+                app_key, nwk_key = root_keys
+                fields = decrypt_join_accept(nwk_key, encrypted)
+                if fields is not None:
+                    app_skey = derive_app_skey(
+                        app_key,
+                        fields["join_nonce"],
+                        join_request["app_eui_raw"],
+                        join_request["dev_nonce"],
+                    )
+                    self._keystore.set_session_key(fields["dev_addr"], app_skey)
+                    decrypted = True
+                    payload.update({
+                        "dev_addr": f"{fields['dev_addr']:08X}",
+                        "net_id": _hex(fields["net_id"]),
+                        "dl_settings": fields["dl_settings"],
+                        "rx_delay": fields["rx_delay"],
+                        "cflist": _hex(fields["cflist"]) if fields["cflist"] else None,
+                    })
+                    logger.info(
+                        "LoRaWAN Join-Accept DECRYPTED: DevEUI=%s -> "
+                        "DevAddr=%s, AppSKey derived and installed",
+                        likely_dev_eui, payload["dev_addr"],
+                    )
+
+        if not decrypted:
+            logger.info(
+                "LoRaWAN Join-Accept: %d bytes (cflist=%s), likely for DevEUI=%s "
+                "-- not decrypted (%s)",
+                len(raw), has_cflist, likely_dev_eui or "unknown",
+                "no root keys configured for this DevEUI" if likely_dev_eui
+                else "no recent Join-Request to correlate with",
+            )
 
         return Packet(
             packet_id=f"joinaccept:{_hex(encrypted[:4])}",
@@ -208,13 +275,8 @@ class LoRaWANDecoder:
             destination_id=likely_dev_eui or "unknown",
             protocol=Protocol.LORAWAN,
             packet_type=PacketType.LORAWAN_JOIN_ACCEPT,
-            decoded_payload={
-                "mtype": "JoinAccept",
-                "likely_dev_eui": likely_dev_eui,
-                "has_cflist": has_cflist,
-                "encrypted_payload": _hex(encrypted),
-            },
-            decrypted=False,  # needs NwkKey to even parse the real fields, let alone verify
+            decoded_payload=payload,
+            decrypted=decrypted,
             signal=signal,
             capture_source="concentrator",
         )
@@ -266,24 +328,47 @@ class LoRaWANDecoder:
             len(raw[fhdr_end + 1: mic_offset]) if fport is not None else 0,
         )
 
+        decoded_payload: dict = {
+            "mtype": "ConfirmedDataUp" if confirmed else "UnconfirmedDataUp",
+            "dev_addr": dev_addr_str,
+            "fcnt": fcnt,
+            "adr": adr,
+            "ack": ack,
+            "fport": fport,
+            "fopts": fopts or None,
+            "frm_payload": frm_payload or None,
+            "mic": mic,
+        }
+        decrypted = False
+
+        # AppSKey-only, FPort>0 decrypt -- matches the v1 scope in project
+        # memory. FPort==0 is a MAC-command frame (needs NwkSEncKey, not
+        # AppSKey) and stays undecrypted; so does anything with no session
+        # key yet (this DevAddr's own Join-Accept hasn't been captured and
+        # decrypted since this process started, or its root keys aren't
+        # configured at all).
+        if self._keystore is not None and fport is not None and fport > 0 and frm_payload:
+            app_skey = self._keystore.session_key_for(dev_addr)
+            if app_skey is not None:
+                ciphertext = bytes.fromhex(frm_payload)
+                plaintext = decrypt_frm_payload(
+                    app_skey, ciphertext, dev_addr, fcnt, uplink=True
+                )
+                decoded_payload["frm_payload_decrypted"] = _hex(plaintext)
+                decrypted = True
+                logger.info(
+                    "LoRaWAN Data Up DECRYPTED: DevAddr=%s FCnt=%d -- %d bytes",
+                    dev_addr_str, fcnt, len(plaintext),
+                )
+
         return Packet(
             packet_id=f"lora:{dev_addr_str}:{fcnt}",
             source_id=dev_addr_str,
             destination_id="network-server",
             protocol=Protocol.LORAWAN,
             packet_type=PacketType.LORAWAN_DATA,
-            decoded_payload={
-                "mtype": "ConfirmedDataUp" if confirmed else "UnconfirmedDataUp",
-                "dev_addr": dev_addr_str,
-                "fcnt": fcnt,
-                "adr": adr,
-                "ack": ack,
-                "fport": fport,
-                "fopts": fopts or None,
-                "frm_payload": frm_payload or None,
-                "mic": mic,
-            },
-            decrypted=False,   # FRMPayload encrypted; keys not available
+            decoded_payload=decoded_payload,
+            decrypted=decrypted,
             signal=signal,
             capture_source="concentrator",
         )

@@ -53,6 +53,7 @@ from src.api.routes import (
     emergency_pager_routes,
     rtl433_routes,
     lorawan_routes,
+    lorawan_config_routes,
     dapnet_routes,
     meshtastic_routes,
     meshcore_routes,
@@ -544,6 +545,7 @@ def create_app(config: AppConfig | None = None) -> FastAPI:
     app.include_router(config_routes.router, dependencies=protected)
     app.include_router(stats_routes.router)
     app.include_router(lorawan_routes.router, dependencies=protected)
+    app.include_router(lorawan_config_routes.router, dependencies=protected)
     app.include_router(dapnet_routes.router, dependencies=protected)
     app.include_router(reticulum_routes.router, dependencies=protected)
     app.include_router(reticulum_config_routes.router, dependencies=protected)
@@ -1911,6 +1913,7 @@ def _init_routes(
     meshcore_firmware_routes.init_routes(config=config, meshcore_sources=_find_meshcore_sources(coord))
     _dev_name = config.device.device_name or "meshpoint"
     lorawan_routes.init_routes(coord.packet_repo, device_name=_dev_name)
+    lorawan_config_routes.init_routes(config=config, keystore=coord.lorawan_keystore)
     dapnet_routes.init_routes(coord.packet_repo, device_name=_dev_name)
     if reticulum_service is not None and message_repo is not None:
         reticulum_routes.init_routes(reticulum_service, message_repo)
