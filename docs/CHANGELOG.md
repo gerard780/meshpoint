@@ -2,6 +2,99 @@
 
 ### Unreleased
 
+#### Docs
+
+- **Bobcat 300 capture yaml.** Step 5 now uses `capture.concentrator_spi_device`
+  instead of a nested `capture.concentrator` block that Meshpoint ignores.
+  GPIO reset stays in the systemd drop-in. Fixes
+  [#125](https://github.com/KMX415/meshpoint/issues/125).
+
+### v0.7.9 (August 2026)
+
+Firmware flash for Meshtastic/MeshCore companions, serial footgun fixes, MeshCore live radio + messaging harden, dashboard hygiene ports, and companion-app bearer login. Edge-only, pure Python. **Upgrade:** Settings → Updates → **Stable**, or the full SSH block in `docs/COMMON-ERRORS.md` (`git fetch`, `checkout main`, `pull`, `scripts/install.sh`, `restart`). Witness-tested on RAK V2 (USB smoke: flash MC+MT, installed versions, MeshCore presets, serial live modem, busy-serial soft-fail, MeshCore messaging). Settings → Updates RC picker now points at **v0.8.0** on `feat/v0.8.0`.
+
+#### Auth
+
+- **Bearer token on login for non-browser clients.** `POST /api/auth/login` still sets the HttpOnly session cookie for browsers. Callers that send `X-Meshpoint-Client` (companion apps) also receive the JWT in the JSON body as `token`, matching the existing `Authorization: Bearer` path.
+
+#### Capture and serial
+
+- **Busy Meshtastic serial no longer kills the service.** If a configured USB
+  serial port fails to open (held by gpsd, wrong path, or busy), that source
+  soft-fails and retries in the background while the concentrator and other
+  capture sources keep running.
+- **GPS vs radio port picker hints.** Configuration → Serial marks known GPS
+  USB devices, prefers `/dev/serial/by-path/…` labels, and warns before save
+  when a GPS-class port is selected as a Meshtastic serial device.
+
+#### Firmware flash
+
+- **esptool is a real dependency.** Pinned `esptool>=4.7.0,<5` in
+  `requirements.txt`; `install.sh` always installs it into the venv (never
+  skips because a system `esptool` is on PATH).
+- **Flash uses `write_flash` (esptool 4.x).** The hyphen form only works on
+  esptool 5+ and left RC boards on the old companion build while the UI said
+  reconnect succeeded.
+- **Failed flash no longer claims reconnect success.** esptool non-zero exit
+  restores USB capture and reports the failure; reconnect wording is only
+  after a successful write.
+- **Board picker is a dropdown.** MeshCore and Meshtastic Firmware cards use
+  a real `<select>` of release assets so mobile/desktop pick exact ids
+  (e.g. `Heltec_v3`) without case or underscore typos.
+
+#### Dashboard
+
+- **Firmware page shows installed companion versions.** Configuration → Firmware
+  queries the connected MeshCore stick (`DEVICE_INFO`) and Meshtastic serial
+  sticks (`metadata.firmware_version`) so operators can see what is already on
+  the board before flashing.
+- **Externally powered battery display.** Meshtastic battery level `101` shows as Powered instead of a bogus percentage on node cards, drawer, packet feed, detail modal, and metrics chart. Battery chips use green/amber/red severity tiers.
+- **Hardware model names on node cards.** Shared HardwareModel lookup translates enum codes to readable names on cards and the node drawer (same map as Stats).
+- **Configuration GET errors toast.** Failed Configuration reads (empty dropdowns, rate limits) show a toast instead of failing silently.
+- **Messages TX banners.** Banners for TX-not-configured and missing Node ID link to Configuration → Transmit.
+- **SQLite Messages hygiene.** Index on `packets(packet_id, protocol)` plus WAL journaling so Messages reads are less likely to stall behind capture writes.
+- **Stats Avg Signal Quality dBm.** The quality donut now draws its center reading on first paint and refresh.
+- **Farthest-node Null Island filter.** Positions at exactly (0, 0) and implausibly far haversine distances no longer win farthest-direct / farthest-mesh stats.
+- **No Dashboard flash on deep-link reload.** URL hash is resolved before app scripts load so `#/settings/updates` (and other routes) paint the correct section first.
+- **MeshCore command-timeout reconnect.** Timed-out companion commands (send, advert, rename) mark the USB source for immediate reconnect instead of leaving a wedged command channel looking "connected" until the health loop notices.
+- **MeshCore live radio presets.** Configuration → MeshCore can apply community frequency/BW/SF/CR presets over the open USB connection (companion reboots and reconnects). CLI `meshpoint meshcore-radio` and the setup wizard use the full 20-entry community preset list; short US/EU/ANZ aliases still work.
+- **Serial live modem controls.** Configuration → Serial can set a connected stick's Region, modem preset, NodeInfo/telemetry intervals, and Bluetooth over the open USB link (device NVS; no Meshpoint yaml rewrite).
+- **Configuration → Firmware.** Flash official Meshtastic or MeshCore companion firmware from GitHub releases via esptool (version / flavor / board / port / NDJSON stream). Erase-everything defaults off for in-place upgrades; `install.sh` installs `esptool` into the Meshpoint venv when missing.
+
+### v0.7.8 (July 2026)
+
+Serial multi-stick, Updates UX, native MQTT MapReport, and operator polish on `main` (merge `feat/v0.7.8`). Edge-only, pure Python, no concentrator recompile. **Upgrade:** Settings → Updates → **Stable**, or the full SSH block in `docs/COMMON-ERRORS.md` (`git fetch`, `checkout main`, `pull`, `scripts/install.sh`, `restart`). Witness-tested on RAK V2. Settings → Updates RC picker now points at **v0.7.9** on `feat/v0.7.9`.
+
+#### MQTT and community map
+
+- **Native MQTT MapReport.** Optional public MapReports publish the configured Meshpoint transmit identity to the official Meshtastic map without using LoRa airtime. One-hour minimum cadence, 12-15 bit position privacy, Configuration → MQTT controls, and `/2/map/` ServiceEnvelope compatibility. MapReport requires MQTT enabled (422 if you turn MapReport on while MQTT is off). Closes [#115](https://github.com/KMX415/meshpoint/issues/115).
+
+#### Settings and Updates
+
+- **What's coming preview.** Settings → Updates groups release-notes bullets under CHANGELOG category headings so RC operators can scan the sprint before Apply.
+- **Full release-notes modal.** **Read full release notes** opens the untruncated CHANGELOG section for the selected channel.
+- **Commit timeline.** One channel-tip list above Apply: unapplied commits marked **NEW**, waiting count badge, muted already-installed rows, and an Apply glow when commits are waiting. Replaces the earlier duplicate incoming + latest-commit strips.
+
+#### Dashboard and storage
+
+- **Cache-bust after restart.** Local dashboard JS/CSS URLs carry a per-boot `?v=` token so Apply no longer leaves browsers on stale scripts until a hard reload.
+- **Telemetry retention cap.** `max_telemetry_retained` bounds SQLite telemetry growth on long-running Meshpoints.
+- **Stats chart downsampling.** Telemetry and signal history downsample into time buckets for the Stats charts; when history exceeds the chart limit, the newest buckets win.
+
+#### Auth and viewers
+
+- **Viewer write lockdown.** Viewer sessions cannot change config or send messages; channel PSKs are redacted in API responses for the viewer role.
+
+#### Serial Meshtastic and messaging
+
+- **Multiple Meshtastic USB sticks.** `capture.serial` accepts a list of ports so more than one companion can RX on the same Meshpoint; blank rows are ignored on save so multi-stick config cannot double-open a port.
+- **Stick-aware replies.** Meshtastic replies go out the USB stick that heard the contact; packets carry stick LoRa freq/SF/BW from the connect handshake.
+- **Serial decode and channel routing.** Reconstruct MeshPacket frames for USB decode, route stick-local channel index by name (not OTA hash), and allow replies when the remote channel name differs but the PSK matches.
+- **Capture source and band.** Packets are tagged with capture source name; node cards can surface band. Unmapped channel hashes land in their own conversation buckets.
+- **Messaging polish.** Channel message sender names are clickable via `source_id`. MeshCore name cross-contamination and sticky conversation titles are fixed. Serial Meshtastic self-telemetry that polluted the feed near -100 dBm is dropped.
+
+#### Not in this release
+
 - **MQTT broker TLS.** Transport TLS (`mqtts`, CA bundle, cert validation) is not implemented on `mqtt_publisher.py` (plain TCP only). Until then use plain port 1883 or a LAN broker without TLS.
 
 ### v0.8.1 (August 2026)

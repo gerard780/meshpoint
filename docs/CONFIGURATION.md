@@ -276,6 +276,7 @@ capture:
     - meshcore_usb             # optional MeshCore USB companion node
     # - serial                 # optional plain Meshtastic USB node as a capture source
     # - mock                   # optional synthetic packets for development
+  concentrator_spi_device: "/dev/spidev0.0"  # Bobcat 300: "/dev/spidev5.0"
   meshcore_usb:
     auto_detect: true          # scans /dev/ttyUSB* and /dev/ttyACM*
     serial_port: null          # or set explicitly: "/dev/ttyACM0"
