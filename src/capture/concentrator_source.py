@@ -81,6 +81,7 @@ class ConcentratorCaptureSource(CaptureSource):
         self._channel_plan = self._resolve_channel_plan(
             channel_plan, radio_config
         )
+        self._region = radio_config.region if radio_config is not None else "US"
         self._poll_interval = poll_interval_ms / 1000.0
         self._syncword = syncword
         self._pager_enabled = pager_enabled
@@ -231,8 +232,11 @@ class ConcentratorCaptureSource(CaptureSource):
 
                 protocol_hint = (
                     Protocol.MESHTASTIC
-                    if pkt.frequency_hz in _MESHTASTIC_EU868_FREQS_HZ
-                    and pkt.bandwidth == BW_250KHZ
+                    if self._region != "EU_868"
+                    or (
+                        pkt.frequency_hz in _MESHTASTIC_EU868_FREQS_HZ
+                        and pkt.bandwidth == BW_250KHZ
+                    )
                     else Protocol.LORAWAN
                 )
 
