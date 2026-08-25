@@ -485,7 +485,6 @@ class NodeDrawer {
         if (!captureSource) return null;
         if (captureSource.endsWith('_433')) return '433 MHz';
         if (captureSource.endsWith('_868')) return '868 MHz';
-        if (captureSource === 'concentrator') return '868 MHz';
         return null;
     }
 
