@@ -55,6 +55,20 @@
 
 .topo-map[hidden] { display: none; }
 
+.topo-map .leaflet-tile-pane {
+    filter: invert(1) hue-rotate(180deg) saturate(0.22) brightness(0.72) contrast(1.22);
+}
+
+.topo-map .leaflet-control-attribution {
+    background: rgba(7, 11, 20, 0.82) !important;
+    color: var(--text-muted) !important;
+    font-size: 10px !important;
+}
+
+.topo-map .leaflet-control-attribution a {
+    color: var(--accent-cyan) !important;
+}
+
 .topo-map-note {
     position: absolute;
     left: 0.75rem;

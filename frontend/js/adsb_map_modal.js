@@ -1,7 +1,8 @@
 /**
  * Modal showing currently-tracked ADS-B aircraft over a live OpenStreetMap
- * (Leaflet + the same CARTO dark tiles topology_tab.js already uses for the
- * node map, so the app has exactly one basemap style). Reuses the
+ * (Leaflet + the same dark-inverted OSM tiles topology_tab.js and
+ * node_map.js already use, so the app has exactly one basemap style).
+ * Reuses the
  * pdm-overlay/pdm-modal shell (packet_detail_modal.css) with the
  * wide/flush-body modifiers so the map can fill the dialog.
  *
@@ -107,9 +108,8 @@ class AdsbMapModal {
     _initMap(el) {
         if (!window.L) return; // leaflet not loaded yet -- nothing to draw into
         this._map = L.map(el, { zoomControl: true, scrollWheelZoom: true });
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-            attribution: '&copy; CARTO &copy; OpenStreetMap contributors',
-            subdomains: 'abcd',
+        L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>',
             maxZoom: 19,
         }).addTo(this._map);
         this._layer = L.layerGroup().addTo(this._map);

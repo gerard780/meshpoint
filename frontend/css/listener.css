@@ -161,6 +161,20 @@
     background: #0a0e14;
 }
 
+.adsb-map .leaflet-tile-pane {
+    filter: invert(1) hue-rotate(180deg) saturate(0.22) brightness(0.72) contrast(1.22);
+}
+
+.adsb-map .leaflet-control-attribution {
+    background: rgba(7, 11, 20, 0.82) !important;
+    color: var(--text-muted) !important;
+    font-size: 10px !important;
+}
+
+.adsb-map .leaflet-control-attribution a {
+    color: var(--accent-cyan) !important;
+}
+
 /* Leaflet's default divIcon adds a white box + border meant for text
    labels; our plane icon is a self-contained SVG, so strip it. */
 .adsb-map .leaflet-div-icon {

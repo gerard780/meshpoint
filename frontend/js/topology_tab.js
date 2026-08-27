@@ -193,9 +193,8 @@ class TopologyTab {
         if (this._map || !window.L) return;
         const mapEl = this.root.querySelector('.topo-map');
         this._map = L.map(mapEl, { zoomControl: false, scrollWheelZoom: true });
-        L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-            attribution: '&copy; CARTO',
-            subdomains: 'abcd',
+        L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>',
             maxZoom: 19,
         }).addTo(this._map);
         this._mapLayer = L.layerGroup().addTo(this._map);
