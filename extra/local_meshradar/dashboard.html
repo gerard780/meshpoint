@@ -186,6 +186,21 @@
     #map:fullscreen, #map:-webkit-full-screen {
         width: 100vw; height: 100vh; border-radius: 0;
     }
+    /* Dark-theme only: OSM's raster has no native dark style (unlike the
+       CARTO dark_all/light_all pair this replaced), so dark mode gets a
+       CSS invert filter instead -- same trick frontend/css/dashboard.css
+       uses for the main Meshpoint dashboard's own always-dark map. */
+    #map.map-tiles-invert .leaflet-tile-pane {
+        filter: invert(1) hue-rotate(180deg) saturate(0.22) brightness(0.72) contrast(1.22);
+    }
+    #map.map-tiles-invert .leaflet-control-attribution {
+        background: rgba(7, 11, 20, 0.82) !important;
+        color: var(--dim) !important;
+        font-size: 10px !important;
+    }
+    #map.map-tiles-invert .leaflet-control-attribution a {
+        color: var(--accent-cyan) !important;
+    }
     .nodes-section { grid-area: nodes; display: flex; flex-direction: column; min-height: 0; }
     .packets-section { grid-area: packets; }
     @media (max-width: 900px) {
@@ -912,18 +927,17 @@ function isDarkThemeActive() {
     return window.matchMedia('(prefers-color-scheme: dark)').matches;
 }
 
-let tileLayer = L.tileLayer(
-    `https://{s}.basemaps.cartocdn.com/${isDarkThemeActive() ? 'dark_all' : 'light_all'}/{z}/{x}/{y}{r}.png`,
-    { attribution: '&copy; CARTO', subdomains: 'abcd', maxZoom: 19 },
-).addTo(map);
+// One raster (OSM has no native dark style) -- dark mode is a CSS invert
+// filter on #map instead, toggled by refreshTileLayer() below.
+const tileLayer = L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>',
+    maxZoom: 19,
+}).addTo(map);
 
 function refreshTileLayer() {
-    map.removeLayer(tileLayer);
-    tileLayer = L.tileLayer(
-        `https://{s}.basemaps.cartocdn.com/${isDarkThemeActive() ? 'dark_all' : 'light_all'}/{z}/{x}/{y}{r}.png`,
-        { attribution: '&copy; CARTO', subdomains: 'abcd', maxZoom: 19 },
-    ).addTo(map);
+    document.getElementById('map').classList.toggle('map-tiles-invert', isDarkThemeActive());
 }
+refreshTileLayer();
 
 const markerGroup = L.markerClusterGroup({
     maxClusterRadius: 50,
