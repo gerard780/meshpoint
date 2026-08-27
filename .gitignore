@@ -67,4 +67,5 @@ scripts/_*
 # WiFi/OTA credentials for the rfenv_companion Arduino sketch -- never commit
 */secrets.h
 secrets.h
+testplan-*.*
 
