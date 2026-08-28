@@ -28,6 +28,23 @@ class MeshtasticInboundHandler:
             return
 
         if packet.packet_type == PacketType.TRACEROUTE:
+            payload = packet.decoded_payload or {}
+            request_id = int(payload.get("request_id") or 0)
+            if request_id:
+                logger.info(
+                    "Inbound traceroute response from %s (request id=%08x)",
+                    packet.source_id,
+                    request_id,
+                )
+                if packet.want_ack:
+                    await self._tx.send_routing_ack(packet)
+                return
+            if not payload.get("want_response", False):
+                logger.debug(
+                    "Ignoring traceroute without want_response from %s",
+                    packet.source_id,
+                )
+                return
             logger.info(
                 "Inbound traceroute from %s (id=%s ch=0x%02x)",
                 packet.source_id,
@@ -36,7 +53,6 @@ class MeshtasticInboundHandler:
             )
             result = await self._tx.send_traceroute_reply(packet)
             if result.success:
-                payload = packet.decoded_payload or {}
                 logger.info(
                     "Traceroute reply TX OK to %s (reply id=%s, inbound route=%d snr=%d)",
                     packet.source_id,
@@ -53,7 +69,12 @@ class MeshtasticInboundHandler:
             return
 
         if packet.packet_type == PacketType.TELEMETRY:
-            variant = (packet.decoded_payload or {}).get(
+            payload = packet.decoded_payload or {}
+            if payload.get("request_id") or not payload.get(
+                "want_response", False
+            ):
+                return
+            variant = payload.get(
                 "telemetry_variant", "device_metrics"
             )
             logger.info(

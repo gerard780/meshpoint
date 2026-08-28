@@ -69,6 +69,11 @@ class SendRequest(BaseModel):
     echo_hash: Optional[int] = None
 
 
+class TracerouteRequest(BaseModel):
+    destination: str
+    channel: int = 0
+
+
 @router.post("/send")
 async def send_message(
     req: SendRequest,
@@ -107,6 +112,39 @@ async def send_message(
             status="sent",
         )
 
+    return {
+        "success": result.success,
+        "packet_id": result.packet_id,
+        "protocol": result.protocol,
+        "timestamp": result.timestamp,
+        "airtime_ms": result.airtime_ms,
+        "error": result.error,
+    }
+
+
+@router.post("/traceroute")
+async def send_traceroute(
+    req: TracerouteRequest,
+    _claims: SessionClaims = Depends(require_admin),
+):
+    """Initiate a Meshtastic traceroute to one unicast node."""
+    if _tx_service is None:
+        raise HTTPException(503, "Transmit service not available")
+    if not req.destination.strip():
+        raise HTTPException(400, "Traceroute destination cannot be empty")
+    if req.channel < 0 or req.channel > 7:
+        raise HTTPException(400, "Channel must be between 0 and 7")
+
+    result = await _tx_service.send_traceroute(
+        destination=req.destination,
+        channel=req.channel,
+    )
+    if not result.success:
+        logger.warning(
+            "Dashboard traceroute to %s failed: %s",
+            req.destination,
+            result.error,
+        )
     return {
         "success": result.success,
         "packet_id": result.packet_id,

@@ -140,6 +140,7 @@
 
 .nd-actions {
     display: flex;
+    flex-wrap: wrap;
     gap: 0.5rem;
     padding: 0.5rem 1rem;
     border-bottom: 1px solid var(--border);
@@ -173,6 +174,51 @@
 
 .nd-action-btn--primary:hover {
     background: rgba(6, 182, 212, 0.2);
+}
+
+.nd-action-btn:disabled {
+    cursor: wait;
+    opacity: 0.6;
+}
+
+.nd-traceroute-status {
+    display: none;
+    flex: 0 0 100%;
+    padding: 0.5rem 0.6rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    font-size: 0.67rem;
+    font-family: var(--font-mono);
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}
+
+.nd-traceroute-status--pending,
+.nd-traceroute-status--timeout,
+.nd-traceroute-status--error,
+.nd-traceroute-status--success {
+    display: block;
+}
+
+.nd-traceroute-status--pending { color: var(--accent-blue); }
+.nd-traceroute-status--timeout { color: var(--accent-amber); }
+.nd-traceroute-status--error { color: var(--accent-red); }
+.nd-traceroute-status--success { border-color: var(--accent-blue); }
+
+.nd-traceroute-status__title {
+    color: var(--accent-green);
+    font-weight: 700;
+    margin-bottom: 0.2rem;
+}
+
+.nd-traceroute-status span {
+    display: inline-block;
+    min-width: 2.8rem;
+    color: var(--text-muted);
+    font-weight: 700;
+    text-transform: uppercase;
 }
 
 /* ---- Sections ---- */

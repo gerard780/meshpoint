@@ -165,6 +165,42 @@ class SerialCaptureSource(CaptureSource):
             logger.exception("%s: send_text failed", self.name)
             return {"success": False, "error": str(exc), "packet_id": ""}
 
+    def send_traceroute(
+        self,
+        destination: int | str,
+        channel_index: int = 0,
+    ) -> dict:
+        """Initiate a traceroute through this stick's Meshtastic interface."""
+        iface = self._interface
+        if iface is None or not self._connected:
+            return {"success": False, "error": "Not connected", "packet_id": ""}
+        try:
+            from meshtastic.protobuf import mesh_pb2, portnums_pb2
+
+            sent = iface.sendData(
+                mesh_pb2.RouteDiscovery().SerializeToString(),
+                destinationId=destination,
+                portNum=portnums_pb2.PortNum.TRACEROUTE_APP,
+                wantAck=True,
+                wantResponse=True,
+                channelIndex=channel_index,
+            )
+            packet_id = (
+                f"{sent.id:08x}"
+                if sent is not None and hasattr(sent, "id")
+                else ""
+            )
+            logger.info(
+                "%s: traceroute sent (dest=%s, id=%s)",
+                self.name,
+                destination,
+                packet_id or "unknown",
+            )
+            return {"success": True, "error": "", "packet_id": packet_id}
+        except Exception as exc:
+            logger.exception("%s: send_traceroute failed", self.name)
+            return {"success": False, "error": str(exc), "packet_id": ""}
+
     def set_owner(self, long_name: Optional[str], short_name: Optional[str]) -> dict:
         """Rename this stick's own Meshtastic identity (long/short name).
 
@@ -930,6 +966,7 @@ class SerialCaptureSource(CaptureSource):
             "portnum": portnum,
             "payload": payload,
             "request_id": decoded.get("requestId", 0),
+            "want_response": decoded.get("wantResponse", False),
         }
         channel_idx = packet.get("channel")
         if channel_idx is not None:

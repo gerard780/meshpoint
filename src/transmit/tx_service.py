@@ -30,6 +30,7 @@ PORTNUM_NODEINFO = 4
 HW_MODEL_PRIVATE_HW = 255
 HW_MODEL_PORTDUINO = 37
 DEFAULT_HOP_LIMIT = 3
+TRACEROUTE_COOLDOWN_SECONDS = 30.0
 
 PRESET_DISPLAY_NAMES: dict[tuple[int, int], str] = {
     (7, 250): "ShortFast",
@@ -87,6 +88,7 @@ class TxService:
         self._device_id = device_id
         self._builder = None
         self._packet_counter = random.randint(1, 0xFFFF)
+        self._last_traceroute_at = 0.0
         self._node_id_source: str = "random"
         self._source_node_id = self._resolve_node_id()
         if persist_derived_node_id:
@@ -500,6 +502,126 @@ class TxService:
 
         return await self._send_built_packet(packet_bytes, packet_id, label="routing ACK")
 
+    async def send_traceroute(
+        self,
+        destination: int | str,
+        channel: int = 0,
+    ) -> SendResult:
+        """Initiate a Meshtastic traceroute to a unicast destination."""
+        try:
+            dest_int = self._resolve_destination(destination, Protocol.MESHTASTIC)
+        except ValueError as exc:
+            return SendResult(
+                success=False,
+                protocol="meshtastic",
+                error=str(exc),
+            )
+
+        if dest_int in RESERVED_NODE_IDS:
+            return SendResult(
+                success=False,
+                protocol="meshtastic",
+                error="Traceroute requires a unicast destination",
+            )
+        if dest_int == self._source_node_id:
+            return SendResult(
+                success=False,
+                protocol="meshtastic",
+                error="Cannot traceroute this Meshpoint's own node ID",
+            )
+
+        now = time.monotonic()
+        cooldown_remaining = (
+            TRACEROUTE_COOLDOWN_SECONDS - (now - self._last_traceroute_at)
+        )
+        if self._last_traceroute_at and cooldown_remaining > 0:
+            return SendResult(
+                success=False,
+                protocol="meshtastic",
+                error=(
+                    "Traceroute cooldown active; retry in "
+                    f"{max(1, int(cooldown_remaining + 0.999))} seconds"
+                ),
+            )
+
+        if self._config is not None and self._config.enabled:
+            serial_source = await self._resolve_serial_send_source(dest_int)
+            if serial_source is not None:
+                channel_name = self._channel_name_for_index(channel)
+                stick_channel_index = serial_source.resolve_channel_index(
+                    channel_name
+                )
+                if stick_channel_index is None:
+                    return SendResult(
+                        success=False,
+                        protocol="meshtastic",
+                        error=(
+                            f"{serial_source.name} has no channel named "
+                            f"'{channel_name}' -- refusing to send on a "
+                            "possibly-wrong channel"
+                        ),
+                    )
+                result = serial_source.send_traceroute(
+                    dest_int,
+                    channel_index=stick_channel_index,
+                )
+                if result["success"]:
+                    self._last_traceroute_at = time.monotonic()
+                return SendResult(
+                    success=result["success"],
+                    protocol="meshtastic",
+                    packet_id=result["packet_id"],
+                    timestamp=time.time() if result["success"] else 0.0,
+                    error=result["error"],
+                )
+
+        if not self.meshtastic_enabled:
+            return SendResult(
+                success=False,
+                protocol="meshtastic",
+                error="Meshtastic TX not available",
+            )
+
+        builder = self._get_builder()
+        if builder is None or not hasattr(builder, "build_traceroute_request"):
+            return SendResult(
+                success=False,
+                protocol="meshtastic",
+                error="Traceroute builder unavailable",
+            )
+
+        packet_id = self._next_packet_id()
+        channel_hash, channel_key = self._resolve_channel(channel)
+        hop_limit = self._config.hop_limit if self._config else DEFAULT_HOP_LIMIT
+        packet_bytes = builder.build_traceroute_request(
+            source_id=self._source_node_id,
+            dest=dest_int,
+            packet_id=packet_id,
+            channel_key=channel_key,
+            channel_hash=channel_hash,
+            hop_limit=hop_limit,
+            hop_start=hop_limit,
+            # Traceroute is infrastructure traffic.  Keep it channel-encrypted
+            # so relays can append their node IDs and measured SNR.
+            recipient_public_key=None,
+        )
+        if packet_bytes is None:
+            return SendResult(
+                success=False,
+                protocol="meshtastic",
+                packet_id=f"{packet_id:08x}",
+                error="Traceroute build failed",
+            )
+
+        result = await self._send_built_packet(
+            packet_bytes,
+            packet_id,
+            label="traceroute request",
+        )
+        if result.success:
+            self._last_traceroute_at = time.monotonic()
+        return result
+
     async def send_traceroute_reply(self, original) -> SendResult:
         """Reply to a traceroute probe addressed to this node."""
         if not self.meshtastic_enabled:
@@ -552,6 +674,7 @@ class TxService:
             channel_hash=channel_hash,
             hop_limit=hop_limit,
             hop_start=hop_start,
+            want_ack=original.want_ack,
             recipient_public_key=recipient_pubkey,
         )
         if packet_bytes is None:
