@@ -31,7 +31,7 @@ class TestInitialConnect(unittest.TestCase):
         source = SerialCaptureSource(port="/dev/fake")
 
         def fake_blocking_connect():
-            return object(), {"region": "US"}
+            return object(), {"region": "US"}, {0: b"channel-key"}
 
         with patch.object(source, "_blocking_connect", side_effect=fake_blocking_connect):
             _run(source.start())
@@ -61,7 +61,7 @@ class TestBackgroundReconnect(unittest.TestCase):
             attempts["count"] += 1
             if attempts["count"] < 3:
                 raise OSError("port busy")
-            return object(), {"region": "US"}
+            return object(), {"region": "US"}, {0: b"channel-key"}
 
         async def scenario():
             with patch("src.capture.serial_source._RECONNECT_BASE_DELAY_SECONDS", 0.01), \

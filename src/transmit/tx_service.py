@@ -325,17 +325,18 @@ class TxService:
                 # happens to sit at that slot on the stick (see F3 in
                 # the worklist).
                 channel_name = self._channel_name_for_index(channel)
+                _, channel_key = self._resolve_channel(channel)
                 stick_channel_index = serial_source.resolve_channel_index(
-                    channel_name
+                    channel_name, channel_key
                 )
                 if stick_channel_index is None:
                     return SendResult(
                         success=False,
                         protocol="meshtastic",
                         error=(
-                            f"{serial_source.name} has no channel named "
-                            f"'{channel_name}' -- refusing to send on a "
-                            "possibly-wrong channel"
+                            f"{serial_source.name} has no channel matching "
+                            f"'{channel_name}' and its configured key -- "
+                            "refusing to send on a possibly-wrong channel"
                         ),
                     )
                 result = serial_source.send_text(
@@ -548,17 +549,18 @@ class TxService:
             serial_source = await self._resolve_serial_send_source(dest_int)
             if serial_source is not None:
                 channel_name = self._channel_name_for_index(channel)
+                _, channel_key = self._resolve_channel(channel)
                 stick_channel_index = serial_source.resolve_channel_index(
-                    channel_name
+                    channel_name, channel_key
                 )
                 if stick_channel_index is None:
                     return SendResult(
                         success=False,
                         protocol="meshtastic",
                         error=(
-                            f"{serial_source.name} has no channel named "
-                            f"'{channel_name}' -- refusing to send on a "
-                            "possibly-wrong channel"
+                            f"{serial_source.name} has no channel matching "
+                            f"'{channel_name}' and its configured key -- "
+                            "refusing to send on a possibly-wrong channel"
                         ),
                     )
                 result = serial_source.send_traceroute(

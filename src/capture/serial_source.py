@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hmac
 import logging
 from datetime import datetime, timezone
 from typing import AsyncIterator, Optional
@@ -54,6 +55,10 @@ class SerialCaptureSource(CaptureSource):
         self._running = False
         self._connected = False
         self._radio_info: dict = {}
+        # Kept separate from _radio_info so channel PSKs can never leak
+        # through the status/config API. Values are expanded AES keys,
+        # indexed by this stick's own channel-table position.
+        self._channel_keys: dict[int, bytes] = {}
         self._queue: asyncio.Queue[RawCapture] = asyncio.Queue(maxsize=500)
         self._reconnect_task: Optional[asyncio.Task] = None
 
@@ -522,7 +527,17 @@ class SerialCaptureSource(CaptureSource):
         else:
             interface = meshtastic.serial_interface.SerialInterface()
         radio_info = self._read_radio_info(interface)
-        return interface, radio_info
+        try:
+            channel_keys = self._read_channel_key_table(interface)
+        except Exception:
+            logger.debug(
+                "%s: could not read channel keys; falling back to name-only "
+                "channel matching",
+                self.name,
+                exc_info=True,
+            )
+            channel_keys = {}
+        return interface, radio_info, channel_keys
 
     async def _attempt_connect(self) -> bool:
         """One connection attempt. Returns True/False instead of raising,
@@ -530,7 +545,9 @@ class SerialCaptureSource(CaptureSource):
         ImportError, which still needs to abort the whole app loudly (a
         missing dependency, not a hardware hiccup worth retrying)."""
         try:
-            interface, radio_info = await asyncio.to_thread(self._blocking_connect)
+            interface, radio_info, channel_keys = await asyncio.to_thread(
+                self._blocking_connect
+            )
         except ImportError:
             logger.error(
                 "meshtastic package not installed. "
@@ -545,6 +562,7 @@ class SerialCaptureSource(CaptureSource):
 
         self._interface = interface
         self._radio_info = radio_info
+        self._channel_keys = channel_keys
         self._connected = True
         pub.subscribe(self._on_receive, "meshtastic.receive")
         logger.info(
@@ -743,13 +761,11 @@ class SerialCaptureSource(CaptureSource):
         instead of a index that only makes sense on this one stick (see
         F1 in the worklist).
 
-        Blank primary-channel names fall back to the modem preset's
-        display name, mirroring firmware's own Channels::getName()
-        convention (same reasoning as ``_read_primary_channel_name``).
-        Blank secondary-channel names are skipped entirely -- there's
-        no equivalent fallback for those, and guessing risks silently
-        routing traffic to the wrong bucket, the exact failure mode
-        this fix exists to eliminate.
+        Every enabled blank channel name falls back to the modem
+        preset's display name, mirroring firmware's own
+        Channels::getName() behavior. Name alone is not a unique
+        channel identity in that case, so outbound resolution also
+        compares the expanded PSK from ``_read_channel_key_table``.
         """
         from meshtastic.protobuf import channel_pb2
         table: dict[int, str] = {}
@@ -758,15 +774,58 @@ class SerialCaptureSource(CaptureSource):
             if ch.role == channel_pb2.Channel.Role.DISABLED:
                 continue
             name = ch.settings.name
-            if not name and ch.role == channel_pb2.Channel.Role.PRIMARY:
-                name = modem_preset_name
+            if not name:
+                preset = get_preset(modem_preset_name) if modem_preset_name else None
+                name = preset.display_name if preset else (modem_preset_name or "Custom")
             if name:
                 table[ch.index] = name
         return table
 
-    def resolve_channel_index(self, name: str) -> Optional[int]:
-        """This stick's own channel-table index for ``name``, or None
-        if it has no channel configured under that exact name.
+    @staticmethod
+    def _read_channel_key_table(interface) -> dict[int, bytes]:
+        """Read this stick's channel indexes and expanded AES keys.
+
+        Firmware treats an empty secondary-channel PSK as inheritance
+        from the primary channel. Expand the protobuf PSKs with the
+        same routine Meshpoint uses for configured keys so comparisons
+        are independent of whether a key was stored as a one-byte
+        well-known-key index or as its full AES value.
+
+        This table is deliberately private and is never placed in
+        ``_radio_info`` or returned by ``get_radio_info``.
+        """
+        from meshtastic.protobuf import channel_pb2
+
+        from src.decode.crypto_service import CryptoService
+
+        channels = getattr(interface.localNode, "channels", None) or []
+        primary_index: Optional[int] = None
+        primary_psk = b""
+        for ch in channels:
+            if ch.role == channel_pb2.Channel.Role.PRIMARY:
+                primary_index = int(ch.index)
+                primary_psk = bytes(getattr(ch.settings, "psk", b"") or b"")
+                break
+
+        table: dict[int, bytes] = {}
+        for ch in channels:
+            if ch.role == channel_pb2.Channel.Role.DISABLED:
+                continue
+            channel_index = int(ch.index)
+            raw_psk = bytes(getattr(ch.settings, "psk", b"") or b"")
+            if (
+                not raw_psk
+                and ch.role == channel_pb2.Channel.Role.SECONDARY
+                and channel_index != primary_index
+            ):
+                raw_psk = primary_psk
+            table[channel_index] = CryptoService._expand_key(raw_psk)
+        return table
+
+    def resolve_channel_index(
+        self, name: str, channel_key: bytes | None = None
+    ) -> Optional[int]:
+        """This stick's own channel-table index for ``name`` and PSK.
 
         Used when sending a reply through this stick: the dashboard's
         own channel index has no relationship to this stick's channel
@@ -775,9 +834,26 @@ class SerialCaptureSource(CaptureSource):
         send at all when there's no match, replaces the previous
         behavior of passing Meshpoint's index straight through as if
         the two numberings were interchangeable (see F3 in the
-        worklist).
+        worklist). When the connect-time handshake exposed channel
+        keys, require both effective name and expanded key to match;
+        this handles devices with the same channels in different slot
+        orders and disambiguates blank channels that all inherit the
+        modem preset name. Older/incomplete handshakes retain the
+        previous name-only fallback.
         """
         table = self._radio_info.get("channel_table") or {}
+        if self._channel_keys:
+            if channel_key is None:
+                return None
+            for idx, ch_name in table.items():
+                stick_key = self._channel_keys.get(idx)
+                if (
+                    ch_name == name
+                    and stick_key is not None
+                    and hmac.compare_digest(stick_key, channel_key)
+                ):
+                    return idx
+            return None
         for idx, ch_name in table.items():
             if ch_name == name:
                 return idx
@@ -786,6 +862,7 @@ class SerialCaptureSource(CaptureSource):
     async def stop(self) -> None:
         self._running = False
         self._connected = False
+        self._channel_keys = {}
         if self._reconnect_task and not self._reconnect_task.done():
             self._reconnect_task.cancel()
             try:

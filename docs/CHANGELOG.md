@@ -24,6 +24,11 @@
   last-heard USB-radio paths send reliable, channel-encrypted RouteDiscovery
   requests so relays can append route and SNR data. Replies are correlated by
   request ID and are not mistaken for new traceroute requests.
+- **USB channel identity matching.** Outbound USB-radio messages and
+  traceroutes resolve independently of slot order using the effective channel
+  name plus its expanded PSK. Private-primary/public-secondary layouts now
+  route through the correct stick channel without exposing channel keys in
+  the status API.
 
 ### v0.7.9 (August 2026)
 

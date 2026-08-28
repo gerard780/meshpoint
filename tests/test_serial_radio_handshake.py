@@ -211,11 +211,12 @@ class ReadChannelTableTest(unittest.TestCase):
     for a real over-the-air channel_hash."""
 
     @staticmethod
-    def _channel(index, role, name):
+    def _channel(index, role, name, psk=b"\x01"):
         ch = MagicMock()
         ch.index = index
         ch.role = role
         ch.settings.name = name
+        ch.settings.psk = psk
         return ch
 
     def test_builds_index_to_name_map_skipping_disabled(self):
@@ -246,7 +247,7 @@ class ReadChannelTableTest(unittest.TestCase):
 
         self.assertEqual(table, {0: "LongFast"})
 
-    def test_blank_secondary_name_is_skipped_not_guessed(self):
+    def test_blank_secondary_name_uses_modem_preset_display_name(self):
         R = channel_pb2.Channel.Role
         channels = [
             self._channel(0, R.PRIMARY, "Home"),
@@ -257,7 +258,38 @@ class ReadChannelTableTest(unittest.TestCase):
 
         table = SerialCaptureSource._read_channel_table(iface, modem_preset_name="LongFast")
 
-        self.assertEqual(table, {0: "Home"})
+        self.assertEqual(table, {0: "Home", 1: "LongFast"})
+
+    def test_reads_expanded_keys_independently_of_slot_order(self):
+        from src.decode.crypto_service import CryptoService
+
+        R = channel_pb2.Channel.Role
+        private_key = bytes(range(16))
+        channels = [
+            self._channel(0, R.PRIMARY, "Private", private_key),
+            self._channel(1, R.SECONDARY, "", b"\x01"),
+        ]
+        iface = MagicMock()
+        iface.localNode.channels = channels
+
+        table = SerialCaptureSource._read_channel_key_table(iface)
+
+        self.assertEqual(table[0], private_key)
+        self.assertEqual(table[1], CryptoService._expand_key(b"\x01"))
+
+    def test_empty_secondary_psk_inherits_primary_key(self):
+        R = channel_pb2.Channel.Role
+        private_key = bytes(range(16))
+        channels = [
+            self._channel(0, R.PRIMARY, "Private", private_key),
+            self._channel(1, R.SECONDARY, "Inherited", b""),
+        ]
+        iface = MagicMock()
+        iface.localNode.channels = channels
+
+        table = SerialCaptureSource._read_channel_key_table(iface)
+
+        self.assertEqual(table[1], private_key)
 
 
 class ResolveChannelIndexTest(unittest.TestCase):
@@ -281,6 +313,44 @@ class ResolveChannelIndexTest(unittest.TestCase):
         source = SerialCaptureSource(port="/dev/ttyUSB1", label="433")
 
         self.assertIsNone(source.resolve_channel_index("LongFast"))
+
+    def test_resolves_reordered_channels_by_name_and_key(self):
+        source = SerialCaptureSource(port="/dev/ttyUSB1", label="433")
+        public_key = bytes(range(16))
+        private_key = bytes(range(16, 32))
+        source._radio_info["channel_table"] = {0: "Private", 1: "LongFast"}
+        source._channel_keys = {0: private_key, 1: public_key}
+
+        self.assertEqual(
+            source.resolve_channel_index("LongFast", public_key),
+            1,
+        )
+
+    def test_rejects_same_name_with_wrong_key(self):
+        source = SerialCaptureSource(port="/dev/ttyUSB1", label="433")
+        source._radio_info["channel_table"] = {0: "LongFast"}
+        source._channel_keys = {0: bytes(range(16))}
+
+        self.assertIsNone(
+            source.resolve_channel_index("LongFast", bytes(range(16, 32)))
+        )
+
+    def test_rejects_missing_requested_key_when_stick_keys_are_known(self):
+        source = SerialCaptureSource(port="/dev/ttyUSB1", label="433")
+        source._radio_info["channel_table"] = {0: "LongFast"}
+        source._channel_keys = {0: bytes(range(16))}
+
+        self.assertIsNone(source.resolve_channel_index("LongFast"))
+
+    def test_channel_keys_are_not_exposed_in_radio_info(self):
+        source = SerialCaptureSource(port="/dev/ttyUSB1", label="433")
+        source._radio_info["channel_table"] = {0: "LongFast"}
+        source._channel_keys = {0: bytes(range(16))}
+
+        info = source.get_radio_info()
+
+        self.assertNotIn("channel_keys", info)
+        self.assertNotIn(bytes(range(16)), info.values())
 
 
 if __name__ == "__main__":
