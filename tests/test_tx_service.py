@@ -441,6 +441,111 @@ class TestSerialSendChannelTranslation(unittest.IsolatedAsyncioTestCase):
             "Home", b"default-channel-key"
         )
 
+    async def test_selected_usb_sends_broadcast_on_sticks_own_index(self):
+        tx = self._build_tx_service(channel_keys={"BayMesh": b"key"})
+        serial_source = Mock()
+        serial_source.name = "serial_433"
+        serial_source.connected = True
+        serial_source.resolve_channel_index = Mock(return_value=1)
+        serial_source.send_text = Mock(return_value={
+            "success": True,
+            "error": "",
+            "packet_id": "abc",
+        })
+        tx._serial_sources = [serial_source]
+
+        result = await tx._send_meshtastic(
+            "hello channel",
+            "broadcast",
+            channel=1,
+            want_ack=False,
+            tx_source="serial_433",
+        )
+
+        self.assertTrue(result.success)
+        serial_source.resolve_channel_index.assert_called_once_with(
+            "BayMesh", b"key"
+        )
+        serial_source.send_text.assert_called_once_with(
+            "hello channel",
+            BROADCAST_ADDR_MT,
+            channel_index=1,
+            want_ack=False,
+        )
+
+    async def test_selected_unknown_usb_is_rejected(self):
+        tx = self._build_tx_service()
+
+        result = await tx._send_meshtastic(
+            "hello",
+            "broadcast",
+            channel=0,
+            want_ack=False,
+            tx_source="serial_433",
+        )
+
+        self.assertFalse(result.success)
+        self.assertIn("not connected", result.error)
+
+    async def test_selected_concentrator_bypasses_last_heard_usb(self):
+        tx = self._build_tx_service()
+        tx._resolve_serial_send_source = AsyncMock()
+
+        result = await tx._send_meshtastic(
+            "hello",
+            0x11223344,
+            channel=0,
+            want_ack=False,
+            tx_source="concentrator",
+        )
+
+        tx._resolve_serial_send_source.assert_not_awaited()
+        self.assertFalse(result.success)
+        self.assertIn("not available", result.error)
+
+    def test_lists_only_connected_usb_radios_with_matching_channel(self):
+        tx = self._build_tx_service(channel_keys={"BayMesh": b"key"})
+        tx._wrapper = Mock()
+
+        compatible = Mock()
+        compatible.name = "serial_433"
+        compatible.connected = True
+        compatible.resolve_channel_index = Mock(return_value=5)
+
+        wrong_key = Mock()
+        wrong_key.name = "serial_868"
+        wrong_key.connected = True
+        wrong_key.resolve_channel_index = Mock(return_value=None)
+
+        disconnected = Mock()
+        disconnected.name = "serial_915"
+        disconnected.connected = False
+        disconnected.resolve_channel_index = Mock(return_value=2)
+        tx._serial_sources = [compatible, wrong_key, disconnected]
+
+        sources = tx.get_meshtastic_tx_sources(1)
+
+        self.assertEqual(sources, [
+            {
+                "id": "concentrator",
+                "label": "Concentrator",
+                "kind": "concentrator",
+            },
+            {
+                "id": "serial_433",
+                "label": "USB 433",
+                "kind": "usb",
+                "radio_channel": 5,
+            },
+        ])
+        compatible.resolve_channel_index.assert_called_once_with(
+            "BayMesh", b"key"
+        )
+        wrong_key.resolve_channel_index.assert_called_once_with(
+            "BayMesh", b"key"
+        )
+        disconnected.resolve_channel_index.assert_not_called()
+
     async def test_traceroute_uses_stick_that_last_heard_destination(self):
         tx = self._build_tx_service(channel_keys={"BayMesh": b"key"})
         serial_source = Mock()

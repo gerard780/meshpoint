@@ -100,4 +100,10 @@
     .msg-sidebar { max-height: 42%; }
     .msg-chat__header { padding: 0.5rem 0.75rem; }
     .msg-chat__messages { padding: 0.6rem; }
+    .msg-compose { flex-wrap: wrap; }
+    .msg-compose__source { flex: 1 0 100%; }
+    .msg-compose__source-select {
+        flex: 1;
+        max-width: none;
+    }
 }

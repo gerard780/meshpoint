@@ -165,6 +165,7 @@ class TxService:
         channel: int = 0,
         want_ack: bool = False,
         echo_hash: int | None = None,
+        tx_source: str | None = None,
     ) -> SendResult:
         """Send a text message over the specified protocol.
 
@@ -177,7 +178,7 @@ class TxService:
         """
         if protocol.lower() in ("meshtastic", "mt"):
             return await self._send_meshtastic(
-                text, destination, channel, want_ack, echo_hash
+                text, destination, channel, want_ack, echo_hash, tx_source
             )
         elif protocol.lower() in ("meshcore", "mc"):
             return await self._send_meshcore(text, destination, channel)
@@ -293,62 +294,55 @@ class TxService:
         channel: int,
         want_ack: bool,
         echo_hash: int | None = None,
+        tx_source: str | None = None,
     ) -> SendResult:
         """Build and transmit a Meshtastic packet via the SX1261
         concentrator, or via a specific USB serial stick when the
         destination was last heard through one instead."""
         dest_int = self._resolve_destination(destination, Protocol.MESHTASTIC)
 
+        requested_source = (tx_source or "auto").strip() or "auto"
+        if requested_source not in {"auto", "concentrator"}:
+            serial_source = self._serial_source_by_name(requested_source)
+            if serial_source is None:
+                return SendResult(
+                    success=False,
+                    protocol="meshtastic",
+                    error=(
+                        f"Meshtastic TX source '{requested_source}' is not "
+                        "connected"
+                    ),
+                )
+            return self._send_text_via_serial_source(
+                serial_source,
+                text,
+                dest_int,
+                channel,
+                want_ack,
+            )
+
         # Route through a specific USB stick when this contact was last
         # heard via one -- a contact heard only on a 433 MHz stick
         # physically cannot receive a reply sent on 868 MHz via the
         # onboard concentrator. Gated on the general transmit toggle,
         # not the concentrator-specific wrapper check below, since this
-        # path doesn't touch the concentrator at all. Broadcasts always
-        # go out via the concentrator unchanged (out of scope here,
-        # same as MeshCore's channel-message fan-out being a separate
-        # piece) -- serial sticks were previously capture-only anyway.
+        # path doesn't touch the concentrator at all. Broadcasts use the
+        # concentrator by default, but the dashboard may now explicitly
+        # select a compatible USB transmitter for a channel message.
         if (
             self._config is not None
             and self._config.enabled
             and dest_int != BROADCAST_ADDR_MT
+            and requested_source == "auto"
         ):
             serial_source = await self._resolve_serial_send_source(dest_int)
             if serial_source is not None:
-                # `channel` is Meshpoint's OWN configured channel index
-                # (0=primary, 1+=channel_keys order) -- it has no
-                # relationship to this stick's own channel table, a
-                # separate physical node with its own, independently
-                # ordered channel list. Translate by NAME and refuse to
-                # send rather than passing the raw index through and
-                # risking transmission on whatever unrelated channel
-                # happens to sit at that slot on the stick (see F3 in
-                # the worklist).
-                channel_name = self._channel_name_for_index(channel)
-                _, channel_key = self._resolve_channel(channel)
-                stick_channel_index = serial_source.resolve_channel_index(
-                    channel_name, channel_key
-                )
-                if stick_channel_index is None:
-                    return SendResult(
-                        success=False,
-                        protocol="meshtastic",
-                        error=(
-                            f"{serial_source.name} has no channel matching "
-                            f"'{channel_name}' and its configured key -- "
-                            "refusing to send on a possibly-wrong channel"
-                        ),
-                    )
-                result = serial_source.send_text(
-                    text, dest_int,
-                    channel_index=stick_channel_index, want_ack=want_ack,
-                )
-                return SendResult(
-                    success=result["success"],
-                    protocol="meshtastic",
-                    packet_id=result["packet_id"],
-                    timestamp=time.time(),
-                    error=result["error"],
+                return self._send_text_via_serial_source(
+                    serial_source,
+                    text,
+                    dest_int,
+                    channel,
+                    want_ack,
                 )
 
         if not self.meshtastic_enabled:
@@ -455,6 +449,106 @@ class TxService:
             protocol="meshtastic",
             packet_id=f"{packet_id:08x}",
             error=f"lgw_send returned {result_code}",
+        )
+
+    def get_meshtastic_tx_sources(self, channel: int) -> list[dict]:
+        """Physical transmitters that can send one logical channel.
+
+        Channel numbers in the dashboard are Meshpoint-local. USB radios have
+        independently ordered channel tables, so a source is offered only
+        when its effective channel name and expanded PSK resolve safely.
+        """
+        sources: list[dict] = []
+        if self.meshtastic_enabled:
+            sources.append({
+                "id": "concentrator",
+                "label": "Concentrator",
+                "kind": "concentrator",
+            })
+
+        if self._config is None or not self._config.enabled:
+            return sources
+
+        channel_name = self._channel_name_for_index(channel)
+        _, channel_key = self._resolve_channel(channel)
+        for source in self._serial_sources:
+            if not getattr(source, "connected", False):
+                continue
+            try:
+                stick_index = source.resolve_channel_index(
+                    channel_name, channel_key
+                )
+            except Exception:
+                logger.debug(
+                    "Could not resolve channel %s on %s",
+                    channel_name,
+                    getattr(source, "name", "serial"),
+                    exc_info=True,
+                )
+                continue
+            if stick_index is None:
+                continue
+            sources.append({
+                "id": source.name,
+                "label": self._serial_source_label(source.name),
+                "kind": "usb",
+                "radio_channel": stick_index,
+            })
+        return sources
+
+    @staticmethod
+    def _serial_source_label(source_name: str) -> str:
+        if source_name == "serial":
+            return "USB"
+        if source_name.startswith("serial_"):
+            return f"USB {source_name.removeprefix('serial_')}"
+        return source_name
+
+    def _serial_source_by_name(self, source_name: str):
+        for source in self._serial_sources:
+            if (
+                source.name == source_name
+                and getattr(source, "connected", False)
+            ):
+                return source
+        return None
+
+    def _send_text_via_serial_source(
+        self,
+        serial_source,
+        text: str,
+        destination: int,
+        channel: int,
+        want_ack: bool,
+    ) -> SendResult:
+        """Send using a selected USB radio after safe channel translation."""
+        channel_name = self._channel_name_for_index(channel)
+        _, channel_key = self._resolve_channel(channel)
+        stick_channel_index = serial_source.resolve_channel_index(
+            channel_name, channel_key
+        )
+        if stick_channel_index is None:
+            return SendResult(
+                success=False,
+                protocol="meshtastic",
+                error=(
+                    f"{serial_source.name} has no channel matching "
+                    f"'{channel_name}' and its configured key -- refusing "
+                    "to send on a possibly-wrong channel"
+                ),
+            )
+        result = serial_source.send_text(
+            text,
+            destination,
+            channel_index=stick_channel_index,
+            want_ack=want_ack,
+        )
+        return SendResult(
+            success=result["success"],
+            protocol="meshtastic",
+            packet_id=result["packet_id"],
+            timestamp=time.time() if result["success"] else 0.0,
+            error=result["error"],
         )
 
     async def send_routing_ack(self, original) -> SendResult:

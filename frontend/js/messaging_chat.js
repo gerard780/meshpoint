@@ -12,6 +12,7 @@ class MessagingChat {
         this._loading = false;
         this._allLoaded = false;
         this._lastDayKey = null;
+        this._selectedTxSources = new Map();
         this._build();
     }
 
@@ -29,6 +30,8 @@ class MessagingChat {
         this._container.classList.add('msg-chat--empty');
         this._input.disabled = true;
         this._sendBtn.disabled = true;
+        this._txSourceWrap.hidden = true;
+        this._txSourceSelect.disabled = true;
     }
 
     setConversation(convo) {
@@ -88,6 +91,7 @@ class MessagingChat {
         this._input.placeholder = isUnmapped
             ? "Can't reply -- no matching local channel"
             : 'Type a message…';
+        this._configureTxSources(convo, isChannel, isUnmapped);
         if (!isUnmapped) this._input.focus();
         this._loadMessages();
     }
@@ -305,7 +309,41 @@ class MessagingChat {
         if (!text || !this._conversation) return;
 
         this._input.value = '';
-        this._onSend(text, this._conversation);
+        const txSource = this._txSourceWrap.hidden
+            ? null
+            : this._txSourceSelect.value;
+        this._onSend(text, this._conversation, txSource);
+    }
+
+    _configureTxSources(convo, isChannel, isUnmapped) {
+        const sources = Array.isArray(convo.tx_sources) ? convo.tx_sources : [];
+        const show = isChannel
+            && convo.protocol === 'meshtastic'
+            && !isUnmapped
+            && sources.length > 0;
+
+        this._txSourceSelect.replaceChildren();
+        this._txSourceWrap.hidden = !show;
+        if (!show) {
+            this._txSourceSelect.disabled = true;
+            return;
+        }
+
+        sources.forEach((source) => {
+            const option = document.createElement('option');
+            option.value = source.id;
+            option.textContent = source.kind === 'usb' && source.radio_channel != null
+                ? `${source.label} · ch ${source.radio_channel}`
+                : source.label;
+            this._txSourceSelect.appendChild(option);
+        });
+
+        const remembered = this._selectedTxSources.get(convo.node_id);
+        const available = sources.some((source) => source.id === remembered);
+        this._txSourceSelect.value = available
+            ? remembered
+            : (convo.default_tx_source || sources[0].id);
+        this._txSourceSelect.disabled = sources.length === 1;
     }
 
     _build() {
@@ -322,6 +360,10 @@ class MessagingChat {
             </div>
             <div class="msg-chat__messages"></div>
             <div class="msg-compose">
+                <label class="msg-compose__source" hidden>
+                    <span class="msg-compose__source-label">TX via</span>
+                    <select class="msg-compose__source-select" aria-label="Transmit interface"></select>
+                </label>
                 <input class="msg-compose__input" placeholder="Type a message…" disabled maxlength="228" />
                 <button class="msg-compose__send" type="button" disabled>
                     <span class="msg-compose__send-label">Send</span>
@@ -336,12 +378,22 @@ class MessagingChat {
         this._connectionBadge = this._container.querySelector('.msg-chat__connection-badge');
         this._headerAvatar = this._container.querySelector('.msg-chat__avatar');
         this._messagesEl = this._container.querySelector('.msg-chat__messages');
+        this._txSourceWrap = this._container.querySelector('.msg-compose__source');
+        this._txSourceSelect = this._container.querySelector('.msg-compose__source-select');
         this._input = this._container.querySelector('.msg-compose__input');
         this._sendBtn = this._container.querySelector('.msg-compose__send');
 
         this._renderEmptyState();
 
         this._sendBtn.addEventListener('click', () => this._handleSend());
+        this._txSourceSelect.addEventListener('change', () => {
+            if (this._conversation) {
+                this._selectedTxSources.set(
+                    this._conversation.node_id,
+                    this._txSourceSelect.value
+                );
+            }
+        });
         this._input.addEventListener('keydown', (e) => {
             if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault();
@@ -437,7 +489,7 @@ class MessagingChat {
         return bubble;
     }
 
-    updateBubbleSignal(packetId, rssi, snr, rxCount) {
+    updateBubbleSignal(packetId, rssi, snr, rxCount, rxSources) {
         const bubble = this._messagesEl.querySelector(`[data-pkt-id="${packetId}"]`);
         if (!bubble) return;
 
@@ -446,32 +498,67 @@ class MessagingChat {
 
         const sig = meta.querySelector('.msg-signal');
         if (sig) sig.remove();
-        const rx = meta.querySelector('.msg-rx-count');
-        if (rx) rx.remove();
+        meta.querySelectorAll('.msg-rx-source, .msg-rx-count').forEach((el) => el.remove());
 
-        const fakeMsg = { direction: 'received', rssi, snr, rx_count: rxCount };
+        const fakeMsg = {
+            direction: 'received',
+            rssi,
+            snr,
+            rx_count: rxCount,
+            rx_sources: rxSources || [],
+        };
         meta.insertAdjacentHTML('beforeend', this._buildSignalHtml(fakeMsg));
     }
 
     _buildSignalHtml(msg) {
-        if (msg.direction === 'sent' || msg.rssi == null) return '';
+        if (msg.direction === 'sent') return '';
 
-        const rssi = msg.rssi;
-        const snr = msg.snr;
-        const level = rssi > -80 ? 5 : rssi > -95 ? 4 : rssi > -110 ? 3 : rssi > -125 ? 2 : 1;
-        const cls = level >= 4 ? 'excellent' : level === 3 ? 'good' : level === 2 ? 'fair' : 'poor';
+        let signalHtml = '';
+        if (msg.rssi != null) {
+            const rssi = msg.rssi;
+            const snr = msg.snr;
+            const level = rssi > -80 ? 5 : rssi > -95 ? 4 : rssi > -110 ? 3 : rssi > -125 ? 2 : 1;
+            const cls = level >= 4 ? 'excellent' : level === 3 ? 'good' : level === 2 ? 'fair' : 'poor';
 
-        let bars = '';
-        for (let i = 1; i <= 5; i++) {
-            const active = i <= level ? 'active' : '';
-            bars += `<span class="sig-bar sig-bar--h${i} ${active}"></span>`;
+            let bars = '';
+            for (let i = 1; i <= 5; i++) {
+                const active = i <= level ? 'active' : '';
+                bars += `<span class="sig-bar sig-bar--h${i} ${active}"></span>`;
+            }
+
+            const snrStr = snr != null ? ` · ${snr.toFixed(1)} dB` : '';
+            signalHtml = `<span class="msg-signal msg-signal--${cls}">${bars}<span class="msg-signal__val">${rssi.toFixed(1)}${snrStr}</span></span>`;
         }
 
-        const snrStr = snr != null ? ` · ${snr.toFixed(1)} dB` : '';
-        const rxStr = (msg.rx_count || 1) > 1
-            ? `<span class="msg-rx-count" title="Received via ${msg.rx_count} RF paths">×${msg.rx_count}</span>`
+        const sources = Array.isArray(msg.rx_sources) ? msg.rx_sources : [];
+        const sourceDetails = sources
+            .map((source) => ({
+                badge: this._formatRxSourceLabel(source),
+                name: source === 'concentrator'
+                    ? 'Concentrator'
+                    : this._formatRxSourceLabel(source),
+            }))
+            .filter((source) => source.badge);
+        const sourceHtml = sourceDetails.map((source) => (
+            `<span class="msg-rx-source" title="Received by ${this._esc(source.name)}">${this._esc(source.badge)}</span>`
+        )).join('');
+        const rxCount = msg.rx_count || 1;
+        const via = sourceDetails.length
+            ? ` via ${sourceDetails.map((source) => source.name).join(' + ')}`
             : '';
-        return `<span class="msg-signal msg-signal--${cls}">${bars}<span class="msg-signal__val">${rssi.toFixed(1)}${snrStr}</span></span>${rxStr}`;
+        const rxHtml = rxCount > 1
+            ? `<span class="msg-rx-count" title="Received ${rxCount} times${this._esc(via)}">×${rxCount}</span>`
+            : '';
+        return `${signalHtml}${sourceHtml}${rxHtml}`;
+    }
+
+    _formatRxSourceLabel(captureSource) {
+        if (captureSource === 'concentrator') return 'C';
+        const label = this._formatConnectionLabel(captureSource);
+        if (!label) return '';
+        if (label === 'USB') return label;
+        if (/^\d+$/.test(label)) return `USB ${label}`;
+        return label;
     }
 
     _insertDaySeparator(ts) {

@@ -121,6 +121,58 @@ class PacketRepository:
         )
         return row["source_id"] if row else ""
 
+    async def get_capture_sources_by_packet_ids(
+        self,
+        packet_keys: list[tuple[str, str]],
+    ) -> dict[tuple[str, str], list[str]]:
+        """Distinct receive interfaces for message packet IDs.
+
+        A single RF packet can be captured by the concentrator and one or
+        more USB radios. Messages deduplicate those copies into one bubble;
+        this batched lookup preserves which physical interfaces contributed
+        the copies without adding an N+1 query to conversation history.
+        """
+        keys = {
+            (packet_id, protocol)
+            for packet_id, protocol in packet_keys
+            if packet_id and protocol
+        }
+        if not keys:
+            return {}
+
+        packet_ids = sorted({packet_id for packet_id, _protocol in keys})
+        protocols = sorted({protocol for _packet_id, protocol in keys})
+        id_placeholders = ",".join("?" for _ in packet_ids)
+        protocol_placeholders = ",".join("?" for _ in protocols)
+        rows = await self._db.fetch_all(
+            f"""
+            SELECT packet_id, protocol, capture_source,
+                   MIN(timestamp) AS first_seen
+            FROM packets
+            WHERE packet_id IN ({id_placeholders})
+              AND protocol IN ({protocol_placeholders})
+              AND capture_source IS NOT NULL
+              AND capture_source != ''
+            GROUP BY packet_id, protocol, capture_source
+            ORDER BY first_seen ASC
+            """,
+            tuple(packet_ids + protocols),
+        )
+        result: dict[tuple[str, str], list[str]] = {}
+        for row in rows:
+            key = (row["packet_id"], row["protocol"])
+            if key in keys:
+                result.setdefault(key, []).append(row["capture_source"])
+        return result
+
+    async def get_capture_sources(
+        self, packet_id: str, protocol: str
+    ) -> list[str]:
+        mapping = await self.get_capture_sources_by_packet_ids(
+            [(packet_id, protocol)]
+        )
+        return mapping.get((packet_id, protocol), [])
+
     async def update_pager_status(self, packet_id: str, status: str) -> bool:
         """Updates the ``status`` field inside an existing pager Outbox
         row's ``decoded_payload`` JSON blob (e.g. "sent" -> "acked" once

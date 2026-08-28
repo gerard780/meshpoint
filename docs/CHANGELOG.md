@@ -7,6 +7,11 @@
 - **Local map tiles.** OSM raster with a dark invert filter, replacing
   CARTO Dark Matter after anonymous CARTO raster requests started
   returning an API-key watermark.
+- **Per-channel transmit source and receive-path badges.** Meshtastic channel
+  conversations can select the onboard concentrator or any connected USB
+  radio whose effective channel name and PSK match, even when their channel
+  slot numbers differ. Received message bubbles show the interface or
+  interfaces that heard them, alongside an ×N count for duplicate receptions.
 
 #### Docs
 

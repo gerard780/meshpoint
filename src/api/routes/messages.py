@@ -37,6 +37,7 @@ _node_repo = None
 _meshcore_tx: MeshCoreTxClient | None = None
 _config: AppConfig | None = None
 _name_resolver: MessageNameResolver | None = None
+_packet_repo: PacketRepository | None = None
 
 
 def init_routes(
@@ -47,12 +48,14 @@ def init_routes(
     config: AppConfig | None = None,
     packet_repo: PacketRepository | None = None,
 ) -> None:
-    global _tx_service, _message_repo, _node_repo, _meshcore_tx, _config, _name_resolver
+    global _tx_service, _message_repo, _node_repo, _meshcore_tx, _config
+    global _name_resolver, _packet_repo
     _tx_service = tx_service
     _message_repo = message_repo
     _node_repo = node_repo
     _meshcore_tx = meshcore_tx
     _config = config
+    _packet_repo = packet_repo
     _name_resolver = MessageNameResolver(node_repo, meshcore_tx, packet_repo)
 
 
@@ -67,6 +70,7 @@ class SendRequest(BaseModel):
     # under a different channel name, so a reply must echo their raw
     # hash byte instead of one recomputed from our own channel name.
     echo_hash: Optional[int] = None
+    tx_source: Optional[str] = None
 
 
 class TracerouteRequest(BaseModel):
@@ -96,6 +100,7 @@ async def send_message(
         channel=req.channel,
         want_ack=req.want_ack,
         echo_hash=req.echo_hash,
+        tx_source=req.tx_source,
     )
 
     node_id = _resolve_node_id(req.destination, req.protocol, req.channel, req.echo_hash)
@@ -238,25 +243,31 @@ async def get_channels(claims: Optional[SessionClaims] = Depends(optional_auth))
             bw = int(_config.radio.bandwidth_khz)
             default_name = PRESET_DISPLAY_NAMES.get((sf, bw), "Custom")
 
-    channels = [
-        {
+    def _meshtastic_channel(index: int, name: str) -> dict:
+        entry = {
             "protocol": "meshtastic",
-            "channel": 0,
-            "name": default_name,
-            "node_id": f"{BROADCAST_NODE_MT}:0",
+            "channel": index,
+            "name": name,
+            "node_id": f"{BROADCAST_NODE_MT}:{index}",
         }
-    ]
+        if _tx_service is not None:
+            tx_sources = _tx_service.get_meshtastic_tx_sources(index)
+            entry["tx_sources"] = tx_sources
+            if tx_sources:
+                entry["default_tx_source"] = (
+                    "concentrator"
+                    if any(s["id"] == "concentrator" for s in tx_sources)
+                    else tx_sources[0]["id"]
+                )
+        return entry
+
+    channels = [_meshtastic_channel(0, default_name)]
 
     if _config:
         for i, (name, _key) in enumerate(
             _config.meshtastic.channel_keys.items(), start=1
         ):
-            channels.append({
-                "protocol": "meshtastic",
-                "channel": i,
-                "name": name,
-                "node_id": f"{BROADCAST_NODE_MT}:{i}",
-            })
+            channels.append(_meshtastic_channel(i, name))
 
     if _meshcore_tx and _meshcore_tx.connected:
         channels.append({
@@ -457,9 +468,27 @@ async def _enrich_conversations(conversations: list[dict]) -> list[dict]:
 
 
 async def _enrich_messages(messages: list[dict]) -> list[dict]:
-    if _name_resolver is None or not messages:
+    if not messages:
         return messages
-    return [
-        await _name_resolver.apply_to_message_dict(msg)
-        for msg in messages
-    ]
+    if _name_resolver is not None:
+        messages = [
+            await _name_resolver.apply_to_message_dict(msg)
+            for msg in messages
+        ]
+    if _packet_repo is not None:
+        keys = [
+            (msg.get("packet_id", ""), msg.get("protocol", ""))
+            for msg in messages
+            if msg.get("packet_id") and msg.get("protocol")
+        ]
+        try:
+            source_map = await _packet_repo.get_capture_sources_by_packet_ids(keys)
+        except Exception:
+            logger.debug("message receive-source lookup failed", exc_info=True)
+            source_map = {}
+        for msg in messages:
+            key = (msg.get("packet_id", ""), msg.get("protocol", ""))
+            sources = source_map.get(key, [])
+            if sources:
+                msg["rx_sources"] = sources
+    return messages

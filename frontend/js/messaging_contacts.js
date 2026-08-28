@@ -212,6 +212,12 @@ class MessagingContacts {
             // this copy the chat header's connection pill could never show
             // for a channel, no matter what the API returned.
             capture_source: existing ? existing.capture_source : null,
+            // Physical radios that can safely transmit this logical
+            // channel. USB channel slots are already translated by the
+            // server using channel name + PSK, so the UI never guesses
+            // that Meshpoint channel 0 is also USB channel 0.
+            tx_sources: ch.tx_sources || [],
+            default_tx_source: ch.default_tx_source || null,
         };
     }
 

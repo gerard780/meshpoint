@@ -62,7 +62,10 @@ class MessagingPanel {
         const chatEl = document.getElementById('msg-chat-area');
 
         this._contacts = new MessagingContacts(listEl, (convo) => this._onConversationSelected(convo));
-        this._chat = new MessagingChat(chatEl, (text, convo) => this._onSendMessage(text, convo));
+        this._chat = new MessagingChat(
+            chatEl,
+            (text, convo, txSource) => this._onSendMessage(text, convo, txSource)
+        );
 
         document.getElementById('msg-new-btn').addEventListener('click', () => {
             this._contacts.openContactPicker();
@@ -129,7 +132,7 @@ class MessagingPanel {
             .then(() => this._syncSidebarBadge());
     }
 
-    async _onSendMessage(text, convo) {
+    async _onSendMessage(text, convo, txSource) {
         const isBroadcast = convo.is_broadcast || (convo.node_id || '').startsWith('broadcast:');
         const destination = isBroadcast ? 'broadcast' : convo.node_id;
 
@@ -155,6 +158,7 @@ class MessagingPanel {
                 channel: channel,
             };
             if (keyedMatch) body.echo_hash = parseInt(keyedMatch[2], 16);
+            if (txSource) body.tx_source = txSource;
 
             const res = await fetch('/api/messages/send', {
                 method: 'POST',
@@ -236,6 +240,8 @@ class MessagingPanel {
                     packet_id: data.packet_id || '',
                     source_id: data.source_id || '',
                     destination_id: data.destination_id || '',
+                    rx_count: data.rx_count || 1,
+                    rx_sources: data.rx_sources || [],
                 };
                 if (data.rssi != null) msg.rssi = data.rssi;
                 if (data.snr != null) msg.snr = data.snr;
@@ -268,7 +274,11 @@ class MessagingPanel {
         window.concentratorWS.on('message_updated', (data) => {
             if (this._activeConvo && data.node_id === this._activeConvo.node_id) {
                 this._chat.updateBubbleSignal(
-                    data.packet_id, data.rssi, data.snr, data.rx_count
+                    data.packet_id,
+                    data.rssi,
+                    data.snr,
+                    data.rx_count,
+                    data.rx_sources
                 );
             }
         });

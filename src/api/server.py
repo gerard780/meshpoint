@@ -1755,6 +1755,14 @@ def _setup_message_interception(
                 rssi=rssi,
                 snr=snr,
             )
+            try:
+                rx_sources = await coord.packet_repo.get_capture_sources(
+                    packet.packet_id or "",
+                    packet.protocol.value,
+                )
+            except Exception:
+                logger.debug("message receive-source lookup failed", exc_info=True)
+                rx_sources = [packet.capture_source] if packet.capture_source else []
             if is_dup:
                 row = await message_repo._db.fetch_one(
                     "SELECT rx_count, rssi, snr FROM messages WHERE id=?",
@@ -1766,6 +1774,7 @@ def _setup_message_interception(
                     "rx_count": row["rx_count"] if row else 2,
                     "rssi": round(row["rssi"], 1) if row and row["rssi"] else None,
                     "snr": round(row["snr"], 1) if row and row["snr"] else None,
+                    "rx_sources": rx_sources,
                 })
             else:
                 ws_name_lookup = (
@@ -1787,6 +1796,8 @@ def _setup_message_interception(
                     "packet_id": packet.packet_id or "",
                     "source_id": packet.source_id or "",
                     "destination_id": packet.destination_id or "",
+                    "rx_count": 1,
+                    "rx_sources": rx_sources,
                 }
                 if rssi is not None:
                     ws_payload["rssi"] = round(rssi, 1)

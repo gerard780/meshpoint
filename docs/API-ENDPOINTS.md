@@ -160,6 +160,12 @@ session gets `401 Unauthorized`. See `src/api/auth/dependencies.py` for the
 | GET | `/api/messages/contacts` | Viewer | Known contacts for the Messages sidebar |
 | GET | `/api/messages/status` | Viewer | Messaging subsystem status (companion connected, etc.) |
 
+Meshtastic entries returned by `/api/messages/channels` include compatible
+`tx_sources`; USB entries carry their device-local `radio_channel` after safe
+name-and-PSK matching. `/api/messages/send` accepts the selected source ID as
+`tx_source`. Conversation messages include distinct `rx_sources` when the
+corresponding packet-capture rows are still retained.
+
 ---
 
 ## Device & system status

@@ -791,6 +791,22 @@
     cursor: default;
 }
 
+.msg-rx-source {
+    display: inline-block;
+    margin-left: 0.4em;
+    padding: 0 4px;
+    font-size: 8px;
+    font-weight: 700;
+    line-height: 14px;
+    letter-spacing: 0.02em;
+    border: 1px solid rgba(112, 192, 255, 0.28);
+    border-radius: 4px;
+    background: rgba(112, 192, 255, 0.1);
+    color: #8ecbff;
+    vertical-align: middle;
+    cursor: default;
+}
+
 /* ── Compose bar ───────────────────────────────────────────────── */
 
 .msg-compose {
@@ -802,6 +818,56 @@
     /* Above fixed .build-stamp (z-index 25) so Send is not ghosted by the pill */
     position: relative;
     z-index: 26;
+}
+
+.msg-compose__source {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    flex: 0 0 auto;
+}
+
+.msg-compose__source[hidden] {
+    display: none;
+}
+
+.msg-compose__source-label {
+    color: var(--msg-text-faint);
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+.msg-compose__source-select {
+    appearance: none;
+    min-width: 112px;
+    max-width: 165px;
+    padding: 9px 24px 9px 10px;
+    border: 1px solid var(--msg-border);
+    border-radius: 9px;
+    background-color: rgba(0, 0, 0, 0.3);
+    background-image: linear-gradient(45deg, transparent 50%, var(--msg-text-dim) 50%),
+        linear-gradient(135deg, var(--msg-text-dim) 50%, transparent 50%);
+    background-position: calc(100% - 12px) 50%, calc(100% - 8px) 50%;
+    background-size: 4px 4px, 4px 4px;
+    background-repeat: no-repeat;
+    color: var(--msg-text);
+    font-family: inherit;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.4;
+    outline: none;
+}
+
+.msg-compose__source-select:focus {
+    border-color: rgba(255, 184, 77, 0.5);
+    box-shadow: 0 0 0 3px rgba(255, 184, 77, 0.08);
+}
+
+.msg-compose__source-select:disabled {
+    opacity: 0.65;
 }
 
 .msg-compose__input {
