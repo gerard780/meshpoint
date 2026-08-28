@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hmac
 import logging
 from datetime import datetime, timezone
 from typing import AsyncIterator, Optional
@@ -43,6 +44,9 @@ class SerialCaptureSource(CaptureSource):
         self._running = False
         self._self_origin = SerialSelfOriginFilter()
         self._radio_info: dict = {"channel_table": {}}
+        # Kept separate from _radio_info so channel secrets are never exposed
+        # through the status API. Values are firmware-compatible expanded PSKs.
+        self._channel_keys: dict[int, bytes] = {}
         self._queue: asyncio.Queue[RawCapture] = asyncio.Queue(maxsize=500)
         self._reconnect_task: Optional[asyncio.Task] = None
 
@@ -58,9 +62,31 @@ class SerialCaptureSource(CaptureSource):
         """Connect-time LoRa/identity snapshot (copy)."""
         return dict(self._radio_info)
 
-    def resolve_channel_index(self, name: str) -> Optional[int]:
-        """This stick's channel-table index for ``name``, or None."""
+    def resolve_channel_index(
+        self,
+        name: str,
+        channel_key: bytes | None = None,
+    ) -> Optional[int]:
+        """This stick's index for a Meshpoint channel identity.
+
+        Meshtastic channel slots are device-local and can be ordered
+        differently on every radio. Match the effective channel name and
+        expanded PSK when handshake key data is available. Name-only matching
+        remains as a compatibility fallback for older/incomplete handshakes.
+        """
         table = self._radio_info.get("channel_table") or {}
+        if self._channel_keys:
+            if channel_key is None:
+                return None
+            for idx, ch_name in table.items():
+                stick_key = self._channel_keys.get(idx)
+                if (
+                    ch_name == name
+                    and stick_key is not None
+                    and hmac.compare_digest(stick_key, channel_key)
+                ):
+                    return idx
+            return None
         for idx, ch_name in table.items():
             if ch_name == name:
                 return idx
@@ -114,10 +140,19 @@ class SerialCaptureSource(CaptureSource):
                 )
             except Exception:
                 logger.debug(
-                    "Could not read channel table from serial interface",
+                    "Could not read channel names from serial interface",
                     exc_info=True,
                 )
                 self._radio_info["channel_table"] = {}
+            try:
+                self._channel_keys = self._read_channel_key_table(self._interface)
+            except Exception:
+                logger.debug(
+                    "Could not read channel keys from serial interface; "
+                    "falling back to name-only matching",
+                    exc_info=True,
+                )
+                self._channel_keys = {}
 
             pub.subscribe(self._on_receive, "meshtastic.receive")
             region = self._radio_info.get("region")
@@ -159,6 +194,7 @@ class SerialCaptureSource(CaptureSource):
                     pass
                 self._interface = None
             self._self_origin.set_own_node_num(None)
+            self._channel_keys = {}
             raise
 
     def _schedule_reconnect(self) -> None:
@@ -252,9 +288,9 @@ class SerialCaptureSource(CaptureSource):
     ) -> dict:
         """Stick channel-table index -> name (for locally decoded packets).
 
-        Blank primary names fall back to the modem preset *display* name
-        (e.g. ``LongFast``), matching Meshpoint's primary-channel naming
-        and firmware ``Channels::getName()`` so TX can translate by name.
+        Firmware ``Channels::getName()`` substitutes the modem preset display
+        name (e.g. ``LongFast``) for an empty name on *any* enabled channel,
+        including a public secondary behind a private primary.
         """
         from meshtastic.protobuf import channel_pb2
 
@@ -266,11 +302,46 @@ class SerialCaptureSource(CaptureSource):
             if ch.role == channel_pb2.Channel.Role.DISABLED:
                 continue
             name = ch.settings.name
-            if not name and ch.role == channel_pb2.Channel.Role.PRIMARY:
+            if not name:
                 preset = get_preset(modem_preset_name) if modem_preset_name else None
-                name = preset.display_name if preset else modem_preset_name
+                name = preset.display_name if preset else (modem_preset_name or "Custom")
             if name:
                 table[ch.index] = name
+        return table
+
+    @staticmethod
+    def _read_channel_key_table(interface) -> dict[int, bytes]:
+        """Stick channel index -> firmware-compatible expanded PSK.
+
+        A secondary channel with an empty PSK inherits the primary channel's
+        key in the reference firmware. The returned mapping stays private to
+        this source and is never included in ``get_radio_info()``.
+        """
+        from meshtastic.protobuf import channel_pb2
+
+        from src.decode.crypto_service import CryptoService
+
+        channels = getattr(interface.localNode, "channels", None) or []
+        primary_index: int | None = None
+        primary_psk = b""
+        for ch in channels:
+            if ch.role == channel_pb2.Channel.Role.PRIMARY:
+                primary_index = int(ch.index)
+                primary_psk = bytes(getattr(ch.settings, "psk", b"") or b"")
+                break
+
+        table: dict[int, bytes] = {}
+        for ch in channels:
+            if ch.role == channel_pb2.Channel.Role.DISABLED:
+                continue
+            raw_psk = bytes(getattr(ch.settings, "psk", b"") or b"")
+            if (
+                not raw_psk
+                and ch.role == channel_pb2.Channel.Role.SECONDARY
+                and int(ch.index) != primary_index
+            ):
+                raw_psk = primary_psk
+            table[int(ch.index)] = CryptoService._expand_key(raw_psk)
         return table
 
     def send_text(
@@ -357,6 +428,7 @@ class SerialCaptureSource(CaptureSource):
                 pass
             self._reconnect_task = None
         self._self_origin.set_own_node_num(None)
+        self._channel_keys = {}
         if self._interface:
             try:
                 self._interface.close()

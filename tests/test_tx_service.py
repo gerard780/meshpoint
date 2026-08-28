@@ -373,6 +373,10 @@ class TestSerialSendChannelTranslation(unittest.IsolatedAsyncioTestCase):
         tx._primary_channel_name = primary_name
         crypto = Mock()
         crypto._keys = dict(channel_keys or {})
+        crypto.get_all_keys = Mock(
+            return_value=[b"default-channel-key", *crypto._keys.values()]
+        )
+        crypto.compute_channel_hash = Mock(return_value=0x2C)
         tx._crypto = crypto
         return tx
 
@@ -390,7 +394,10 @@ class TestSerialSendChannelTranslation(unittest.IsolatedAsyncioTestCase):
             "hi", 0x11223344, channel=1, want_ack=False, echo_hash=None,
         )
 
-        serial_source.resolve_channel_index.assert_called_once_with("BayMesh")
+        serial_source.resolve_channel_index.assert_called_once_with(
+            "BayMesh",
+            b"key",
+        )
         serial_source.send_text.assert_called_once_with(
             "hi", 0x11223344, channel_index=5, want_ack=False,
         )
@@ -409,6 +416,10 @@ class TestSerialSendChannelTranslation(unittest.IsolatedAsyncioTestCase):
         )
 
         serial_source.send_text.assert_not_called()
+        serial_source.resolve_channel_index.assert_called_once_with(
+            "BayMesh",
+            b"key",
+        )
         self.assertFalse(result.success)
         self.assertIn("BayMesh", result.error)
         self.assertIn("serial", result.error)
@@ -427,7 +438,10 @@ class TestSerialSendChannelTranslation(unittest.IsolatedAsyncioTestCase):
             "hi", 0x11223344, channel=0, want_ack=False, echo_hash=None,
         )
 
-        serial_source.resolve_channel_index.assert_called_once_with("Home")
+        serial_source.resolve_channel_index.assert_called_once_with(
+            "Home",
+            b"default-channel-key",
+        )
 
     async def test_traceroute_uses_stick_that_last_heard_destination(self):
         tx = self._build_tx_service(channel_keys={"BayMesh": b"key"})
@@ -445,7 +459,10 @@ class TestSerialSendChannelTranslation(unittest.IsolatedAsyncioTestCase):
 
         self.assertTrue(result.success)
         self.assertEqual(result.packet_id, "01020304")
-        serial_source.resolve_channel_index.assert_called_once_with("BayMesh")
+        serial_source.resolve_channel_index.assert_called_once_with(
+            "BayMesh",
+            b"key",
+        )
         serial_source.send_traceroute.assert_called_once_with(
             0x11223344,
             channel_index=5,

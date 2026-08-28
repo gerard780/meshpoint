@@ -194,13 +194,14 @@ class BuildPreDecodedEarlyExitTest(unittest.TestCase):
 
 
 class ReadChannelTableTest(unittest.TestCase):
-    def _channel(self, index, role, name):
+    def _channel(self, index, role, name, psk=b"\x01"):
         from unittest.mock import MagicMock
 
         ch = MagicMock()
         ch.index = index
         ch.role = role
         ch.settings.name = name
+        ch.settings.psk = psk
         return ch
 
     def test_builds_index_to_name_map_skipping_disabled(self):
@@ -235,7 +236,7 @@ class ReadChannelTableTest(unittest.TestCase):
         )
         self.assertEqual(table, {0: "LongFast"})
 
-    def test_blank_secondary_name_is_skipped_not_guessed(self):
+    def test_blank_secondary_name_uses_firmware_preset_fallback(self):
         from meshtastic.protobuf import channel_pb2
         from unittest.mock import MagicMock
 
@@ -250,7 +251,44 @@ class ReadChannelTableTest(unittest.TestCase):
         table = SerialCaptureSource._read_channel_table(
             iface, modem_preset_name="LongFast"
         )
-        self.assertEqual(table, {0: "Home"})
+        self.assertEqual(table, {0: "Home", 1: "LongFast"})
+
+    def test_reads_expanded_keys_independently_of_slot_order(self):
+        from meshtastic.protobuf import channel_pb2
+        from unittest.mock import MagicMock
+
+        from src.decode.crypto_service import CryptoService
+
+        R = channel_pb2.Channel.Role
+        private_key = b"p" * 16
+        channels = [
+            self._channel(0, R.PRIMARY, "Private", private_key),
+            self._channel(1, R.SECONDARY, "", b"\x01"),
+        ]
+        iface = MagicMock()
+        iface.localNode.channels = channels
+
+        table = SerialCaptureSource._read_channel_key_table(iface)
+
+        self.assertEqual(table[0], private_key)
+        self.assertEqual(table[1], CryptoService._expand_key(b"\x01"))
+
+    def test_empty_secondary_psk_inherits_primary_key_like_firmware(self):
+        from meshtastic.protobuf import channel_pb2
+        from unittest.mock import MagicMock
+
+        R = channel_pb2.Channel.Role
+        private_key = b"q" * 16
+        channels = [
+            self._channel(0, R.PRIMARY, "Private", private_key),
+            self._channel(1, R.SECONDARY, "Inherited", b""),
+        ]
+        iface = MagicMock()
+        iface.localNode.channels = channels
+
+        table = SerialCaptureSource._read_channel_key_table(iface)
+
+        self.assertEqual(table[1], private_key)
 
 
 class ResolveChannelIndexTest(unittest.TestCase):
@@ -267,6 +305,37 @@ class ResolveChannelIndexTest(unittest.TestCase):
     def test_returns_none_when_channel_table_never_populated(self):
         source = SerialCaptureSource(port="/dev/ttyUSB1")
         self.assertIsNone(source.resolve_channel_index("LongFast"))
+
+    def test_reversed_slots_match_public_channel_by_name_and_key(self):
+        source = SerialCaptureSource(port="/dev/ttyUSB1")
+        private_key = b"private-key-0001"
+        public_key = b"public-key-00001"
+        source._radio_info["channel_table"] = {
+            0: "Private",
+            1: "LongFast",
+        }
+        source._channel_keys = {0: private_key, 1: public_key}
+
+        self.assertEqual(
+            source.resolve_channel_index("LongFast", public_key),
+            1,
+        )
+
+    def test_same_name_with_wrong_key_is_rejected(self):
+        source = SerialCaptureSource(port="/dev/ttyUSB1")
+        source._radio_info["channel_table"] = {0: "LongFast"}
+        source._channel_keys = {0: b"private-key-0001"}
+
+        self.assertIsNone(
+            source.resolve_channel_index("LongFast", b"public-key-00001")
+        )
+
+    def test_missing_requested_key_is_rejected_when_stick_keys_are_known(self):
+        source = SerialCaptureSource(port="/dev/ttyUSB1")
+        source._radio_info["channel_table"] = {0: "LongFast"}
+        source._channel_keys = {0: b"public-key-00001"}
+
+        self.assertIsNone(source.resolve_channel_index("LongFast", None))
 
 
 class SerialSourceNameTest(unittest.TestCase):
