@@ -703,22 +703,12 @@ class SerialCaptureSource(CaptureSource):
         except Exception:
             logger.debug("Could not read own node number from serial interface", exc_info=True)
         try:
-            # Unlike the fields above (all read from state the interface
-            # already caches from the initial connect handshake),
-            # firmware/hw model need an explicit admin-message round trip
-            # -- getMetadata() sends the request and blocks on its own
-            # ack/nak wait, then the response lands in interface.metadata
-            # as a side effect (same mechanism as MeshCore's
-            # send_device_query() in meshcore_tx_client.py, just
-            # meshtastic-python's synchronous equivalent). Called once
-            # here at connect time only, never repeated on every status
-            # poll. UNVERIFIED against a real serial stick as of writing
-            # (no Meshtastic hardware on the Mac dev machine) -- the
-            # field names (firmware_version, hw_model) are confirmed
-            # against the real meshtastic/protobufs DeviceMetadata
-            # message, but the exact getMetadata()/interface.metadata
-            # interaction hasn't been exercised live.
-            interface.localNode.getMetadata()
+            # SerialInterface's normal handshake may already have populated
+            # metadata. Do not actively call localNode.getMetadata() here:
+            # that waits synchronously for an admin ACK using
+            # meshtastic-python's default 300-second timeout. A radio that
+            # does not answer metadata requests would otherwise hold the
+            # entire web application in startup for five minutes.
             metadata = getattr(interface, "metadata", None)
             if metadata:
                 info["firmware_version"] = metadata.firmware_version or None

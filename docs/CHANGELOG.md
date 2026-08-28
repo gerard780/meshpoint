@@ -29,6 +29,9 @@
   name plus its expanded PSK. Private-primary/public-secondary layouts now
   route through the correct stick channel without exposing channel keys in
   the status API.
+- **USB startup no longer waits five minutes for optional metadata.** Serial
+  startup uses firmware metadata already cached by meshtastic-python and does
+  not issue a blocking admin request that some radios never answer.
 
 ### v0.7.9 (August 2026)
 

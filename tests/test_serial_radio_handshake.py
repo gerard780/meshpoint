@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import base64
 import unittest
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from meshtastic.protobuf import channel_pb2, config_pb2, portnums_pb2  # noqa: F401 -- import-time dependency probe
@@ -139,6 +140,27 @@ class ReadRadioInfoFailureIsolationTest(unittest.TestCase):
         self.assertIsNone(info["region"])
         self.assertIsNone(info["channel_num"])
         self.assertIsNone(info["short_name"])
+
+    def test_metadata_read_never_sends_blocking_admin_request(self):
+        iface = MagicMock()
+        iface.metadata = None
+
+        SerialCaptureSource._read_radio_info(iface)
+
+        iface.localNode.getMetadata.assert_not_called()
+
+    def test_uses_metadata_already_cached_by_interface(self):
+        iface = MagicMock()
+        iface.metadata = SimpleNamespace(
+            firmware_version="2.7.15",
+            hw_model=44,
+        )
+
+        info = SerialCaptureSource._read_radio_info(iface)
+
+        self.assertEqual(info["firmware_version"], "2.7.15")
+        self.assertIsInstance(info["hw_model"], str)
+        iface.localNode.getMetadata.assert_not_called()
 
 
 class BuildPreDecodedTest(unittest.TestCase):
