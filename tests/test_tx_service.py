@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import unittest
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import ANY, AsyncMock, Mock, patch
 
 from src.config import TransmitConfig
 from src.models.packet import Protocol
@@ -12,6 +12,7 @@ from src.transmit.tx_service import (
     BROADCAST_ADDR_MT,
     PRESET_DISPLAY_NAMES,
     RESERVED_NODE_IDS,
+    SendResult,
     TxService,
 )
 
@@ -295,6 +296,74 @@ class TestEchoHashOverride(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kwargs["channel_key"], b"the-real-channel-key")
 
 
+class TestTracerouteSend(unittest.IsolatedAsyncioTestCase):
+    def _build_tx_service(self):
+        cfg = TransmitConfig(enabled=True, hop_limit=4, node_id=0xC0FFEE42)
+        wrapper = Mock()
+        wrapper.send = Mock(return_value=0)
+        wrapper.get_time_on_air = Mock(return_value=123)
+        tx = TxService(
+            wrapper=wrapper,
+            transmit_config=cfg,
+            persist_derived_node_id=False,
+        )
+        tx._resolve_channel = Mock(return_value=(0x2C, b"channel-key"))
+        tx._resolve_serial_send_source = AsyncMock(return_value=None)
+        builder = Mock()
+        builder.build_traceroute_request = Mock(return_value=b"packet-bytes")
+        tx._get_builder = Mock(return_value=builder)
+        tx._send_built_packet = AsyncMock(return_value=SendResult(
+            success=True,
+            packet_id="01020304",
+            protocol="meshtastic",
+            airtime_ms=123,
+        ))
+        return tx, builder, wrapper
+
+    async def test_native_request_is_channel_encrypted_and_reliable(self):
+        tx, builder, wrapper = self._build_tx_service()
+
+        result = await tx.send_traceroute("11223344", channel=2)
+
+        self.assertTrue(result.success)
+        self.assertEqual(result.airtime_ms, 123)
+        wrapper.send.assert_not_called()
+        tx._send_built_packet.assert_awaited_once_with(
+            b"packet-bytes",
+            ANY,
+            label="traceroute request",
+        )
+        kwargs = builder.build_traceroute_request.call_args.kwargs
+        self.assertEqual(kwargs["dest"], 0x11223344)
+        self.assertEqual(kwargs["channel_hash"], 0x2C)
+        self.assertEqual(kwargs["channel_key"], b"channel-key")
+        self.assertEqual(kwargs["hop_limit"], 4)
+        self.assertIsNone(kwargs["recipient_public_key"])
+
+    async def test_rejects_broadcast_and_self(self):
+        tx, builder, _wrapper = self._build_tx_service()
+
+        broadcast = await tx.send_traceroute("broadcast")
+        own_id = await tx.send_traceroute("c0ffee42")
+
+        self.assertFalse(broadcast.success)
+        self.assertIn("unicast", broadcast.error)
+        self.assertFalse(own_id.success)
+        self.assertIn("own node ID", own_id.error)
+        builder.build_traceroute_request.assert_not_called()
+
+    async def test_enforces_reference_firmware_cooldown(self):
+        tx, builder, _wrapper = self._build_tx_service()
+
+        first = await tx.send_traceroute("11223344")
+        second = await tx.send_traceroute("55667788")
+
+        self.assertTrue(first.success)
+        self.assertFalse(second.success)
+        self.assertIn("cooldown", second.error.lower())
+        builder.build_traceroute_request.assert_called_once()
+
+
 class TestSerialSendChannelTranslation(unittest.IsolatedAsyncioTestCase):
     """Reply via USB stick: translate Meshpoint channel index by name."""
 
@@ -360,7 +429,28 @@ class TestSerialSendChannelTranslation(unittest.IsolatedAsyncioTestCase):
 
         serial_source.resolve_channel_index.assert_called_once_with("Home")
 
+    async def test_traceroute_uses_stick_that_last_heard_destination(self):
+        tx = self._build_tx_service(channel_keys={"BayMesh": b"key"})
+        serial_source = Mock()
+        serial_source.name = "serial"
+        serial_source.resolve_channel_index = Mock(return_value=5)
+        serial_source.send_traceroute = Mock(return_value={
+            "success": True,
+            "error": "",
+            "packet_id": "01020304",
+        })
+        tx._resolve_serial_send_source = AsyncMock(return_value=serial_source)
+
+        result = await tx.send_traceroute("11223344", channel=1)
+
+        self.assertTrue(result.success)
+        self.assertEqual(result.packet_id, "01020304")
+        serial_source.resolve_channel_index.assert_called_once_with("BayMesh")
+        serial_source.send_traceroute.assert_called_once_with(
+            0x11223344,
+            channel_index=5,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
-

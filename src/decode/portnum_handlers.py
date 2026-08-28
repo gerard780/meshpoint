@@ -257,10 +257,12 @@ def _decode_traceroute(payload: bytes) -> _Result:
         rd = mesh_pb2.RouteDiscovery()
         rd.ParseFromString(payload)
         route = [format(node_id, '08x') for node_id in rd.route]
+        route_back = [format(node_id, '08x') for node_id in rd.route_back]
         snr_towards = list(rd.snr_towards) if rd.snr_towards else []
         snr_back = list(rd.snr_back) if rd.snr_back else []
         return {
             "route": route,
+            "route_back": route_back,
             "snr_towards": snr_towards,
             "snr_back": snr_back,
         }, PacketType.TRACEROUTE
