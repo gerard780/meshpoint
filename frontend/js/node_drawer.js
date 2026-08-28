@@ -11,9 +11,15 @@ class NodeDrawer {
         this._sections = {};
         this._metricsChart = null;
         this._metricsHours = 24;
+        this._pendingTraceroute = null;
 
         if (window.MeshpointNodeFavorites) {
             window.MeshpointNodeFavorites.onChange(() => this._refreshFavoriteButton());
+        }
+        if (window.concentratorWS) {
+            window.concentratorWS.on('packet', (packet) => {
+                this._handleTraceroutePacket(packet);
+            });
         }
     }
 
@@ -145,7 +151,152 @@ class NodeDrawer {
             div.appendChild(mapBtn);
         }
 
+        if ((n.protocol || 'meshtastic').toLowerCase() === 'meshtastic') {
+            const traceBtn = document.createElement('button');
+            traceBtn.className = 'nd-action-btn';
+            traceBtn.textContent = 'Trace Route';
+
+            const traceStatus = document.createElement('div');
+            traceStatus.className = 'nd-traceroute-status';
+            traceStatus.setAttribute('role', 'status');
+            traceStatus.setAttribute('aria-live', 'polite');
+
+            traceBtn.addEventListener('click', () => {
+                this._sendTraceroute(n, traceBtn, traceStatus);
+            });
+            div.appendChild(traceBtn);
+            div.appendChild(traceStatus);
+        }
+
         return div;
+    }
+
+    async _sendTraceroute(n, button, status) {
+        const nodeId = String(n.node_id || '').replace(/^!/, '').toLowerCase();
+        if (!/^[0-9a-f]{8}$/.test(nodeId)) {
+            this._setTracerouteStatus(status, 'error', 'Invalid Meshtastic node ID.');
+            return;
+        }
+
+        button.disabled = true;
+        button.textContent = 'Tracing…';
+        this._setTracerouteStatus(status, 'pending', 'Sending traceroute…');
+
+        try {
+            const res = await fetch('/api/messages/traceroute', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ destination: nodeId, channel: 0 }),
+            });
+            const result = await res.json().catch(() => ({}));
+            if (!res.ok || !result.success) {
+                const reason = result.detail || result.error || `HTTP ${res.status}`;
+                this._setTracerouteStatus(status, 'error', `Traceroute failed: ${reason}`);
+                button.disabled = false;
+                button.textContent = 'Trace Route';
+                return;
+            }
+
+            const pending = {
+                requestId: String(result.packet_id || '').toLowerCase(),
+                nodeId,
+                nodeName: n.display_name || n.long_name || n.short_name || `!${nodeId.slice(-4)}`,
+                button,
+                status,
+                awaiting: true,
+                responseTimer: null,
+                cooldownTimer: null,
+            };
+            this._pendingTraceroute = pending;
+            this._setTracerouteStatus(status, 'pending', 'Traceroute sent. Waiting for reply…');
+
+            pending.responseTimer = setTimeout(() => {
+                if (this._pendingTraceroute !== pending || !pending.awaiting) return;
+                pending.awaiting = false;
+                button.textContent = 'Trace Route (cooldown)';
+                this._setTracerouteStatus(status, 'timeout', 'No reply received within 10 seconds.');
+            }, 10000);
+            pending.cooldownTimer = setTimeout(() => {
+                if (button.isConnected) {
+                    button.disabled = false;
+                    button.textContent = 'Trace Route';
+                }
+                if (this._pendingTraceroute === pending) this._pendingTraceroute = null;
+            }, 30000);
+        } catch (e) {
+            console.error('Traceroute failed:', e);
+            this._setTracerouteStatus(status, 'error', 'Traceroute failed: network error');
+            button.disabled = false;
+            button.textContent = 'Trace Route';
+        }
+    }
+
+    _handleTraceroutePacket(packet) {
+        const pending = this._pendingTraceroute;
+        if (!pending || !pending.awaiting || packet.packet_type !== 'traceroute') return;
+
+        const payload = packet.decoded_payload || {};
+        const sourceId = String(packet.source_id || '').replace(/^!/, '').toLowerCase();
+        const requestId = Number(payload.request_id || 0)
+            .toString(16).padStart(8, '0');
+        if (sourceId !== pending.nodeId) return;
+        if (pending.requestId && requestId !== pending.requestId) return;
+
+        pending.awaiting = false;
+        clearTimeout(pending.responseTimer);
+        if (pending.button.isConnected) pending.button.textContent = 'Trace Route (cooldown)';
+        this._renderTracerouteResult(pending.status, payload, pending.nodeName);
+    }
+
+    _renderTracerouteResult(status, payload, destinationName) {
+        if (!status || !status.isConnected) return;
+        const forward = Array.isArray(payload.route) ? payload.route : [];
+        const forwardSnr = Array.isArray(payload.snr_towards) ? payload.snr_towards : [];
+        const back = Array.isArray(payload.route_back) ? payload.route_back : [];
+        const backSnr = Array.isArray(payload.snr_back) ? payload.snr_back : [];
+
+        const forwardParts = ['Meshpoint'];
+        forward.forEach((nodeId, i) => {
+            forwardParts.push(this._traceHopLabel(nodeId, forwardSnr[i]));
+        });
+        forwardParts.push(this._traceHopLabel(
+            destinationName,
+            forwardSnr.length ? forwardSnr[forwardSnr.length - 1] : null,
+            true,
+        ));
+
+        const returnParts = [String(destinationName)];
+        for (let i = back.length - 1; i >= 0; i--) {
+            returnParts.push(this._traceHopLabel(back[i], backSnr[i]));
+        }
+        returnParts.push(this._traceHopLabel(
+            'Meshpoint',
+            backSnr.length ? backSnr[backSnr.length - 1] : null,
+            true,
+        ));
+
+        status.className = 'nd-traceroute-status nd-traceroute-status--success';
+        status.innerHTML = `
+            <div class="nd-traceroute-status__title">Reply received</div>
+            <div><span>Out</span> ${this._esc(forwardParts.join(' → '))}</div>
+            <div><span>Back</span> ${this._esc(returnParts.join(' → '))}</div>
+        `;
+    }
+
+    _traceHopLabel(nodeId, rawSnr, keepName = false) {
+        let label = String(nodeId || 'unknown');
+        if (!keepName && /^[0-9a-f]{8}$/i.test(label)) {
+            label = label.toLowerCase() === 'ffffffff'
+                ? 'unknown hop'
+                : `!${label.slice(-4)}`;
+        }
+        if (rawSnr == null || Number(rawSnr) === -128) return label;
+        return `${label} (${(Number(rawSnr) / 4).toFixed(1)} dB)`;
+    }
+
+    _setTracerouteStatus(status, state, message) {
+        status.className = `nd-traceroute-status nd-traceroute-status--${state}`;
+        status.textContent = message;
     }
 
     _buildInfoSection(n) {

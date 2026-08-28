@@ -67,6 +67,8 @@ class MeshtasticDecoder:
             request_id = pre_decoded.get("request_id", 0)
             remote_channel_name = pre_decoded.get("channel_name")
             if decoded_payload is not None:
+                if pre_decoded.get("want_response", False):
+                    decoded_payload["want_response"] = True
                 decrypted = True
 
         elif CryptoService.is_pki_packet(
@@ -285,6 +287,8 @@ class MeshtasticDecoder:
             request_id = int(data_msg.request_id) if data_msg.request_id else 0
 
             decoded, packet_type = dispatch_portnum(portnum, inner)
+            if decoded is not None and data_msg.want_response:
+                decoded["want_response"] = True
             return decoded, packet_type, bytes(inner) if inner else None, request_id
         except ImportError:
             return (

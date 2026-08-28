@@ -18,6 +18,8 @@ import asyncio
 import base64
 import struct
 import unittest
+from types import SimpleNamespace
+from unittest.mock import Mock
 
 from src.capture.serial_source import SerialCaptureSource
 
@@ -184,6 +186,26 @@ class SerialCaptureSourcePubsubGuardTest(unittest.IsolatedAsyncioTestCase):
         source._on_receive({"raw": "aabbcc"}, source._interface)
 
         self.assertTrue(source._queue.empty())
+
+
+class SerialTracerouteSendTest(unittest.TestCase):
+    def test_send_traceroute_uses_meshtastic_response_flags(self):
+        source = SerialCaptureSource(port="/dev/ttyUSB0")
+        source._running = True
+        source._connected = True
+        source._interface = Mock()
+        source._interface.sendData.return_value = SimpleNamespace(id=0x01020304)
+
+        result = source.send_traceroute(0x11223344, channel_index=2)
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["packet_id"], "01020304")
+        args, kwargs = source._interface.sendData.call_args
+        self.assertEqual(args[0], b"")
+        self.assertEqual(kwargs["destinationId"], 0x11223344)
+        self.assertTrue(kwargs["wantAck"])
+        self.assertTrue(kwargs["wantResponse"])
+        self.assertEqual(kwargs["channelIndex"], 2)
 
 
 class BuildPreDecodedEarlyExitTest(unittest.TestCase):

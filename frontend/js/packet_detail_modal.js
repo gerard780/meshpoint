@@ -436,8 +436,11 @@ class PacketDetailModal {
             case 'routing':
                 return p.error_reason || p.reply_id != null ? `reply ${p.reply_id}` : '';
             case 'traceroute': {
-                const route = Array.isArray(p.route) ? p.route.join(' → ') : '';
-                return route ? `route: ${route}` : '';
+                const route = Array.isArray(p.route) && p.route.length
+                    ? p.route.join(' → ') : 'direct';
+                const back = Array.isArray(p.route_back) && p.route_back.length
+                    ? p.route_back.slice().reverse().join(' → ') : 'direct';
+                return `out: ${route} · back: ${back}`;
             }
             case 'neighborinfo': {
                 const n = Array.isArray(p.neighbors) ? p.neighbors.length : 0;
