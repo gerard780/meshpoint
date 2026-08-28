@@ -40,10 +40,49 @@ class TestMeshtasticInboundHandler(unittest.IsolatedAsyncioTestCase):
             protocol=Protocol.MESHTASTIC,
             packet_type=PacketType.TRACEROUTE,
             decrypted=True,
-            decoded_payload={"route": []},
+            decoded_payload={"route": [], "want_response": True},
         )
         await handler.handle(packet)
         tx.send_traceroute_reply.assert_awaited_once_with(packet)
+
+    async def test_traceroute_response_is_not_answered_again(self):
+        tx = MagicMock()
+        tx.send_traceroute_reply = AsyncMock()
+        tx.send_routing_ack = AsyncMock(return_value=MagicMock(success=True))
+        handler = MeshtasticInboundHandler(tx, our_node_id=0x12345678)
+
+        packet = Packet(
+            packet_id="0000000d",
+            source_id="aabbccdd",
+            destination_id="12345678",
+            protocol=Protocol.MESHTASTIC,
+            packet_type=PacketType.TRACEROUTE,
+            want_ack=True,
+            decrypted=True,
+            decoded_payload={"route": [], "request_id": 0x01020304},
+        )
+        await handler.handle(packet)
+
+        tx.send_traceroute_reply.assert_not_awaited()
+        tx.send_routing_ack.assert_awaited_once_with(packet)
+
+    async def test_traceroute_without_want_response_is_ignored(self):
+        tx = MagicMock()
+        tx.send_traceroute_reply = AsyncMock()
+        handler = MeshtasticInboundHandler(tx, our_node_id=0x12345678)
+        packet = Packet(
+            packet_id="0000000e",
+            source_id="aabbccdd",
+            destination_id="12345678",
+            protocol=Protocol.MESHTASTIC,
+            packet_type=PacketType.TRACEROUTE,
+            decrypted=True,
+            decoded_payload={"route": []},
+        )
+
+        await handler.handle(packet)
+
+        tx.send_traceroute_reply.assert_not_awaited()
 
     async def test_telemetry_reply(self):
         tx = MagicMock()
@@ -57,7 +96,10 @@ class TestMeshtasticInboundHandler(unittest.IsolatedAsyncioTestCase):
             protocol=Protocol.MESHTASTIC,
             packet_type=PacketType.TELEMETRY,
             decrypted=True,
-            decoded_payload={"telemetry_variant": "local_stats"},
+            decoded_payload={
+                "telemetry_variant": "local_stats",
+                "want_response": True,
+            },
         )
         await handler.handle(packet)
         tx.send_telemetry_reply.assert_awaited_once_with(packet)

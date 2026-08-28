@@ -67,6 +67,29 @@ class TestMeshtasticMeshParticipantBuilder(unittest.TestCase):
         self.assertEqual(decoded.decoded_payload.get("request_id"), request_id)
         self.assertEqual(decoded.decoded_payload.get("snr_back"), [30])
 
+    def test_traceroute_request_matches_firmware_flags(self):
+        packet = self.builder.build_traceroute_request(
+            source_id=self.source_id,
+            dest=self.dest_id,
+            packet_id=0x10203040,
+            hop_limit=5,
+            hop_start=5,
+        )
+        self.assertIsNotNone(packet)
+        assert packet is not None
+        self.assertNotEqual(packet[13], 0)
+
+        decoded = self.decoder.decode(packet)
+        self.assertIsNotNone(decoded)
+        assert decoded is not None
+        self.assertEqual(decoded.packet_type.value, "traceroute")
+        self.assertTrue(decoded.want_ack)
+        self.assertEqual(decoded.hop_limit, 5)
+        self.assertTrue(decoded.decoded_payload.get("want_response"))
+        self.assertEqual(decoded.decoded_payload.get("route"), [])
+        self.assertEqual(decoded.decoded_payload.get("route_back"), [])
+        self.assertIsNone(decoded.decoded_payload.get("request_id"))
+
     def test_traceroute_reply_preserves_inbound_hops(self):
         from src.models.packet import Packet, PacketType, Protocol
         from src.transmit.tx_service import TxService

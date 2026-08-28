@@ -335,6 +335,7 @@ class MeshtasticPacketBuilder:
         channel_hash: int = 0x08,
         hop_limit: int = 3,
         hop_start: int = 3,
+        want_ack: bool = False,
         recipient_public_key: bytes | None = None,
     ) -> bytes | None:
         """Build a TRACEROUTE reply with a RouteDiscovery payload."""
@@ -376,6 +377,61 @@ class MeshtasticPacketBuilder:
             packet_id,
             hop_limit=hop_limit,
             hop_start=hop_start,
+            want_ack=want_ack,
+            channel_hash=on_air_hash,
+        )
+        return header + ciphertext
+
+    def build_traceroute_request(
+        self,
+        source_id: int,
+        dest: int,
+        packet_id: int,
+        *,
+        channel_key: bytes | None = None,
+        channel_hash: int = 0x08,
+        hop_limit: int = 3,
+        hop_start: int = 3,
+        recipient_public_key: bytes | None = None,
+    ) -> bytes | None:
+        """Build a reliable TRACEROUTE request for a unicast node.
+
+        The reference firmware sends an empty ``RouteDiscovery`` protobuf,
+        sets ``Data.want_response``, and requests reliable delivery.
+        """
+        try:
+            from meshtastic.protobuf import mesh_pb2
+
+            payload = mesh_pb2.RouteDiscovery().SerializeToString()
+        except Exception:
+            logger.exception("Traceroute protobuf build failed")
+            return None
+
+        inner = self._serialize_data(
+            PORTNUM_TRACEROUTE,
+            payload,
+            want_response=True,
+        )
+        ciphertext = self._encrypt_payload(
+            inner,
+            packet_id,
+            source_id,
+            dest,
+            channel_key,
+            channel_hash,
+            recipient_public_key,
+        )
+        if ciphertext is None:
+            return None
+
+        on_air_hash = 0 if recipient_public_key else channel_hash
+        header = self._build_header(
+            dest,
+            source_id,
+            packet_id,
+            hop_limit=hop_limit,
+            hop_start=hop_start,
+            want_ack=True,
             channel_hash=on_air_hash,
         )
         return header + ciphertext
@@ -407,7 +463,11 @@ class MeshtasticPacketBuilder:
 
     @staticmethod
     def _serialize_data(
-        portnum: int, payload: bytes, request_id: int = 0
+        portnum: int,
+        payload: bytes,
+        request_id: int = 0,
+        *,
+        want_response: bool = False,
     ) -> bytes:
         """Serialize a mesh_pb2.Data protobuf manually."""
         result = bytearray()
@@ -416,6 +476,9 @@ class MeshtasticPacketBuilder:
         result.append(0x12)
         result.extend(_encode_varint(len(payload)))
         result.extend(payload)
+        if want_response:
+            # Data.want_response = field 3, varint true.
+            result.extend((0x18, 0x01))
         if request_id:
             result.append(0x35)
             result.extend(struct.pack("<I", request_id & 0xFFFFFFFF))

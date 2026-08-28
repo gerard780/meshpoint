@@ -2,6 +2,16 @@
 
 ### Unreleased
 
+#### Meshtastic traceroute
+
+- **Initiate traceroutes from the node drawer.** Meshtastic node details now
+  include a Trace Route action with live forward and return paths, per-hop SNR,
+  a 10-second response window, and a 30-second cooldown.
+- **Reference-compatible traceroute requests.** Native concentrator and
+  last-heard USB-radio paths send reliable, channel-encrypted RouteDiscovery
+  requests so relays can append route and SNR data. Replies are correlated by
+  request ID and are not mistaken for new traceroute requests.
+
 ### v0.7.9 (August 2026)
 
 Firmware flash for Meshtastic/MeshCore companions, serial footgun fixes, MeshCore live radio + messaging harden, dashboard hygiene ports, and companion-app bearer login. Edge-only, pure Python. **Upgrade:** Settings → Updates → **Stable**, or the full SSH block in `docs/COMMON-ERRORS.md` (`git fetch`, `checkout main`, `pull`, `scripts/install.sh`, `restart`). Witness-tested on RAK V2 (USB smoke: flash MC+MT, installed versions, MeshCore presets, serial live modem, busy-serial soft-fail, MeshCore messaging). Settings → Updates RC picker now points at **v0.8.0** on `feat/v0.8.0`.

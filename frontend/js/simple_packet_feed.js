@@ -139,6 +139,13 @@ class SimplePacketFeed {
                 }
                 return parts.join(' ') || '--';
             }
+            case 'traceroute': {
+                const route = Array.isArray(p.route) ? p.route : [];
+                const back = Array.isArray(p.route_back) ? p.route_back : [];
+                const forwardLabel = route.length ? route.join(' → ') : 'direct';
+                const backLabel = back.length ? back.slice().reverse().join(' → ') : 'direct';
+                return `out: ${forwardLabel} · back: ${backLabel}`;
+            }
             default: return '--';
         }
     }
